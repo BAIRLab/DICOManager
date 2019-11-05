@@ -10,7 +10,7 @@ import csv
 import optparse
 from tqdm import tqdm
 
-__author__ = "Evan Porter, Nick Myziuk"
+__author__ = "Evan Porter, Ron Levitin, Nick Myziuk"
 __copyright__ = "Copyright 2018, Beaumont Health"
 __credits__ = ["Evan Porter", "Nick Myziuk", "Thomas Guerrero"]
 __maintainer__ = "Evan Porter"
@@ -26,8 +26,6 @@ parser.add_option('-f', '--file', action='store', dest='csv_file',
                   help='MRN csv to sort from', default=None)
 parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Base storing directory', default='pwd')
-parser.add_option('-r', '--recursive', action='store_true', dest='recursive',
-                  help='Recursively copies -l into imported data', default=False)
 parser.add_option('-l', '--legacy', action='store',
                   dest='legacy', help='legacy dir', default=None)
 
@@ -41,15 +39,12 @@ if options.base_dir == 'pwd':
 elif options.base_dir[-1] == '/':
     options.base_dir = options.base_dir[:-1]
 
-if options.recursive:
-    if options.legacy:
-        if options.legacy[-1] == '/':
-            options.legacy = options.legacy[:-1]
-        legacy_files = glob.glob(options.legacy + '/**/*.dcm', recursive=True)
-        for lf in legacy_files:
-            shutil.copy(lf, options.base_dir + '/imported_data/')
-    else:
-        raise FileNotFoundError('Must specify a legacy dir with -r')
+if options.legacy:
+    if options.legacy[-1] == '/':
+        options.legacy = options.legacy[:-1]
+    legacy_files = glob.glob(options.legacy + '/**/*.dcm', recursive=True)
+    for lf in legacy_files:
+        shutil.copy(lf, options.base_dir + '/imported_data/')
 
 
 def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
@@ -108,7 +103,7 @@ def specific_sort(dicom_file, file_path, cohort_list,
     """
     # List is append, subfolder if we add more modalities, we just
     #   update this dictionary to include the options
-    with open(options.base_dir + '/modality.csv', mode='r') as csv_file:
+    with open(options.base_dir + '/' + options.csv_file, mode='r') as csv_file:
         input_file = csv.reader(csv_file)
         subfolders = dict((rows[0], rows[1]) for rows in input_file)
 
@@ -146,8 +141,7 @@ dicom_files = glob.glob(data_dir + '/*.dcm*')
 csv_path = options.base_dir + '/sort_csv/' + options.csv_file
 
 try:
-    cohort_list = pd.read_csv(options.csv_file, engine='python')[
-                              'MRN'].tolist()
+    cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
 except FileNotFoundError:
     raise FileNotFoundError(f'The specified .csv is not in {csv_path}')
 else:
