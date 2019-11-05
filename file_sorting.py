@@ -24,8 +24,8 @@ parser.add_option('-d', '--date', action='store_true', dest='date',
                   help='sort modalities by date', default=False)
 parser.add_option('-f', '--file', action='store', dest='csv_file',
                   help='MRN csv to sort from', default=None)
-parser.add_option('-b', '--base', action='store', dest'base_dir',
-                  help='Base storing directory', action='store', default='pwd')
+parser.add_option('-b', '--base', action='store', dest='base_dir',
+                  help='Base storing directory', default='pwd')
 parser.add_option('-r', '--recursive', action='store_true', dest='recursive',
                   help='Recursively copies -l into imported data', default=False)
 parser.add_option('-l', '--legacy', action='store',
@@ -37,8 +37,8 @@ if not options.csv_file:
     raise NameError('A sorting csv file must be specified with flag --file')
 
 if options.base_dir == 'pwd':
-    options.base_dir = os.get_cwd()
-elif options.base_dir[-1] = '/':
+    options.base_dir = os.getcwd()
+elif options.base_dir[-1] == '/':
     options.base_dir = options.base_dir[:-1]
 
 if options.recursive:
@@ -108,7 +108,7 @@ def specific_sort(dicom_file, file_path, cohort_list,
     """
     # List is append, subfolder if we add more modalities, we just
     #   update this dictionary to include the options
-    with open(optoins.base_dir + '/modality.csv', mode='r') as csv_file:
+    with open(options.base_dir + '/modality.csv', mode='r') as csv_file:
         input_file = csv.reader(csv_file)
         subfolders = dict((rows[0], rows[1]) for rows in input_file)
 
@@ -143,7 +143,7 @@ def specific_sort(dicom_file, file_path, cohort_list,
 
 data_dir = options.base_dir + '/imported_data'
 dicom_files = glob.glob(data_dir + '/*.dcm*')
-csv_path = options.base_dir + '/sort_csv/' + option.csv_file
+csv_path = options.base_dir + '/sort_csv/' + options.csv_file
 
 try:
     cohort_list = pd.read_csv(options.csv_file, engine='python')[
@@ -154,18 +154,24 @@ else:
     for _, dicom_file in enumerate(tqdm(dicom_files)):
         try:
             ds = pydicom.dcmread(dicom_file, stop_before_pixels=True)
-        except (dicom.errors.InvalidDicomError, struct.error):
+        except (pydicom.errors.InvalidDicomError, struct.error):
             shutil.move(dicom_file, options.base_dir + '/rejected_files')
         else:
-            if "StudyDescription" not in dir(ds_ct):
+            if "StudyDescription" not in dir(ds):
                 ds.add_new([0x0008, 0x1030], 'LO', '')
-            if "Modality" in dir(ds_ct):
+            if "Modality" in dir(ds):
                 project_dir = csv_path[:-4].rpartiont('/')[-1]
                 if ds.StudyDescription[:4] == 'CBCT':
-                    specific_sort(dicom_file, file_path=project_dir,
-                                  cohort_list, ds.PatientID,
-                                  'CBCT', 'CBCT')
+                    specific_sort(dicom_file=dicom_file,
+                                  file_path=project_dir,
+                                  cohort_list=cohort_list,
+                                  patientID=ds.PatientID,
+                                  modality='CBCT',
+                                  ds=ds)
                 else:
-                    specific_sort(dicom_file, file_path=project_dir,
-                                  cohort_list, ds.PatientID,
-                                  ds.Modality, ds)
+                    specific_sort(dicom_file=dicom_file,
+                                  file_path=project_dir,
+                                  cohort_list=cohort_list,
+                                  patientID=ds.PatientID,
+                                  modality=ds.Modality,
+                                  ds=ds)
