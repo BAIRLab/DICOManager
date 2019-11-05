@@ -57,7 +57,8 @@ replaced by anonymously coded numbers per patient.
 Modalities are chosen from the modality.csv. Unique encodings can be provided,
 with mapping of first row to directories of the second row.
 
-Parsed arguments for this function include:
+Parsed arguments for this function include: 
+```
 -d, --date: bool
     Specify if sorting below MRN should include date before modality.
     Hierarchy is AcquisitionDate then StudyDate
@@ -65,6 +66,7 @@ Parsed arguments for this function include:
     Specify the base directory that sorting is occuring.  
 -f, --file: str
     Specify the name of a .csv file contained within sort_csv directory
+```
 
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
