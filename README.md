@@ -1,4 +1,4 @@
-# Data Pre-processing Library
+# DICOM Pre-processing Library
 
 ## Purpose
 To take DICOM files, imported to /data/imported_data and sorts based by provided
@@ -66,12 +66,17 @@ Parsed arguments for this function include:
 -f, --file: str
     Specify the name of a .csv file contained within sort_csv directory
 -l, --legacy: str
-    
+    A legacy directory of .dcm files that will be recursively unpacked and
+    copied into imported_data/ before being sorted into sorted_data/
 
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of
 patient .dcm files of a given modality and returns a reconstructed volume
+
+#### PET: pet_reconstruction
+Calculates the time corrected SUVbw PET value for the registered CT coordinate
+system. Returns a numpy array of float32 values.
 
 #### CBCT / CT : ct_reconstruction
 Both CBCT and CT perform similarly, they are simply stored under different names.
