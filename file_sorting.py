@@ -20,14 +20,14 @@ __status__ = "Research & Data Organization"
 # Alter this path for directories not stored with '/data'
 parser = optparse.OptionParser()
 
-parser.add_option('-d', '--date', action='store_true', dest='date',
-                  help='sort modalities by date', default=False)
-parser.add_option('-f', '--file', action='store', dest='csv_file',
-                  help='MRN csv to sort from', default=None)
+parser.add_option('-a', '--alt', action='store',
+                  dest='alt', help='alternative source dir', default=None)
 parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Base storing directory', default='pwd')
-parser.add_option('-l', '--legacy', action='store',
-                  dest='legacy', help='legacy dir', default=None)
+parser.add_option('-c', '--csv', action='store', dest='csv_file',
+                  help='MRN csv to sort from', default=None)
+parser.add_option('-d', '--date', action='store_true', dest='date',
+                  help='sort modalities by date', default=False)
 
 options, args = parser.parse_args()
 
@@ -36,15 +36,12 @@ if not options.csv_file:
 
 if options.base_dir == 'pwd':
     options.base_dir = os.getcwd()
-elif options.base_dir[-1] == '/':
-    options.base_dir = options.base_dir[:-1]
 
-if options.legacy:
-    if options.legacy[-1] == '/':
-        options.legacy = options.legacy[:-1]
-    legacy_files = glob.glob(options.legacy + '/**/*.dcm', recursive=True)
-    for lf in legacy_files:
-        shutil.copy(lf, options.base_dir + '/imported_data/')
+if options.alt:
+    dicom_files = glob.glob(os.path.join(
+        options.alt, '/**/*.dcm'), recursive=True)
+else:
+    dicom_files = glob.glob(options.base_dir + '/imported_data/*.dcm*')
 
 
 def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
@@ -78,7 +75,10 @@ def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
 
     _, filename = os.path.split(dicom_file)
     destination = os.path.join(new_path, filename)
-    shutil.move(os.path.join(data_dir, dicom_file), destination)
+    if options.alt:
+        shutil.copy(os.path.join(data_dir, dicom_file), destination)
+    else:
+        shutil.move(os.path.join(data_dir, dicom_file), destination)
 
 
 def specific_sort(dicom_file, file_path, cohort_list,
@@ -103,9 +103,14 @@ def specific_sort(dicom_file, file_path, cohort_list,
     """
     # List is append, subfolder if we add more modalities, we just
     #   update this dictionary to include the options
-    with open(options.base_dir + '/' + options.csv_file, mode='r') as csv_file:
+    with open(os.path.join(options.base_dir, options.csv_file), mode='r') as csv_file:
         input_file = csv.reader(csv_file)
         subfolders = dict((rows[0], rows[1]) for rows in input_file)
+
+    if options.alt:
+        data_dir = options.alt
+    else:
+        data_dir = os.path.join(options.base_dir, 'imported_data')
 
     write_params = {"file_path": file_path,
                     "patientID": patientID,
@@ -136,11 +141,8 @@ def specific_sort(dicom_file, file_path, cohort_list,
         write_to_path(**write_params)
 
 
-data_dir = options.base_dir + '/imported_data'
-dicom_files = glob.glob(data_dir + '/*.dcm*')
-csv_path = options.base_dir + '/sort_csv/' + options.csv_file
-
 try:
+    csv_path = os.path.join(options.base_dir, 'sort_csv', options.csv_file)
     cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
 except FileNotFoundError:
     raise FileNotFoundError(f'The specified .csv is not in {csv_path}')
@@ -149,7 +151,8 @@ else:
         try:
             ds = pydicom.dcmread(dicom_file, stop_before_pixels=True)
         except (pydicom.errors.InvalidDicomError, struct.error):
-            shutil.move(dicom_file, options.base_dir + '/rejected_files')
+            shutil.move(os.path.join(
+                dicom_file, options.base_dir, 'rejected_files'))
         else:
             if "StudyDescription" not in dir(ds):
                 ds.add_new([0x0008, 0x1030], 'LO', '')
