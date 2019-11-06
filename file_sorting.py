@@ -105,7 +105,7 @@ def specific_sort(dicom_file, file_path, cohort_list,
     """
     # List is append, subfolder if we add more modalities, we just
     #   update this dictionary to include the options
-    with open(os.path.join(options.base_dir, options.csv_file), mode='r') as csv_file:
+    with open(os.path.join(options.base_dir, 'modality.csv'), mode='r') as csv_file:
         input_file = csv.reader(csv_file)
         subfolders = dict((rows[0], rows[1]) for rows in input_file)
 
@@ -144,7 +144,7 @@ def specific_sort(dicom_file, file_path, cohort_list,
 
 
 try:
-    csv_path = os.path.join(options.base_dir, 'sort_csv', options.csv_file)
+    csv_path = os.path.join(options.base_dir, options.csv_file)
     cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
 except FileNotFoundError:
     raise FileNotFoundError(f'The specified .csv is not in {csv_path}')
@@ -159,7 +159,7 @@ else:
             if "StudyDescription" not in dir(ds):
                 ds.add_new([0x0008, 0x1030], 'LO', '')
             if "Modality" in dir(ds):
-                project_dir = csv_path[:-4].rpartiont('/')[-1]
+                project_dir = csv_path[:-4].rpartion('/')[-1]
                 if ds.StudyDescription[:4] == 'CBCT':
                     specific_sort(dicom_file=dicom_file,
                                   file_path=project_dir,
