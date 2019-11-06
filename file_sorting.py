@@ -21,7 +21,7 @@ __status__ = "Research & Data Organization"
 parser = optparse.OptionParser()
 
 parser.add_option('-a', '--alt', action='store',
-                  dest='alt', help='alternative source dir', default=None)
+                  dest='alt', help='Alternative source dir', default=None)
 parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Base storing directory', default='pwd')
 parser.add_option('-c', '--csv', action='store', dest='csv_file',
@@ -34,7 +34,7 @@ parser.add_option('-s', '--sequence', action='store_true', dest='sequence',
 options, args = parser.parse_args()
 
 if not options.csv_file:
-    raise NameError('A sorting csv file must be specified with flag --file')
+    raise NameError('A sorting csv file must be specified with flag --csv')
 
 if options.base_dir == 'pwd':
     options.base_dir = os.getcwd()
@@ -77,7 +77,8 @@ def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
 
     if options.sequence:  # Specific private tag for Philips MR Scanners
         try:
-            sequence = str(ds[0x2005, 0x140f].value[0][0x0018, 0x9005].value)
+            # sequence = str(ds[0x2005, 0x140f].value[0][0x0018, 0x9005].value)
+            sequence = str(ds[0x0008, 0x103E].value)
             path_list.append(sequence)
         except ValueError:
             pass
