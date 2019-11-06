@@ -28,6 +28,8 @@ parser.add_option('-c', '--csv', action='store', dest='csv_file',
                   help='MRN csv to sort from', default=None)
 parser.add_option('-d', '--date', action='store_true', dest='date',
                   help='sort modalities by date', default=False)
+parser.add_option('-s', '--sequence', action='store_true', dest='sequence',
+                  help='sequence sorting', default=False)
 
 options, args = parser.parse_args()
 
@@ -47,7 +49,7 @@ else:
 
 
 def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
-                  subfolder=False, **kwargs):
+                  subfolder=False):
     """
     Function
     ---------
@@ -65,12 +67,22 @@ def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
     subfolder : bool (Default = False)
         A subfolder to be placed within the file_path
     """
-    if options.date and date:
-        new_path = os.path.join(file_path, patientID, date, subfolder)
-    elif subfolder:
-        new_path = os.path.join(file_path, patientID, subfolder)
-    else:
-        new_path = os.path.join(file_path, patientID)
+    path_list = [file_path, patientID]
+
+    if options.date:
+        path_list.append(date)
+
+    if subfolder:
+        path_list.append(subfolder)
+
+    if options.sequence:  # Specific private tag for Philips MR Scanners
+        try:
+            sequence = str(ds[0x2005, 0x140f].value[0][0x0018, 0x9005].value)
+            path_list.append(sequence)
+        except ValueError:
+            pass
+
+    new_path = os.path.join(*path_list)
 
     if not os.path.exists(new_path):
         os.makedirs(new_path)
@@ -126,19 +138,11 @@ def specific_sort(dicom_file, file_path, cohort_list,
     elif hasattr(ds, 'StudyDate'):
         write_params['date'] = ds.StudyDate
 
-    try:
-        if int(patientID) in cohort_list:
-            if modality in subfolders.keys():
-                subfolder = subfolders[modality]
-            else:
-                subfolder = ds.StudyDescription
-    except ValueError:
-        if patientID in str(cohort_list):
-            if modality in subfolders.keys():
-                subfolder = subfolders[modality]
-            else:
-                subfolder = ds.StudyDescription
-    finally:
+    if int(patientID) in cohort_list or patientID in str(cohort_list):
+        if modality in subfolders.keys():
+            subfolder = subfolders[modality]
+        else:
+            subfolder = ds.StudyDescription
         write_params.update({"subfolder": subfolder})
         write_to_path(**write_params)
 
@@ -147,7 +151,7 @@ try:
     csv_path = os.path.join(options.base_dir, options.csv_file)
     cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
 except FileNotFoundError:
-    raise FileNotFoundError(f'The specified .csv is not in {csv_path}')
+    raise FileNotFoundError(f'The specified .csv is not at {csv_path}')
 else:
     for _, dicom_file in enumerate(tqdm(dicom_files)):
         try:
@@ -159,7 +163,7 @@ else:
             if "StudyDescription" not in dir(ds):
                 ds.add_new([0x0008, 0x1030], 'LO', '')
             if "Modality" in dir(ds):
-                project_dir = csv_path[:-4].rpartion('/')[-1]
+                project_dir = csv_path[:-4].rpartition('/')[-1]
                 if ds.StudyDescription[:4] == 'CBCT':
                     specific_sort(dicom_file=dicom_file,
                                   file_path=project_dir,
