@@ -58,35 +58,36 @@ Modalities are chosen from the modality.csv. Unique encodings can be provided,
 with mapping of first row to directories of the second row.
 
 Parsed arguments for this function include:
+```
+-a, --alt: str
+    Alternative directory of .dcm files that will be recursively unpacked and
+    copied into imported_data/ before being sorted into sorted_data/
+-b, --base: str (Default : pwd)
+    Specify the base directory that sorting is occuring.  
+-c, --csv: str
+    Specify the name of a .csv file contained within sort_csv directory
 -d, --date: bool
     Specify if sorting below MRN should include date before modality.
     Hierarchy is AcquisitionDate then StudyDate
--b, --base: str (Default : pwd)
-    Specify the base directory that sorting is occuring.  
--f, --file: str
-    Specify the name of a .csv file contained within sort_csv directory
--l, --legacy: str
-    A legacy directory of .dcm files that will be recursively unpacked and
-    copied into imported_data/ before being sorted into sorted_data/
-
+```
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of
 patient .dcm files of a given modality and returns a reconstructed volume
 
-#### PET: pet_reconstruction
+#### PET: pet
 Calculates the time corrected SUVbw PET value for the registered CT coordinate
 system. Returns a numpy array of float32 values.
 
-#### CBCT / CT : ct_reconstruction
+#### CBCT / CT : ct
 Both CBCT and CT perform similarly, they are simply stored under different names.
 Reconstuction is done at original image coordinates. Future work will include
 projection of CBCT into CT coordinate space.
 
-#### DOSE : dose_reconstruction
+#### DOSE : dose
 Reconstruction of Pinnacle 11.0 dose files into registered CT coordinate space
 
-#### RTStruct : struct_reconstruction
+#### RTStruct : struct
 RTStruct files are saved as a list of arrays, but the dimensions are
 (number-of-masks, x, y, z). Each element in the arrays are boolean. Masks are
 returned in order as specified, except in cases where mask is not present in

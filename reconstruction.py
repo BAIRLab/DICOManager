@@ -282,7 +282,7 @@ def d_max_check(path, volume, printing):
 # --------------------------- Primary Functions --------------------------
 
 
-def struct_reconstruction(patient_path, wanted_contours, raises=False):
+def struct(patient_path, wanted_contours, raises=False):
     """
     Function
     ----------
@@ -393,7 +393,7 @@ def struct_reconstruction(patient_path, wanted_contours, raises=False):
         return np.array(ordered, dtype='bool')
 
 
-def ct_reconstruction(patient_path, path_mod=None, HU=False, raises=False):
+def ct(patient_path, path_mod=None, HU=False, raises=False):
     """
     Function
     ----------
@@ -455,7 +455,7 @@ def ct_reconstruction(patient_path, path_mod=None, HU=False, raises=False):
             return ct_array
 
 
-def pet_reconstruction(patient_path, path_mod=None, raises=False):
+def pet(patient_path, path_mod=None, raises=False):
     """
     Function
     ----------
@@ -532,7 +532,7 @@ def pet_reconstruction(patient_path, path_mod=None, raises=False):
             return rescaled * patient_weight / total_dose
 
 
-def dose_reconstruction(patient_path, raises=False):
+def dose(patient_path, raises=False):
     """
     Function
     ----------
