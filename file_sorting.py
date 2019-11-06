@@ -38,10 +38,12 @@ if options.base_dir == 'pwd':
     options.base_dir = os.getcwd()
 
 if options.alt:
-    dicom_files = glob.glob(os.path.join(
-        options.alt, '/**/*.dcm'), recursive=True)
+    dicom_files = glob.glob(os.path.join(options.base_dir,
+                                         options.alt,
+                                         '**/*.dcm'), recursive=True)
 else:
-    dicom_files = glob.glob(options.base_dir + '/imported_data/*.dcm*')
+    dicom_files = glob.glob(os.path.join(options.base_dir,
+                                         'imported_data/*.dcm*'))
 
 
 def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
@@ -151,8 +153,8 @@ else:
         try:
             ds = pydicom.dcmread(dicom_file, stop_before_pixels=True)
         except (pydicom.errors.InvalidDicomError, struct.error):
-            shutil.move(os.path.join(
-                dicom_file, options.base_dir, 'rejected_files'))
+            shutil.move(dicom_file,
+                        os.path.join(options.base_dir, 'rejected_files'))
         else:
             if "StudyDescription" not in dir(ds):
                 ds.add_new([0x0008, 0x1030], 'LO', '')
