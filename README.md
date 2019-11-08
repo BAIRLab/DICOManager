@@ -43,8 +43,7 @@ data / base directory
             └── DATE0 (Optional)
                 ├── MODAILITY0
                 └── MODAILITY1
-                    └── SEQUENCE0 (Optional)
-                        └── *.dcm
+                    └── *.dcm
  ```
 
 ## Project Overview
@@ -73,9 +72,6 @@ Parsed arguments for this function include:
 -d, --date: bool
     Specify if sorting below MRN should include date before modality.
     Hierarchy is AcquisitionDate then StudyDate
--s, --sequence: bool
-    Sorts by MR sequence tag specific to Philips MR, if tag is avaliable
-    Tag is stored at [0x2005, 0x140f][0x0018, 0x9005]
 ```
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
@@ -99,9 +95,3 @@ RTStruct files are saved as a list of arrays, but the dimensions are
 (number-of-masks, x, y, z). Each element in the arrays are boolean. Masks are
 returned in order as specified, except in cases where mask is not present in
 the RTDOSE file.
-
-## Inline Construction Features to add:
-..* Per-patient (memory efficient)
-..* All patients as unified list (memory inefficient)
-..* Limited sub-list of patients
-..* Limited to subset of modalities
