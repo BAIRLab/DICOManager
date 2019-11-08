@@ -10,12 +10,12 @@ import csv
 import optparse
 from tqdm import tqdm
 
-__author__ = "Evan Porter, Ron Levitin, Nick Myziuk"
-__copyright__ = "Copyright 2018, Beaumont Health"
-__credits__ = ["Evan Porter", "Nick Myziuk", "Thomas Guerrero"]
-__maintainer__ = "Evan Porter"
+
+__author__ = ["Evan Porter", "Ron Levitin", "Nick Myziuk"]
+__liscense__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
-__status__ = "Research & Data Organization"
+__status__ = "Research"
+
 
 # Alter this path for directories not stored with '/data'
 parser = optparse.OptionParser()
@@ -48,8 +48,8 @@ else:
                                          'imported_data/*.dcm*'))
 
 
-def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
-                  subfolder=False):
+def _write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
+                   subfolder=False):
     """
     Function
     ---------
@@ -95,8 +95,8 @@ def write_to_path(file_path, patientID, dicom_file, data_dir, date=None,
         shutil.move(os.path.join(data_dir, dicom_file), destination)
 
 
-def specific_sort(dicom_file, file_path, cohort_list,
-                  patientID, modality, ds):
+def _specific_sort(dicom_file, file_path, cohort_list,
+                   patientID, modality, ds):
     """
     Function
     ----------
@@ -144,7 +144,7 @@ def specific_sort(dicom_file, file_path, cohort_list,
         else:
             subfolder = ds.StudyDescription
         write_params.update({"subfolder": subfolder})
-        write_to_path(**write_params)
+        _write_to_path(**write_params)
 
 
 try:
@@ -165,16 +165,16 @@ else:
             if "Modality" in dir(ds):
                 project_dir = csv_path[:-4].rpartition('/')[-1]
                 if ds.StudyDescription[:4] == 'CBCT':
-                    specific_sort(dicom_file=dicom_file,
-                                  file_path=project_dir,
-                                  cohort_list=cohort_list,
-                                  patientID=ds.PatientID,
-                                  modality='CBCT',
-                                  ds=ds)
+                    _specific_sort(dicom_file=dicom_file,
+                                   file_path=project_dir,
+                                   cohort_list=cohort_list,
+                                   patientID=ds.PatientID,
+                                   modality='CBCT',
+                                   ds=ds)
                 else:
-                    specific_sort(dicom_file=dicom_file,
-                                  file_path=project_dir,
-                                  cohort_list=cohort_list,
-                                  patientID=ds.PatientID,
-                                  modality=ds.Modality,
-                                  ds=ds)
+                    _specific_sort(dicom_file=dicom_file,
+                                   file_path=project_dir,
+                                   cohort_list=cohort_list,
+                                   patientID=ds.PatientID,
+                                   modality=ds.Modality,
+                                   ds=ds)

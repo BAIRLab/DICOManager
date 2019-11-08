@@ -1,8 +1,12 @@
 # DICOM Pre-processing Library
 
 ## Purpose
-To take DICOM files, imported to /data/imported_data and sorts based by provided
-MRN list. Then volumes can be reconstructed with the reconstruct.py functions.
+To take DICOM files, imported to /data/imported_data (or another specified location)
+and sorts based by provided MRN list.
+
+User can then reconstruct volumes with the reconstruct.py functions.
+
+Future support for inline, post-stored automatic reconstruction will be added.
 
 ## Prequisites
 ### Packages
@@ -65,7 +69,7 @@ Parsed arguments for this function include:
 -b, --base: str (Default : pwd)
     Specify the base directory that sorting is occuring.  
 -c, --csv: str
-    Specify the name of a .csv file contained within sort_csv directory
+    Specify the path to a .csv file contained within sort_csv directory
 -d, --date: bool
     Specify if sorting below MRN should include date before modality.
     Hierarchy is AcquisitionDate then StudyDate
@@ -95,3 +99,9 @@ RTStruct files are saved as a list of arrays, but the dimensions are
 (number-of-masks, x, y, z). Each element in the arrays are boolean. Masks are
 returned in order as specified, except in cases where mask is not present in
 the RTDOSE file.
+
+## Inline Construction Features to add:
+..* Per-patient (memory efficient)
+..* All patients as unified list (memory inefficient)
+..* Limited sub-list of patients
+..* Limited to subset of modalities

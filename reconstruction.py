@@ -8,18 +8,14 @@ import glob
 import collections
 import os
 
-__authors__ = ["Evan Porter", "David Solis"]
-__maintainer__ = "Evan Porter"
-__liscense__ = "Beaumont Artificial Intelligence Lab"
+
+__author__ = ["Evan Porter", "David Solis"]
+__liscense__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
-__version__ = '1.0'
 
 
-# --------------------------- Helper Functions ---------------------------
-
-
-def nearest(array, value):
+def _nearest(array, value):
     """
     Function
     ----------
@@ -37,7 +33,7 @@ def nearest(array, value):
     return np.abs(np.asarray(array) - value).argmin()
 
 
-def key_list_creator(key_list, *args):
+def _key_list_creator(key_list, *args):
     """
     Function
     ----------
@@ -57,7 +53,7 @@ def key_list_creator(key_list, *args):
     return new_key
 
 
-def slice_thickness(dcm0, dcm1):
+def _slice_thickness(dcm0, dcm1):
     """
     Function
     ----------
@@ -83,10 +79,10 @@ def slice_thickness(dcm0, dcm1):
     inst0 = dcm0.InstanceNumber
     inst1 = dcm1.InstanceNumber
 
-    return abs((loc1 - loc0) / (inst1 - inst0))
+    return abs((loc1-loc0) / (inst1-inst0))
 
 
-def img_dims(dicom_list):
+def _img_dims(dicom_list):
     """
     Function
     ----------
@@ -124,8 +120,8 @@ def img_dims(dicom_list):
         instances.append(round(ds.InstanceNumber))
     instances.sort()
 
-    thickness = slice_thickness(dicom_list[0], dicom_list[1])
-    n_slices = 1 + (abs(high[0] - low[0]) / thickness)
+    thickness = _slice_thickness(dicom_list[0], dicom_list[1])
+    n_slices = 1 + (abs(high[0]-low[0]) / thickness)
 
     # We need to cover for if instance 1 is missing
     # Unfortunately, we don't know how many upper instances could be missing
@@ -145,7 +141,7 @@ def img_dims(dicom_list):
     return thickness, round(n_slices), low[0], high[0], flip
 
 
-def d_max_coords(patient_path, dose_volume, printing=True):
+def _d_max_coords(patient_path, dose_volume, printing=True):
     """
     Function
     ----------
@@ -207,13 +203,13 @@ def d_max_coords(patient_path, dose_volume, printing=True):
     dose_iso = np.array(dose_dcm.ImagePositionPatient)
     dx, dy, dz = (*dose_dcm.PixelSpacing, dose_dcm.SliceThickness)
 
-    d_grid_x = dose_iso[1] + dx * np.arange(dose_dims[0])
-    d_grid_y = dose_iso[0] + dy * np.arange(dose_dims[1])
-    d_grid_z = dose_iso[2] + dz * np.arange(dose_dims[2])
+    d_grid_x = dose_iso[1]+dx * np.arange(dose_dims[0])
+    d_grid_y = dose_iso[0]+dy * np.arange(dose_dims[1])
+    d_grid_z = dose_iso[2]+dz * np.arange(dose_dims[2])
 
-    i_grid_x = img_iso[1] + ix * np.arange(img_dims[0])
-    i_grid_y = img_iso[0] + iy * np.arange(img_dims[1])
-    i_grid_z = img_iso[2] + iz * np.arange(img_dims[2])
+    i_grid_x = img_iso[1]+ix * np.arange(img_dims[0])
+    i_grid_y = img_iso[0]+iy * np.arange(img_dims[1])
+    i_grid_z = img_iso[2]+iz * np.arange(img_dims[2])
 
     if z_0 < z_1:
         i_grid_z = i_grid_z[::-1]
@@ -245,7 +241,7 @@ def d_max_coords(patient_path, dose_volume, printing=True):
     return (volume_max, ct_max_mm, dose_max_mm, ct_voxel_size)
 
 
-def d_max_check(path, volume, printing):
+def _d_max_check(path, volume, printing):
     """
     Function
     ----------
@@ -267,19 +263,16 @@ def d_max_check(path, volume, printing):
     offset : np.array
         An array of the voxel offset in the [x, y, z] axis
     """
-    _, ct_max, dose_max, v_size = d_max_coords(path, volume, printing)
+    _, ct_max, dose_max, v_size = _d_max_coords(path, volume, printing)
     offset = [0, 0, 0]
 
     for i, diff in enumerate(ct_max - dose_max):
         pad = 30  # Chosen because > 30 offset likely indicates greater issues
         low, high, spacing = (-pad * v_size[i], pad * v_size[i], v_size[i])
         offset_list = np.arange(low, high, spacing)
-        offset[i] = nearest(offset_list, diff) - pad
+        offset[i] = _nearest(offset_list, diff) - pad
 
     return np.array(offset, dtype=int)
-
-
-# --------------------------- Primary Functions --------------------------
 
 
 def struct(patient_path, wanted_contours, raises=False):
@@ -378,16 +371,16 @@ def struct(patient_path, wanted_contours, raises=False):
                                 print(
                                     f'Contour {contour.ROIName} in {rt_files[0]} is corrupt')
                         rt_x = np.array(
-                            ((contour_data[:, 0] - img_iso[0]) / ix), dtype=int)
+                            ((contour_data[:, 0]-img_iso[0]) / ix), dtype=int)
                         rt_y = np.array(
-                            ((contour_data[:, 1] - img_iso[1]) / iy), dtype=int)
+                            ((contour_data[:, 1]-img_iso[1]) / iy), dtype=int)
                         rt_z = abs(
-                            np.array(((img_iso[2] - contour_data[0, 2]) / iz), dtype=int))
+                            np.array(((img_iso[2]-contour_data[0, 2]) / iz), dtype=int))
                         y_poly, x_poly = skdraw.polygon(rt_x, rt_y)
                         fill_array[x_poly, y_poly, rt_z] = 1
                 masks.append(fill_array)
         # Reorders the list to match the wanted contours
-        key_list = key_list_creator(wanted_contours)
+        key_list = _key_list_creator(wanted_contours)
         ordered = [masks[contours.index(x)]
                    for x in sorted(contours, key=key_list)]
         return np.array(ordered, dtype='bool')
@@ -432,14 +425,14 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     ct_files.sort()
     ct_dcm = pydicom.dcmread(ct_files[0])
 
-    ct_thick, ct_n_z, ct_loc0, ct_loc1, flip = img_dims(ct_files)
+    ct_thick, ct_n_z, ct_loc0, ct_loc1, flip = _img_dims(ct_files)
     ct_array = np.zeros((*ct_dcm.pixel_array.shape,
                          ct_n_z), dtype='float32')
 
     try:
         for ct_file in ct_files:
             ds = pydicom.dcmread(ct_file)
-            loc = round(abs((ct_loc0 - ds.SliceLocation) / ct_thick))
+            loc = round(abs((ct_loc0-ds.SliceLocation) / ct_thick))
             ct_array[:, :, loc] = ds.pixel_array
     except IndexError:
         if raises:
@@ -450,7 +443,7 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
         if flip:
             ct_array = ct_array[..., ::-1]
         if HU:
-            return ct_array * ct_dcm.RescaleSlope + ct_dcm.RescaleIntercept
+            return ct_array * ct_dcm.RescaleSlope+ct_dcm.RescaleIntercept
         else:
             return ct_array
 
@@ -500,7 +493,7 @@ def pet(patient_path, path_mod=None, raises=False):
     pet_files = glob.glob(patient_path + 'PET' + str(path_mod) + '/*.dcm')
     pet_dcm = pydicom.dcmread(pet_files[0])
 
-    pet_thick, pet_n_z, pet_loc0, pet_loc1, flip = img_dims(pet_files)
+    pet_thick, pet_n_z, pet_loc0, pet_loc1, flip = _img_dims(pet_files)
     pet_array = np.zeros((*pet_dcm.pixel_array.shape,
                           pet_n_z), dtype='float32')
 
@@ -590,14 +583,14 @@ def dose(patient_path, raises=False):
     dose_dims = np.rollaxis(dose_dcm.pixel_array, 0, 3).shape
     dx, dy, dz = (*dose_dcm.PixelSpacing, dose_dcm.SliceThickness)
 
-    d_grid_x = dose_iso[1] + dx * np.arange(dose_dims[0])
-    d_grid_y = dose_iso[0] + dy * np.arange(dose_dims[1])
-    d_grid_z = dose_iso[2] + dz * np.arange(dose_dims[2])
+    d_grid_x = dose_iso[1]+dx * np.arange(dose_dims[0])
+    d_grid_y = dose_iso[0]+dy * np.arange(dose_dims[1])
+    d_grid_z = dose_iso[2]+dz * np.arange(dose_dims[2])
 
     padding = 25  # Padding since some RTDOSE extend outside the CT volume
-    i_grid_x = img_iso[1] + ix * np.arange(img_dims[0])
-    i_grid_y = img_iso[0] + iy * np.arange(img_dims[1])
-    i_grid_z = img_iso[2] + iz * np.arange(-padding, img_dims[2] + padding)
+    i_grid_x = img_iso[1]+ix * np.arange(img_dims[0])
+    i_grid_y = img_iso[0]+iy * np.arange(img_dims[1])
+    i_grid_z = img_iso[2]+iz * np.arange(-padding, img_dims[2] + padding)
     i_grid_z = i_grid_z[::-1]  # Likely redundant with lower flips
 
     grids = [(i_grid_x, d_grid_x), (i_grid_y, d_grid_y), (i_grid_z, d_grid_z)]
@@ -605,7 +598,7 @@ def dose(patient_path, raises=False):
 
     # Compute the nearest CT coordinate to each dose coordinate
     for index, (img_grid, dose_grid) in enumerate(grids):
-        temp = list(set([nearest(img_grid, val) for val in dose_grid]))
+        temp = list(set([_nearest(img_grid, val) for val in dose_grid]))
         temp.sort()
         list_of_grids.append(np.array(temp))
 
@@ -623,20 +616,20 @@ def dose(patient_path, raises=False):
                                                       (d_grid_z, i_grid_z)]):
                 if len(d_grid) > len(list_of_grids[index]):
                     # Calculate how many points overshoot
-                    temp = [nearest(i_grid, val) for val in d_grid]
+                    temp = [_nearest(i_grid, val) for val in d_grid]
                     xtra = [(x, n - 1)
                             for x, n in collections.Counter(temp).items() if n > 1]
                     if len(xtra) > 1:
+                        lo_xtra, hi_xtra = (xtra[0][1], -xtra[1][1])
                         if index == 2:
                             cropped_dose_array = dose_array[:,
                                                             :,
-                                                            xtra[0][1]:-xtra[1][1]]
+                                                            lo_xtra: hi_xtra]
                         elif index == 1:
                             cropped_dose_array = dose_array[:,
-                                                            xtra[0][1]:-xtra[1][1]]
+                                                            lo_xtra: hi_xtra]
                         else:
-                            cropped_dose_array = dose_array[xtra[0]
-                                                            [1]:-xtra[1][1]]
+                            cropped_dose_array = dose_array[lo_xtra: hi_xtra]
                     else:
                         # Cropping for if the RTDOSE still extends
                         # This is likely unnecessary and may be removed later
@@ -671,15 +664,15 @@ def dose(patient_path, raises=False):
                                                    z_mm[0]:z_mm[1]].reshape(3, total_pts)]).T)
         interp_vals = interp(interp_pts)
         # This flipping may be redundant with flipping below
-        interp_vol = interp_vals.reshape(x_mm[1] - x_mm[0],
-                                         y_mm[1] - y_mm[0],
-                                         z_mm[1] - z_mm[0])[..., ::-1]
+        interp_vol = interp_vals.reshape(x_mm[1]-x_mm[0],
+                                         y_mm[1]-y_mm[0],
+                                         z_mm[1]-z_mm[0])[..., ::-1]
 
         full_vol = np.zeros(img_dims)
         if z_1 < z_0:  # Because some images were flipped for interpolation
             interp_vol = interp_vol[..., ::-1]
-            z_mm = [full_vol.shape[-1] - z_mm[1] - 1,
-                    full_vol.shape[-1] - z_mm[0] - 1]
+            z_mm = [full_vol.shape[-1]-z_mm[1]-1,
+                    full_vol.shape[-1]-z_mm[0]-1]
 
         interp_lo, interp_hi = (0, interp_vol.shape[-1])
 
@@ -697,9 +690,9 @@ def dose(patient_path, raises=False):
 
         # This is to ensure that d_max matches, if not, the image will be
         # adjusted to match accordingly
-        slice_offset = d_max_check(path=patient_path,
-                                   volume=full_vol,
-                                   printing=False)
+        slice_offset = _d_max_check(path=patient_path,
+                                    volume=full_vol,
+                                    printing=False)
 
         if np.any(slice_offset):
             full_vol = np.zeros(img_dims)
@@ -710,30 +703,30 @@ def dose(patient_path, raises=False):
             # Offsets differently if coordinates are postive or negative
             if z_1 > z_0:
                 # Crops, if necessary
-                if (z_mm[1] + o_z) > full_vol.shape[-1]:
-                    diff_hi = full_vol.shape[-1] - (o_z + z_mm[1])
+                if (z_mm[1]+o_z) > full_vol.shape[-1]:
+                    diff_hi = full_vol.shape[-1] - (o_z+z_mm[1])
                     z_mm[1] = z_mm[1] + diff_hi
-                if (z_mm[0] + o_z) < 0:
-                    diff_lo = abs(z_mm[0] + o_z)
+                if (z_mm[0]+o_z) < 0:
+                    diff_lo = abs(z_mm[0]+o_z)
                     z_mm[0] = z_mm[0] + diff_lo
 
-                full_vol[x_mm[0] - o_x: x_mm[1] - o_x,
-                         y_mm[0] - o_y: y_mm[1] - o_y,
-                         z_mm[0] + o_z: z_mm[1] + o_z] = interp_vol[..., diff_lo:diff_hi]
+                full_vol[x_mm[0]-o_x: x_mm[1]-o_x,
+                         y_mm[0]-o_y: y_mm[1]-o_y,
+                         z_mm[0]+o_z: z_mm[1]+o_z] = interp_vol[..., diff_lo: diff_hi]
             else:
-                z_mm = [full_vol.shape[-1] - z_mm[1] - 1,
-                        full_vol.shape[-1] - z_mm[0] - 1]
+                z_mm = [full_vol.shape[-1]-z_mm[1]-1,
+                        full_vol.shape[-1]-z_mm[0]-1]
                 # Crops, if necessary
-                if (z_mm[1] - o_z) > full_vol.shape[-1]:
-                    diff_hi = full_vol.shape[-1] - (z_mm[1] - o_z)
+                if (z_mm[1]-o_z) > full_vol.shape[-1]:
+                    diff_hi = full_vol.shape[-1] - (z_mm[1]-o_z)
                     z_mm[1] = z_mm[1] + diff_hi
-                if (z_mm[0] - o_z) < 0:
-                    diff_lo = abs(z_mm[0] - o_z)
+                if (z_mm[0]-o_z) < 0:
+                    diff_lo = abs(z_mm[0]-o_z)
                     z_mm[0] = z_mm[0] + diff_lo
 
-                full_vol[x_mm[0] - o_x: x_mm[1] - o_x,
-                         y_mm[0] - o_y: y_mm[1] - o_y,
-                         z_mm[0] - o_z: z_mm[1] - o_z] = interp_vol[..., diff_lo:diff_hi]
+                full_vol[x_mm[0]-o_x: x_mm[1]-o_x,
+                         y_mm[0]-o_y: y_mm[1]-o_y,
+                         z_mm[0]-o_z: z_mm[1]-o_z] = interp_vol[..., diff_lo: diff_hi]
 
         # Adjusts for HFS if coordinates are negative
         if z_0 > z_1:
