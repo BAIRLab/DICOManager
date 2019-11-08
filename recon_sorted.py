@@ -35,11 +35,9 @@ class FileName:
     None
     """
     fullpath: str
-    study_sorted: bool
     project: str = None
     mrn: str = None
     date: str = None
-    study: str = None
     MR: list = None
     CT: list = None
     PET: list = None
@@ -50,25 +48,18 @@ class FileName:
         split_path = self.fullpath.split('/')
         self.project, self.mrn = split_path[:2]
 
-        if len(split_path) == 5:
-            if self.study_sorted:
-                self.date, _, self.study = split_path[2:]
-        elif len(split_path) == 3:
+        if len(split_path) == 3:
             self.date = split_path[2]
 
         mod_list = ['MR', 'CT', 'PET', 'RTSTRUCT', 'RTDOSE']
 
-        if self.study_sorted:
-            path_list = [[self.project, self.mrn, self.date,
-                          x, self.study, '*.dcm'] for x in mod_list]
+        if self.date:
+            path_list = [[self.project, self.mrn,
+                          self.date, x, '*.dcm'] for x in mod_list]
         else:
-            if self.date:
-                path_list = [[self.project, self.mrn,
-                              self.date, x, '*.dcm'] for x in mod_list]
-            else:
-                path_list = [[self.project, self.mrn, x, '*.dcm']
-                             for x in mod_list]
-        print(path_list)
+            path_list = [[self.project, self.mrn, x, '*.dcm']
+                         for x in mod_list]
+
         search_paths = [os.path.join(*x) for x in path_list]
 
         self.MR = glob(search_paths[0])
@@ -105,8 +96,6 @@ def _file_namer(filename, modality):
     current_name += filename.mrn + '_'
     if filename.date:
         current_name += filename.date + '_'
-    if filename.study:
-        current_name += filename.study + '_'
     current_name += modality + '.npy'
     return current_name
 
@@ -123,8 +112,6 @@ parser.add_option('-l', '--list', action='store', dest='contour_list',
                   help='Store Contours for RTSTRUCT recon', default=None)
 parser.add_option('-p', '--pool', action='store_true', dest='pool',
                   help='pool sorted into combined list', default=True)
-parser.add_option('-s', '--study', action='store', dest='study',
-                  help='.csv of study for reconsturction', default=None)
 
 options, args = parser.parse_args()
 
@@ -133,21 +120,14 @@ if not options.base_dir:
 
 file_tree = glob(os.path.join(options.base_dir, '**/*[!.dcm]'), recursive=True)
 
-if options.study:
-    with open(options.study, mode='r') as csv_file:
-        filter_list = list(rows[0] for rows in csv.reader(csv_file))
-else:
-    with open('modality.csv', mode='r') as csv_file:
-        filter_list = list(rows[1] for rows in csv.reader(csv_file))
+with open('modality.csv', mode='r') as csv_file:
+    filter_list = list(rows[1] for rows in csv.reader(csv_file))
 
 pat_folders = list(set([df.rpartition('/')[0]
                         for df in file_tree if df.rpartition('/')[-1] in filter_list]))
 
 for path in pat_folders:
-    if options.study:
-        patient_group = FileName(path, True)
-    else:
-        patient_group = FileName(path, False)
+    patient_group = FileName(path)
 
     mr, ct, pet, rts, dose = [[] for _ in range(5)]
 
