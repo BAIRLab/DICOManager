@@ -10,7 +10,7 @@ import numpy as np
 
 
 __author__ = "Evan Porter"
-__liscense__ = "Beaumont Artificial Intelligence Research Lab"
+__license__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
 

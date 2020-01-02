@@ -371,11 +371,11 @@ def struct(patient_path, wanted_contours, raises=False):
                                 print(
                                     f'Contour {contour.ROIName} in {rt_files[0]} is corrupt')
                         rt_x = np.array(
-                            ((contour_data[:, 0]-img_iso[0]) / ix), dtype=int)
+                            np.round((contour_data[:, 0]-img_iso[0]) / ix), dtype=int)
                         rt_y = np.array(
-                            ((contour_data[:, 1]-img_iso[1]) / iy), dtype=int)
+                            np.round((contour_data[:, 1]-img_iso[1]) / iy), dtype=int)
                         rt_z = abs(
-                            np.array(((img_iso[2]-contour_data[0, 2]) / iz), dtype=int))
+                            np.array(np.round((img_iso[2]-contour_data[0, 2]) / iz), dtype=int))
                         y_poly, x_poly = skdraw.polygon(rt_x, rt_y)
                         fill_array[x_poly, y_poly, rt_z] = 1
                 masks.append(fill_array)
