@@ -129,18 +129,22 @@ def _specific_sort(dicom_file, file_path, cohort_list,
     elif hasattr(ds, 'StudyDate'):
         write_params['date'] = ds.StudyDate
 
-    if int(patientID) in cohort_list or patientID in str(cohort_list):
-        if modality in subfolders.keys():
-            subfolder = subfolders[modality]
-        else:
-            subfolder = ds.StudyDescription
-        write_params.update({"subfolder": subfolder})
-        _write_to_path(**write_params)
+    try:
+        if int(patientID) in cohort_list or patientID in str(cohort_list):
+            if modality in subfolders.keys():
+                subfolder = subfolders[modality]
+            else:
+                subfolder = ds.StudyDescription
+            write_params.update({"subfolder": subfolder})
+            _write_to_path(**write_params)
+    except ValueError:
+        pass
 
 
 try:
     csv_path = os.path.join(options.base_dir, options.csv_file)
     cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
+    print(cohort_list)
 except FileNotFoundError:
     raise FileNotFoundError(f'The specified .csv is not at {csv_path}')
 else:
