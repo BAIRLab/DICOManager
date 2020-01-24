@@ -21,8 +21,6 @@ __status__ = "Research"
 # Alter this path for directories not stored with '/data'
 parser = optparse.OptionParser()
 
-# parser.add_option('-a', '--alt', action='store',
-                #   dest='alt', help='Alternative source dir', default=None)
 parser.add_option('-m', '--move', action='store_true', dest='move_file',
                   help='Move instead of default of copy', default=False)
 parser.add_option('-b', '--base', action='store', dest='base_dir',
@@ -38,6 +36,21 @@ options, args = parser.parse_args()
 
 if not options.csv_file:
     raise NameError('A sorting csv file must be specified with flag --csv')
+
+if options.move_file:
+    bad_input = True
+    while bad_input:
+        confirm = input("Confirm you want to move and not copy the files (y/n): ")
+        if confirm.lower() == "n":
+            print("Copying instead...")
+            bad_input = False
+            options.move_file = False
+            break
+        if confirm.lower() == "y":
+            bad_input = False
+            break
+        else:
+            bad_input = True
 
 dicom_files = glob.glob(os.path.join(options.base_dir, '**/*.dcm*'), recursive=True)
 
@@ -77,15 +90,12 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
     destination = os.path.join(new_path, filename)
     
     if options.move_file:
-        count+=1
         shutil.move(dicom_file, destination)
     else:
         shutil.copy(dicom_file, destination)
 
 
-def _specific_sort(dicom_file, dest_dir, cohort_list,
-                #    patientID, modality, 
-                ds):
+def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
     """
     Function
     ----------
@@ -104,26 +114,14 @@ def _specific_sort(dicom_file, dest_dir, cohort_list,
     modality : str
         A string representing the modality
     """
-    # List is append, subfolder if we add more modalities, we just
-    #   update this dictionary to include the options
-    # with open(os.path.join('modality.csv'), mode='r') as csv_file:
-    #     input_file = csv.reader(csv_file)
-    #     subfolders = dict((rows[0], rows[1]) for rows in input_file)
 
     write_params = {"dest_dir": dest_dir,
                     "patientID": ds.PatientID,
                     "dicom_file": dicom_file,
-                    # "date": None
                     }
 
-    # if hasattr(ds, 'AcquisitionDate'):
-        # write_params['date'] = ds.AcquisitionDate
-    # elif hasattr(ds, 'StudyDate'):
-        # write_params['date'] = ds.StudyDate
-    # print(f"{ds.PatientID}: {cohort_list}\n")
     try:
         if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list):
-            # print("Found a patient")
             if "CBCT" in ds.StudyDescription:
                 subfolder = "CBCT"
             else:
@@ -151,24 +149,4 @@ else:
             _specific_sort(dicom_file=dicom_file,
                             dest_dir=options.project_dir,
                             cohort_list=cohort_list,
-                            ds=ds)
-
-print(count)
-            # # if "StudyDescription" not in dir(ds):
-            #     # ds.add_new([0x0008, 0x1030], 'LO', '')
-            # if "Modality" in dir(ds):
-            #     # project_dir = options.project_dir
-            #     if ds.StudyDescription[:4] == 'CBCT':
-            #         _specific_sort(dicom_file=dicom_file,
-            #                        file_path=project_dir,
-            #                        cohort_list=cohort_list,
-            #                     #    patientID=ds.PatientID,
-            #                        modality='CBCT',
-            #                        ds=ds)
-            #     else:
-            #         _specific_sort(dicom_file=dicom_file,
-            #                        file_path=project_dir,
-            #                        cohort_list=cohort_list,
-            #                     #    patientID=ds.PatientID,
-            #                        modality=ds.Modality,
-            #                        ds=ds)
+                            ds=ds) 
