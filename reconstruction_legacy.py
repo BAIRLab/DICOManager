@@ -1,24 +1,19 @@
 #!/usr/bin/python3
 
-# %%
 from scipy.interpolate import RegularGridInterpolator
-from pathlib import Path
 import skimage.draw as skdraw
 import numpy as np
 import pydicom
 import glob
 import collections
 import os
-from matplotlib import pyplot as plt
+from pathlib import Path
 
-__author__ = ["Evan Porter", "David Solis", "Ron Levitin"]
-__license__ = "Beaumont Artificial Intelligence Research Lab"
+
+__author__ = ["Evan Porter", "David Solis"]
+__liscense__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
-
-# Ron's PLANNED CHANGES
-# Move the path-handling out of the reconstruction functions.
-# ct, mri, pet, rtstruct should accept a path and be assured that it is receiving the correct path
 
 
 def _nearest(array, value):
@@ -54,13 +49,9 @@ def _key_list_creator(key_list, *args):
     ----------
     Returns a function which yeilds the proper index of each structure
     """
-    if type(key_list) is dict:
-        key_list = list(key_list.keys())
     def new_key(*args):
         return key_list.index(*args)
     return new_key
-
-# %%
 
 
 def _slice_thickness(dcm0, dcm1):
@@ -68,7 +59,6 @@ def _slice_thickness(dcm0, dcm1):
     Function
     ----------
     Computes the slice thickness for a DICOM set
-    -- *NOTE* Calculates based on slice location and instance number. Does not trust SliceThickness DICOM Header
 
     Parameters
     ----------
@@ -80,7 +70,6 @@ def _slice_thickness(dcm0, dcm1):
     slice_thickness : float
         A float representing the robustly calculated slice thickness
     """
-
     if type(dcm0) != pydicom.dataset.FileDataset:
         dcm0 = pydicom.dcmread(dcm0)
     if type(dcm1) != pydicom.dataset.FileDataset:
@@ -94,7 +83,6 @@ def _slice_thickness(dcm0, dcm1):
     return abs((loc1-loc0) / (inst1-inst0))
 
 
-# %%
 def _img_dims(dicom_list):
     """
     Function
@@ -109,7 +97,7 @@ def _img_dims(dicom_list):
 
     Returns
     ----------
-    (thickness, n_slices, low, high, flip) : (float, int, float, float, boolean)
+    (thickness, n_slices, low, high) : (float, int, float, float)
         A tuple of values corresponding to the slice thickness,
             total number of slices and the high / low value of the
             image position in patient coordinates
@@ -153,8 +141,6 @@ def _img_dims(dicom_list):
 
     return thickness, round(n_slices), low[0], high[0], flip
 
-
-# %%
 
 def _d_max_coords(patient_path, dose_volume, printing=True):
     """
@@ -210,7 +196,7 @@ def _d_max_coords(patient_path, dose_volume, printing=True):
             z_1 = float(ct_dcm.ImagePositionPatient[-1])
 
     img_dims = (ct_dcm.Rows, ct_dcm.Columns, len(ct_files))
-    img_origin = np.array([*ct_dcm.ImagePositionPatient[:2], min(z_0, z_1)])
+    img_iso = np.array([*ct_dcm.ImagePositionPatient[:2], min(z_0, z_1)])
     ix, iy, iz = (*ct_dcm.PixelSpacing, ct_dcm.SliceThickness)
     ct_voxel_size = np.array([ix, iy, iz])
 
@@ -222,9 +208,9 @@ def _d_max_coords(patient_path, dose_volume, printing=True):
     d_grid_y = dose_iso[0]+dy * np.arange(dose_dims[1])
     d_grid_z = dose_iso[2]+dz * np.arange(dose_dims[2])
 
-    i_grid_x = img_origin[1]+ix * np.arange(img_dims[0])
-    i_grid_y = img_origin[0]+iy * np.arange(img_dims[1])
-    i_grid_z = img_origin[2]+iz * np.arange(img_dims[2])
+    i_grid_x = img_iso[1]+ix * np.arange(img_dims[0])
+    i_grid_y = img_iso[0]+iy * np.arange(img_dims[1])
+    i_grid_z = img_iso[2]+iz * np.arange(img_dims[2])
 
     if z_0 < z_1:
         i_grid_z = i_grid_z[::-1]
@@ -288,9 +274,6 @@ def _d_max_check(path, volume, printing):
         offset[i] = _nearest(offset_list, diff) - pad
 
     return np.array(offset, dtype=int)
-
-# %%
-
 
 def _find_series_slices(path, find_associated=False, force=False):
     """
@@ -379,6 +362,116 @@ def _find_series_slices(path, find_associated=False, force=False):
 
     return(volume_slice_list)
 
+def struct(patient_path, wanted_contours, raises=False):
+    """
+    Function
+    ----------
+    Reconstructs a RTSTRUCT volume(s)
+
+    Parameters
+    ----------
+    patient_path : str
+        A path directing towards a patient database in the following format:
+            MRN/[CT,PET,RTSTRUCT,RTDOSE]/*.dcm
+    contour_names : list or dict
+        A list of contour names that will be included if found. Array will order
+            in the same format as the recieved list of names, or order of keys
+        If list, then only items in the list will be output. If a dict, then
+            each list will map to the key and saved the respective index
+    raises : bool (Default = False)
+        Determines if errors are raised or not. As false, only printing occurs
+
+    Raises
+    ----------
+    ValueEror
+        Raised if the RTSTRUCT and CT are not registered
+    ValueError
+        Raised if values are missing from an RTSTRUCT contour sequence
+
+    Returns
+    ----------
+    rtstruct_array : np.array
+        A reconstructed RTSTRUCT array in the shape of [struct, x, y, z], where
+            x, y, z are the same dimensions as the registered CT volume
+    """
+
+    if patient_path[0] == '~':
+        patient_path = os.path.expanduser('~') + patient_path[1:]
+
+    if patient_path[-1] != '/':
+        patient_path += '/'
+
+    if type(wanted_contours) is dict:
+        for key in wanted_contours.keys():
+            temp = [item.lower() for item in wanted_contours.pop(key)]
+            wanted_contours.update({key.lower(): temp})
+    else:
+        wanted_contours = [item.lower() for item in wanted_contours]
+
+    rt_files = glob.glob(patient_path + 'RTSTRUCT/*.dcm*')
+    rt_files.sort()
+    rt_dcm = pydicom.dcmread(rt_files[0])
+
+    ct_files = glob.glob(patient_path + 'CT/*.dcm')
+    ct_files.sort()
+    ct_dcm = pydicom.dcmread(ct_files[0])
+    dimensions = (ct_dcm.Rows, ct_dcm.Columns, len(ct_files))
+
+    ct_uid = ct_dcm.FrameOfReferenceUID
+    rt_uid = rt_dcm.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
+
+    masks = []
+
+    # Check Registration
+    if ct_uid != rt_uid:
+        if raises:
+            raise ValueError(
+                f'These two images are not registered: {ct_files[0]} & {rt_files[0]}')
+        else:
+            print(
+                f'These two images are not registered: {ct_files[0]} & {rt_files[0]}')
+    else:
+        img_iso = np.array(ct_dcm.ImagePositionPatient)
+        ix, iy, iz = (*ct_dcm.PixelSpacing, ct_dcm.SliceThickness)
+        contours = []  # Designates the contours that have been included
+        for index, contour in enumerate(rt_dcm.StructureSetROISequence):
+            # Functionality for dictionaries
+            if type(wanted_contours) is dict:
+                for key in wanted_contours:
+                    if contour.ROIName.lower() in wanted_contours[key]:
+                        contour.ROIName = key
+                        break
+            if contour.ROIName.lower() in wanted_contours:
+                contours.append(contour.ROIName.lower())
+                fill_array = np.zeros(shape=dimensions)
+                if hasattr(rt_dcm.ROIContourSequence[index], 'ContourSequence'):
+                    contour_list = rt_dcm.ROIContourSequence[index].ContourSequence
+                    for _, contour_slice in enumerate(contour_list):
+                        try:
+                            contour_data = np.array(
+                                contour_slice.ContourData).reshape(-1, 3)
+                        except ValueError:
+                            if raises:
+                                raise ValueError(
+                                    f'Contour {contour.ROIName} in {rt_files[0]} is corrupt')
+                            else:
+                                print(
+                                    f'Contour {contour.ROIName} in {rt_files[0]} is corrupt')
+                        rt_x = np.array(
+                            np.round((contour_data[:, 0]-img_iso[0]) / ix), dtype=int)
+                        rt_y = np.array(
+                            np.round((contour_data[:, 1]-img_iso[1]) / iy), dtype=int)
+                        rt_z = abs(
+                            np.array(np.round((img_iso[2]-contour_data[0, 2]) / iz), dtype=int))
+                        y_poly, x_poly = skdraw.polygon(rt_x, rt_y)
+                        fill_array[x_poly, y_poly, rt_z] = 1
+                masks.append(fill_array)
+        # Reorders the list to match the wanted contours
+        key_list = _key_list_creator(wanted_contours)
+        ordered = [masks[contours.index(x)]
+                   for x in sorted(contours, key=key_list)]
+        return np.array(ordered, dtype='bool')
+
 # %%
 def mri(patient_path, path_mod=False, raises=False):
     """
@@ -450,139 +543,6 @@ def mri(patient_path, path_mod=False, raises=False):
             image_array = image_array[..., ::-1]
     return image_array
 
-# %%
-
-
-def struct(patient_path, wanted_contours, raises=False):
-    """
-    Function
-    ----------
-    Reconstructs a RTSTRUCT volume(s)
-
-    Parameters
-    ----------
-    patient_path : str
-        A path directing towards a patient database in the following format:
-            MRN/[CT,PET,RTSTRUCT,RTDOSE]/*.dcm
-    contour_names : list or dict
-        A list of contour names that will be included if found. Array will order
-            in the same format as the recieved list of names, or order of keys
-        If list, then only items in the list will be output. If a dict, then
-            each list will map to the key and saved the respective index
-    raises : bool (Default = False)
-        Determines if errors are raised or not. As false, only printing occurs
-
-    Raises
-    ----------
-    ValueEror
-        Raised if the RTSTRUCT and CT are not registered
-    ValueError
-        Raised if values are missing from an RTSTRUCT contour sequence
-
-    Returns
-    ----------
-    rtstruct_array : np.array
-        A reconstructed RTSTRUCT array in the shape of [struct, x, y, z], where
-            x, y, z are the same dimensions as the registered CT volume
-    """
-
-    # Check path type
-    # -- if dicom file, check directory for related dicoms
-    # -- if directory, check for "[CT, MRI, CBCT, PET, RTSTRUCT, RTDOSE]" folder and read those in.
-
-    # If path is a string, convert to pathlib.Path
-    if not isinstance(patient_path, Path):
-        patient_path = Path(patient_path).expanduser()
-
-    # find the RTSTRUCT dcm file
-    if patient_path.is_file() and patient_path.suffix == ".dcm":
-        struct_file = patient_path
-    elif patient_path.is_dir():
-        patient_path_sub = patient_path / 'RTSTRUCT'
-        if patient_path_sub.is_dir():
-            struct_file = next(patient_path_sub.iterdir())
-        else:
-            err_msg = f"No RTSTRUCT folder in patient path: {patient_path.parent}"
-            if raises:
-                raise ValueError(err_msg)
-            else:
-                print(err_msg)
-
-    # Open RTSTRUCT Header
-    struct_dcm = pydicom.dcmread(str(struct_file))
-    if not struct_dcm.Modality == 'RTSTRUCT':
-        err_msg = f"DICOM header for file {struct_file} is of Modality {struct_dcm.Modality}"
-        raise ValueError(err_msg) if raises else print(err_msg)
-
-    # Find the associated volume dicoms and read them.
-    # Need the associated volume for the image space information
-    volume_slice_files = _find_series_slices(
-        str(struct_file), find_associated=True)
-    volume_dcm = pydicom.dcmread(
-        volume_slice_files[0], stop_before_pixels=True)
-
-    dimensions = (volume_dcm.Rows, volume_dcm.Columns, len(volume_slice_files))
-    img_origin = np.array(volume_dcm.ImagePositionPatient)
-    ix, iy, iz = (*volume_dcm.PixelSpacing, volume_dcm.SliceThickness)
-
-    # inner function to convert the points to coords
-    def _points_to_coords(contour_data, img_origin, ix, iy, iz):
-        points = np.array(
-            np.round(
-                (contour_data - img_origin) / [ix, iy, abs(iz)]
-                    ), dtype=int
-                        )
-        return points
-        
-
-    # This function requires a list of the contours being looked for. Can be dict or list
-    if type(wanted_contours) is dict:
-        wanted_contours = dict((k.lower(), v)
-                               for k, v in wanted_contours.items())
-    else:
-        wanted_contours = [item.lower() for item in wanted_contours]
-
-    masks = []
-    contours = []  # Designates the contours that have been included
-    for index, contour in enumerate(struct_dcm.StructureSetROISequence):
-        # Functionality for dictionaries
-        if type(wanted_contours) is dict:
-            for key in wanted_contours:
-                if contour.ROIName.lower() in wanted_contours[key]:
-                    contour.ROIName = key
-                    break
-        if contour.ROIName.lower() not in wanted_contours:
-            break
-
-        contours.append(contour.ROIName.lower())
-
-        fill_array = np.zeros(shape=dimensions)
-        if hasattr(struct_dcm.ROIContourSequence[index], 'ContourSequence'):
-            contour_list = struct_dcm.ROIContourSequence[index].ContourSequence
-            all_points = np.empty((0, 3))
-
-            for contour_slice in contour_list:
-                try:
-                    contour_data = np.array(
-                        contour_slice.ContourData).reshape(-1, 3)
-                except ValueError:
-                    err_msg = f'Contour {contour.ROIName} in {struct_file} is corrupt'
-                    raise ValueError(err_msg) if raises else print(err_msg)
-
-                points = _points_to_coords(contour_data, img_origin, ix, iy, iz)
-                y_poly, x_poly = skdraw.polygon(*points[:, :2].T)
-
-                fill_array[x_poly, y_poly, points[0,2]] = 1
-
-        masks.append(fill_array)
-    # Reorders the list to match the wanted contours
-    key_list = _key_list_creator(wanted_contours)
-    ordered = [masks[contours.index(x)]
-               for x in sorted(contours, key=key_list)]
-    return np.array(ordered, dtype='bool')
-
-
-# %%
 
 def ct(patient_path, path_mod=None, HU=False, raises=False):
     """
@@ -769,8 +729,7 @@ def dose(patient_path, raises=False):
             z_1 = float(ct_dcm.ImagePositionPatient[-1])
 
     try:
-        img_origin = np.array(
-            [*ct_dcm.ImagePositionPatient[:2], min(z_0, z_1)])
+        img_iso = np.array([*ct_dcm.ImagePositionPatient[:2], min(z_0, z_1)])
     except UnboundLocalError:
         print('This patient has multiple CT image sets or missing files')
         return 0
@@ -787,9 +746,9 @@ def dose(patient_path, raises=False):
     d_grid_z = dose_iso[2]+dz * np.arange(dose_dims[2])
 
     padding = 25  # Padding since some RTDOSE extend outside the CT volume
-    i_grid_x = img_origin[1]+ix * np.arange(img_dims[0])
-    i_grid_y = img_origin[0]+iy * np.arange(img_dims[1])
-    i_grid_z = img_origin[2]+iz * np.arange(-padding, img_dims[2] + padding)
+    i_grid_x = img_iso[1]+ix * np.arange(img_dims[0])
+    i_grid_y = img_iso[0]+iy * np.arange(img_dims[1])
+    i_grid_z = img_iso[2]+iz * np.arange(-padding, img_dims[2] + padding)
     i_grid_z = i_grid_z[::-1]  # Likely redundant with lower flips
 
     grids = [(i_grid_x, d_grid_x), (i_grid_y, d_grid_y), (i_grid_z, d_grid_z)]
@@ -808,7 +767,7 @@ def dose(patient_path, raises=False):
         try:
             dose_array = np.rollaxis(dose_dcm.pixel_array, 0, 3)
             interp = RegularGridInterpolator(
-                list_of_grids, dose_array, method='linear')
+                     list_of_grids, dose_array, method='linear')
         except ValueError:
             for index, (d_grid, i_grid) in enumerate([(d_grid_x, i_grid_x),
                                                       (d_grid_y, i_grid_y),
@@ -845,7 +804,7 @@ def dose(patient_path, raises=False):
                         else:  # 0 and x
                             cropped_dose_array = dose_array[:xtra[0][1]]
             interp = RegularGridInterpolator(
-                list_of_grids, cropped_dose_array, method='linear')
+                     list_of_grids, cropped_dose_array, method='linear')
             dose_array = cropped_dose_array
     except ValueError:
         if raises:
@@ -932,82 +891,3 @@ def dose(patient_path, raises=False):
             full_vol = full_vol[..., ::-1]
 
         return full_vol * float(dose_dcm.DoseGridScaling)
-
-# Code below is for viewing volumes
-
-
-def show_volume(volume_array, rows=2, cols=6, figsize='none'):
-    if figsize == 'none':
-        figsize = (cols * 4, rows * 3)
-
-    plt.figure(figsize=figsize)
-    _, _, zmax = volume_array.shape
-    imgs_out = rows * cols
-    skip = zmax // imgs_out
-    extra = zmax % imgs_out
-    for i in range(imgs_out):
-        plt.subplot(rows, cols, i+1)
-        z = i * skip + int(extra/2 + skip/2)
-        plt.imshow(volume_array[:, :, z], cmap='gray', interpolation='none')
-        plt.axis('off')
-        plt.title(f"z={z}")
-    plt.show
-
-# %%
-
-def show_contours(volume_arr, contour_arr, rows=2, cols=6, orientation = 'axial', aspect=4/1.48375, figsize='none'):
-    """
-    Shows 2d MR img with contour
-    Inputs
-        img_arr: 2d np.array image array with pixel intensities
-        contour_arr: 2d np.array contour array with pixels of 1 and 0
-    """
-
-    # Currently hard coded the aspect ratio for MRI context. May need to adapt it to make it more adaptible.
-
-    if figsize == 'none':
-        figsize = (cols * 4, rows * 3)
-
-    masked_contour_arr = np.ma.masked_equal(contour_arr, 0)
-
-    plt.figure(figsize=figsize)
-    xmax, ymax, zmax = volume_arr.shape
-    imgs_out = rows * cols
-
-    if orientation == "axial":
-        max_dim = zmax
-        dim = "z"
-    elif orientation == "coronal":
-        max_dim = xmax
-        dim = "x"
-    elif orientation == "sagittal":
-        max_dim = ymax
-        dim = "y"
-
-    skip = max_dim // imgs_out
-    extra = max_dim % imgs_out
-    slice_index = list(range(int(skip/2 + extra/2), max_dim - int(skip/2 + extra/2), skip))
-
-    for i, s in enumerate(slice_index):
-        plt.subplot(rows, cols, i+1)
-
-        if orientation == "axial":
-            plt.imshow(volume_arr[:,:,s], cmap='gray', interpolation='none')
-            plt.imshow(masked_contour_arr[:,:,s],
-                   cmap='Pastel1', interpolation='none', alpha=0.5)
-        elif orientation == "coronal":
-            plt.imshow(np.rollaxis(volume_arr[s,:,::-1], 1, 0), cmap='gray', interpolation='none', aspect = aspect)
-            plt.imshow(np.rollaxis(masked_contour_arr[s,:,::-1], 1, 0),
-                   cmap='Pastel1', interpolation='none', alpha=0.5, aspect = aspect)
-        elif orientation == "sagittal":
-            plt.imshow(np.rollaxis(volume_arr[:, s, ::-1], 1, 0), cmap='gray', interpolation='none', aspect = aspect)
-            plt.imshow(np.rollaxis(masked_contour_arr[:, s, ::-1], 1, 0),
-                   cmap='Pastel1', interpolation='none', alpha=0.5, aspect = aspect)
-
-        plt.axis('off')
-        plt.title(f"{dim}={s}")
-
-    plt.show()
-
-
-# %%

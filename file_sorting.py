@@ -54,8 +54,6 @@ if options.move_file:
 
 dicom_files = glob.glob(os.path.join(options.base_dir, '**/*.dcm*'), recursive=True)
 
-print(f"base_dir: {options.base_dir}\n# of dicoms: {len(dicom_files)}")
-
 def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
     """
     Function
@@ -76,9 +74,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
     """
     path_list = [dest_dir, patientID]
     
-    print(dicom_file)
-
-    if subfolder:
+if subfolder:
         path_list.append(subfolder)
 
     new_path = os.path.join(*path_list)
