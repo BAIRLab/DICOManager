@@ -1,6 +1,8 @@
+python >= 3.7.3
 glob2 >= 0.6
 pydicom >= 1.2.0
 scipy >= 1.1.0
 scikit-image >= 0.14.1
 numpy >= 1.17
 pandas >= 0.24.2
+tqdm >= 4.41.1
