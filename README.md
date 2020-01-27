@@ -1,10 +1,12 @@
-# DICOM Processing Library
+# DICOM Pre-processing Library
 
 ## Purpose
 To take DICOM files, imported to /data/imported_data (or another specified location)
 and sorts based by provided MRN list.
 
-User can then reconstruct volumes with the reconstruct.py function.
+User can then reconstruct volumes with the reconstruct.py functions.
+
+Future support for inline, post-stored automatic reconstruction will be added.
 
 ## Prequisites
 ### Packages
@@ -18,25 +20,30 @@ pip install -r requirements.txt
 This libary is designed to function with the following directory tree. Any
 alterations will require changing directory locations within file_sorting.py.
 
+Any non-DICOM files, or those with corrupted headers will be moved to the
+'rejected_files' director
+
+Future versions may include a script to create the proper file tree in
+linux / unix systems.
+
 ```
-parent directory
+data / base directory
 ├── imported_data
-|   ├── rejected_files
-│   └── <file>.dcm
+│   └──  <file>.dcm
 ├── DICOManager
 |   ├── <project>.csv
-|   ├── <countour names>.json
-|   ├── requirements.txt 
-|   ├── clean_rtstructs.py 
-│   ├── recon_sorted.py
+│   ├── modality.csv
 │   ├── reconstruction.py
 |   └── file_sorting.py
+├── rejected_files
+|   └── *.dcm
 └── sorted_data
     └── <project>
         └── MRN0
-            ├── MODAILITY0
-            └── MODAILITY1
-                └── *.dcm
+            └── DATE0 (Optional)
+                ├── MODAILITY0
+                └── MODAILITY1
+                    └── *.dcm
  ```
 
 ## Project Overview
@@ -46,73 +53,26 @@ Required libraries for pip install, see above for guide
 ### file_sorting.py
 Initally imported data of just DICOM files will be dumped into imported_data.
 From which, sorting cam be completed for a given <project>. Sorting is completed
-via a <project>.csv of MRN values and sorts them by MRN and then modality.
-It is recommended for PHI confidentiality, that MRNs are replaced by anonymously
-coded numbers per patient.
+via a <project>.csv of MRN values and sorts them by MRN and date (if desired),
+and then modality. It is recommended for PHI confidentiality, that MRNs are
+replaced by anonymously coded numbers per patient.
 
-Any non-dicom files will be moved to ./rejected_files, to prevent read failures.
-
-Modalities will be choosen from the standard DICOM molalities.
+Modalities are chosen from the modality.csv. Unique encodings can be provided,
+with mapping of first row to directories of the second row.
 
 Parsed arguments for this function include:
 ```
--b, --base: str (Default: /data/imported_data/)
-	A path to a directory containing the unsorted files to be sorted 
--c, --csv : str
-	A path to a .csv file of the MRNs to be sorted. The .csv should be
-	formatted like example.csv
--m, --move: bool (Default: False)
-	A boolean to designate if the files should be move instead of
-	copied to the project destination directory
--p, --project_dest: str (Default: /data/sorted_data)
-	A path to a destination for the sorted files
-```
-### recon_sorted.py
-This function is a script to apply the reconstruction.py functions to a 
-sorted project directory. 
-
-Parsed arguements for this function include:
-```
--b, --base: str
-	A path to the sorted project directory
+-a, --alt: str
+    Alternative directory of .dcm files that will be recursively unpacked and
+    copied into imported_data/ before being sorted into sorted_data/
+-b, --base: str (Default : pwd)
+    Specify the base directory that sorting is occuring.  
 -c, --csv: str
-	A path to a .csv file in the format of example.csv, indicating
-	the MRN values to be reconstructed
--d, --dest_dir: str
-	A path to a file where the final .npy volumes will be stored
--j, --json: str
-	A path to a .json file for the contour name dictionary to 
-	map contour names to a common name
--p, --project_name: str
-	A string representing the name to append to the front of the
-	saved .npy volume
+    Specify the path to a .csv file contained within sort_csv directory
+-d, --date: bool
+    Specify if sorting below MRN should include date before modality.
+    Hierarchy is AcquisitionDate then StudyDate
 ```
-
-### clean_rtstructs.py
-If specified, this function will move all but the newest RTSTRUCT from a
-sorted patient directory for simpler management of redunant outdate rt files.
-If specified the remaining strutures and be printed.
-
-Parsed arguements for this function include:
-```
--b, --base: str
-	A path to the sorted project directory
--c, --csv: str
-	A path to a .csv file in the format of example.csv, indicating
-	the MRN values to be reconstructed
--d, --dest_dir: str
-	A path to a file where the final .npy volumes will be stored
--j, --json: str	
-	A path toa .json file for the contour name dictionary to 
-	map contour names to a common name
--s, --summary: bool
-	Prints the names of the remaining RTSTRUCT ROIs
--v, --verbose: bool
-	Prints the files and their relocated path
--r, --read_only: bool
-	Only lists the ROIs in the RTSTRUCTs in the base directory
-```
-
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of

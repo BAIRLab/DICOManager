@@ -91,6 +91,8 @@ parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Directory containing unsorted files', default='/data/imported_data/')
 parser.add_option('-c', '--csv', action='store', dest='csv_file',
                   help='MRN csv to sort from, should be located in -b', default=None)
+parser.add_option('-d', '--date', action='store_true', dest='date',
+                  help='sort modalities by date', default=False)
 parser.add_option('-m', '--move', action='store_true', dest='move_file',
                   help='Move instead of default of copy', default=False)
 parser.add_option('-p', '--project-dest', action='store', dest='project_dir',
