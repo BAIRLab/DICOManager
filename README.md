@@ -76,6 +76,54 @@ Parsed arguments for this function include:
     Specify if sorting below MRN should include date before modality.
     Hierarchy is AcquisitionDate then StudyDate
 ```
+
+
+### recon_sorted.py
+This function is a script to apply the reconstruction.py functions to a
+sorted project directory.
+
+Parsed arguements for this function include:
+```
+-b, --base: str
+        A path to the sorted project directory
+-c, --csv: str
+        A path to a .csv file in the format of example.csv, indicating
+        the MRN values to be reconstructed
+-d, --dest_dir: str
+        A path to a file where the final .npy volumes will be stored
+-j, --json: str
+        A path to a .json file for the contour name dictionary to
+        map contour names to a common name
+-p, --project_name: str
+        A string representing the name to append to the front of the
+        saved .npy volume
+```
+
+### clean_rtstructs.py
+If specified, this function will move all but the newest RTSTRUCT from a
+sorted patient directory for simpler management of redunant outdate rt files.
+If specified the remaining strutures and be printed.
+
+Parsed arguements for this function include:
+```
+-b, --base: str
+        A path to the sorted project directory
+-c, --csv: str
+        A path to a .csv file in the format of example.csv, indicating
+        the MRN values to be reconstructed
+-d, --dest_dir: str
+        A path to a file where the final .npy volumes will be stored
+-j, --json: str
+        A path toa .json file for the contour name dictionary to
+        map contour names to a common name
+-s, --summary: bool
+        Prints the names of the remaining RTSTRUCT ROIs
+-v, --verbose: bool
+        Prints the files and their relocated path
+-r, --read_only: bool
+        Only lists the ROIs in the RTSTRUCTs in the base directory
+```
+
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of
