@@ -47,13 +47,13 @@ class FileName:
     def __post_init__(self):
         self.project, _, self.mrn = self.fullpath.rpartition('/')
         
-        if options.project:
-            self.project = options.project
-
         mod_list = ['MR', 'CT', 'PET', 'RTSTRUCT', 'RTDOSE']
 
         path_list = [[self.project, self.mrn, x, '*.dcm']
                         for x in mod_list]
+        
+        if options.project:
+            self.project = options.project
 
         search_paths = [os.path.join(*x) for x in path_list]
 
@@ -76,10 +76,10 @@ parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Directory with sorted data to reconstruct', default=None)
 parser.add_option('-c', '--csv', action='store', dest='csv_file',
                   help='MRN list to reconstruct', default=None)
-parser.add_option('-j', '--json', action='store', dest='contour_list',
-                  help='Path to json of dictionary of RTSTRUCTS to reconstruct', default=None)
 parser.add_option('-d', '--dest_dir', action='store', dest='dest_dir',
                   help='Directory to save numpy arrays', default=None)
+parser.add_option('-j', '--json', action='store', dest='contour_list',
+                  help='Path to json of dictionary of RTSTRUCTS to reconstruct', default=None)
 parser.add_option('-p', '--project_name', action='store', dest='project',
                     help='Project name to prepend to files', default=None)
  
@@ -91,7 +91,6 @@ if not options.base_dir:
 if not options.dest_dir:
     options.dest_dir = options.base_dir
 
-# File tree aside from dicoms. Assumes nothing but dicoms in the sorted directories
 file_tree = glob(os.path.join(options.base_dir, '**/*[!.dcm]'), recursive=True)
 
 with open(options.csv_file, mode='r') as MRN_csv:
@@ -102,6 +101,7 @@ pat_folders = list(set([df.rpartition('/')[0]
 
 for path in tqdm(pat_folders):
     patient_group = FileName(path)
+
     mr, ct, pet, rts, dose = [[] for _ in range(5)]
 
     if patient_group.MR:
@@ -126,6 +126,7 @@ for path in tqdm(pat_folders):
                 }
     if not os.path.exists(options.dest_dir):
         os.makedirs(options.dest_dir)
+
     np.save(Path(options.dest_dir) / 
             (patient_group.project + '_' + patient_group.mrn),
             pool_dict)
