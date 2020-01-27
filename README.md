@@ -60,6 +60,9 @@ replaced by anonymously coded numbers per patient.
 Modalities are chosen from the modality.csv. Unique encodings can be provided,
 with mapping of first row to directories of the second row.
 
+Modalities will be choosen from the standard DICOM molalities, unless 'CBCT' is
+in the SeriesDesecription, in which the .dcm files will be stored under CBCT.
+
 Parsed arguments for this function include:
 ```
 -a, --alt: str
@@ -76,7 +79,7 @@ Parsed arguments for this function include:
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of
-patient .dcm files of a given modality and returns a reconstructed volume
+patient .dcm files of a given modality and returns a reconstructed volume.
 
 #### PET: pet
 Calculates the time corrected SUVbw PET value for the registered CT coordinate
@@ -88,10 +91,13 @@ Reconstuction is done at original image coordinates. Future work will include
 projection of CBCT into CT coordinate space.
 
 #### DOSE : dose
-Reconstruction of Pinnacle 11.0 dose files into registered CT coordinate space
+Reconstruction of Pinnacle 11.0 dose files into registered CT coordinate space.
 
-#### RTStruct : struct
-RTStruct files are saved as a list of arrays, but the dimensions are
+#### RTSTRUCT : struct
+RTSTRUCT files are saved as a list of arrays, but the dimensions are
 (number-of-masks, x, y, z). Each element in the arrays are boolean. Masks are
 returned in order as specified, except in cases where mask is not present in
 the RTDOSE file.
+
+#### MRI: mri
+Creates an MRI volume and returns a numpy array of float32 values.
