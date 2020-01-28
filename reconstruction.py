@@ -1,6 +1,4 @@
 #!/usr/bin/python3
-
-# %%
 from scipy.interpolate import RegularGridInterpolator
 from pathlib import Path
 import skimage.draw as skdraw
@@ -15,10 +13,6 @@ __author__ = ["Evan Porter", "David Solis", "Ron Levitin"]
 __license__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
-
-# Ron's PLANNED CHANGES
-# Move the path-handling out of the reconstruction functions.
-# ct, mri, pet, rtstruct should accept a path and be assured that it is receiving the correct path
 
 
 def _nearest(array, value):
@@ -60,8 +54,6 @@ def _key_list_creator(key_list, *args):
         return key_list.index(*args)
     return new_key
 
-# %%
-
 
 def _slice_thickness(dcm0, dcm1):
     """
@@ -94,7 +86,6 @@ def _slice_thickness(dcm0, dcm1):
     return abs((loc1-loc0) / (inst1-inst0))
 
 
-# %%
 def _img_dims(dicom_list):
     """
     Function
@@ -153,8 +144,6 @@ def _img_dims(dicom_list):
 
     return thickness, round(n_slices), low[0], high[0], flip
 
-
-# %%
 
 def _d_max_coords(patient_path, dose_volume, printing=True):
     """
@@ -289,18 +278,27 @@ def _d_max_check(path, volume, printing):
 
     return np.array(offset, dtype=int)
 
-# %%
 
-
-def _find_series_slices(path, find_associated=False, force=False):
+def _find_series_slices(path, find_associated=False):
     """
-    _find_series_slices: Given the path to a slice of a volume, checks all files within the directory for the remaining slices of a given volume using the SeriesInstanceUID
+    Function
+    ----------
+    Given the path to a slice of a volume, checks all files within the
+        directory for the remaining slices of a given volume using
+        the SeriesInstanceUID
 
-    Args:
-        path (pathlib.Path]): Path to a volumetric dicom slice
+    Paramters
+    ----------
+    path : pathlib.Path
+        A path to a DICOM image volume slice
+    find_associate : bool (Default = False)
+        A boolean designating finding a volume associated to a
+            associated RTSTRUCT based on SeriesInstanceUID
 
-    Returns:
-        volume_slice_list (list): List of files belonging to the volume
+    Returns
+    ----------
+    volume_slice_list : list
+        A list of files belonging to an image volume
     """
     if not isinstance(path, Path):
         path = Path(path)
@@ -377,9 +375,9 @@ def _find_series_slices(path, find_associated=False, force=False):
 
     volume_slice_list.sort()
 
-    return(volume_slice_list)
+    return volume_slice_list
 
-# %%
+
 def mri(patient_path, path_mod=False, raises=False):
     """
     Function
@@ -442,15 +440,13 @@ def mri(patient_path, path_mod=False, raises=False):
             image_array[:, :, loc] = ds.pixel_array
     except IndexError:
         if raises:
-            raise IndexError(f'There is a discontinuity in {patient_path}/CT')
+            raise IndexError(f'There is a discontinuity in {patient_path}/MR')
         else:
-            print(f'This is a discontinuity in {patient_path}/CT')
+            print(f'This is a discontinuity in {patient_path}/MR')
     else:
         if not flip:
             image_array = image_array[..., ::-1]
     return image_array
-
-# %%
 
 
 def struct(patient_path, wanted_contours, raises=False):
@@ -581,8 +577,6 @@ def struct(patient_path, wanted_contours, raises=False):
                for x in sorted(contours, key=key_list)]
     return np.array(ordered, dtype='bool')
 
-
-# %%
 
 def ct(patient_path, path_mod=None, HU=False, raises=False):
     """
@@ -933,15 +927,30 @@ def dose(patient_path, raises=False):
 
         return full_vol * float(dose_dcm.DoseGridScaling)
 
+
 # Code below is for viewing volumes
 
 
-def show_volume(volume_array, rows=2, cols=6, figsize='none'):
-    if figsize == 'none':
+def show_volume(volume_array, rows=2, cols=6, figsize=None):
+    """
+    Function
+    ----------
+    Displays the given image volume
+
+    Paramters
+    ----------
+    volume_array : np.array
+        Numpy arrays designating image and contour volumes
+    rows, cols : int (Default: rows = 2, cols = 6)
+        Intergers representing the rows, columns of the displayed images
+    figsize : int (Default = None)
+        An integer representing the pyplot figure size    
+    """
+    if not figsize:
         figsize = (cols * 4, rows * 3)
 
     plt.figure(figsize=figsize)
-    _, _, zmax = volume_array.shape
+    zmax = volume_array.shape[-1]
     imgs_out = rows * cols
     skip = zmax // imgs_out
     extra = zmax % imgs_out
@@ -953,19 +962,32 @@ def show_volume(volume_array, rows=2, cols=6, figsize='none'):
         plt.title(f"z={z}")
     plt.show
 
-# %%
 
-def show_contours(volume_arr, contour_arr, rows=2, cols=6, orientation = 'axial', aspect=4/1.48375, figsize='none'):
+def show_contours(volume_arr, contour_arr, rows=2, cols=6,
+                  orientation='axial', aspect=3, figsize=None):
     """
-    Shows 2d MR img with contour
-    Inputs
-        img_arr: 2d np.array image array with pixel intensities
-        contour_arr: 2d np.array contour array with pixels of 1 and 0
+    Function
+    ----------
+    Displays a volume with overlaid contours
+
+    Paramters
+    ----------
+    volume_arr, contour_arr : np.array
+        Numpy arrays designating image and contour volumes     
+    rows, cols : int (Default: rows = 2, cols = 2)
+        Intergers representing the rows, columns of the displayed images
+    aspect : float (Default = 3)
+        An aspect ratio for image display 
+    orientation : str (Default = 'axial')
+        Designates the axis from which to display the images. Options include
+            'axial', 'sagittal' and 'coronal'
+    figsize : int (Default = None)
+        An integer representing the pyplot figure size    
     """
 
     # Currently hard coded the aspect ratio for MRI context. May need to adapt it to make it more adaptible.
 
-    if figsize == 'none':
+    if not figsize:
         figsize = (cols * 4, rows * 3)
 
     masked_contour_arr = np.ma.masked_equal(contour_arr, 0)
@@ -983,6 +1005,8 @@ def show_contours(volume_arr, contour_arr, rows=2, cols=6, orientation = 'axial'
     elif orientation == "sagittal":
         max_dim = ymax
         dim = "y"
+    else:
+        raise NameError('The orientation provided is not an option')
 
     skip = max_dim // imgs_out
     extra = max_dim % imgs_out
@@ -994,20 +1018,20 @@ def show_contours(volume_arr, contour_arr, rows=2, cols=6, orientation = 'axial'
         if orientation == "axial":
             plt.imshow(volume_arr[:,:,s], cmap='gray', interpolation='none')
             plt.imshow(masked_contour_arr[:,:,s],
-                   cmap='Pastel1', interpolation='none', alpha=0.5)
+                       cmap='Pastel1', interpolation='none', alpha=0.5)
         elif orientation == "coronal":
-            plt.imshow(np.rollaxis(volume_arr[s,:,::-1], 1, 0), cmap='gray', interpolation='none', aspect = aspect)
+            plt.imshow(np.rollaxis(volume_arr[s,:,::-1], 1, 0), cmap='gray',
+                       interpolation='none', aspect = aspect)
             plt.imshow(np.rollaxis(masked_contour_arr[s,:,::-1], 1, 0),
-                   cmap='Pastel1', interpolation='none', alpha=0.5, aspect = aspect)
+                       cmap='Pastel1', interpolation='none', alpha=0.5, aspect = aspect)
         elif orientation == "sagittal":
-            plt.imshow(np.rollaxis(volume_arr[:, s, ::-1], 1, 0), cmap='gray', interpolation='none', aspect = aspect)
+            plt.imshow(np.rollaxis(volume_arr[:, s, ::-1], 1, 0), cmap='gray',
+                       interpolation='none', aspect = aspect)
             plt.imshow(np.rollaxis(masked_contour_arr[:, s, ::-1], 1, 0),
-                   cmap='Pastel1', interpolation='none', alpha=0.5, aspect = aspect)
+                       cmap='Pastel1', interpolation='none', alpha=0.5, aspect = aspect)
 
         plt.axis('off')
         plt.title(f"{dim}={s}")
 
     plt.show()
 
-
-# %%

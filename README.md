@@ -60,6 +60,9 @@ replaced by anonymously coded numbers per patient.
 Modalities are chosen from the modality.csv. Unique encodings can be provided,
 with mapping of first row to directories of the second row.
 
+Modalities will be choosen from the standard DICOM molalities, unless 'CBCT' is
+in the SeriesDesecription, in which the .dcm files will be stored under CBCT.
+
 Parsed arguments for this function include:
 ```
 -a, --alt: str
@@ -73,10 +76,58 @@ Parsed arguments for this function include:
     Specify if sorting below MRN should include date before modality.
     Hierarchy is AcquisitionDate then StudyDate
 ```
+
+
+### recon_sorted.py
+This function is a script to apply the reconstruction.py functions to a
+sorted project directory.
+
+Parsed arguements for this function include:
+```
+-b, --base: str
+        A path to the sorted project directory
+-c, --csv: str
+        A path to a .csv file in the format of example.csv, indicating
+        the MRN values to be reconstructed
+-d, --dest_dir: str
+        A path to a file where the final .npy volumes will be stored
+-j, --json: str
+        A path to a .json file for the contour name dictionary to
+        map contour names to a common name
+-p, --project_name: str
+        A string representing the name to append to the front of the
+        saved .npy volume
+```
+
+### clean_rtstructs.py
+If specified, this function will move all but the newest RTSTRUCT from a
+sorted patient directory for simpler management of redunant outdate rt files.
+If specified the remaining strutures and be printed.
+
+Parsed arguements for this function include:
+```
+-b, --base: str
+        A path to the sorted project directory
+-c, --csv: str
+        A path to a .csv file in the format of example.csv, indicating
+        the MRN values to be reconstructed
+-d, --dest_dir: str
+        A path to a file where the final .npy volumes will be stored
+-j, --json: str
+        A path toa .json file for the contour name dictionary to
+        map contour names to a common name
+-s, --summary: bool
+        Prints the names of the remaining RTSTRUCT ROIs
+-v, --verbose: bool
+        Prints the files and their relocated path
+-r, --read_only: bool
+        Only lists the ROIs in the RTSTRUCTs in the base directory
+```
+
 ### reconstruction.py
 Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of
-patient .dcm files of a given modality and returns a reconstructed volume
+patient .dcm files of a given modality and returns a reconstructed volume.
 
 #### PET: pet
 Calculates the time corrected SUVbw PET value for the registered CT coordinate
@@ -88,10 +139,13 @@ Reconstuction is done at original image coordinates. Future work will include
 projection of CBCT into CT coordinate space.
 
 #### DOSE : dose
-Reconstruction of Pinnacle 11.0 dose files into registered CT coordinate space
+Reconstruction of Pinnacle 11.0 dose files into registered CT coordinate space.
 
-#### RTStruct : struct
-RTStruct files are saved as a list of arrays, but the dimensions are
+#### RTSTRUCT : struct
+RTSTRUCT files are saved as a list of arrays, but the dimensions are
 (number-of-masks, x, y, z). Each element in the arrays are boolean. Masks are
 returned in order as specified, except in cases where mask is not present in
 the RTDOSE file.
+
+#### MRI: mri
+Creates an MRI volume and returns a numpy array of float32 values.
