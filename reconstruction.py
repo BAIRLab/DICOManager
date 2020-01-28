@@ -287,11 +287,11 @@ def _find_series_slices(path, find_associated=False):
         directory for the remaining slices of a given volume using
         the SeriesInstanceUID
 
-    Paramters
+    Parameters
     ----------
     path : pathlib.Path
         A path to a DICOM image volume slice
-    find_associate : bool (Default = False)
+    find_associated : bool (Default = False)
         A boolean designating finding a volume associated to a
             associated RTSTRUCT based on SeriesInstanceUID
 

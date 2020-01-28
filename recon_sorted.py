@@ -1,21 +1,54 @@
 #!/usr/bin/python3
 
 import os
-from glob import glob as glob
 import csv
 import optparse
 import json
+import reconstruction
+import pydicom
+import numpy as np
+from glob import glob as glob
 from tqdm import tqdm
 from pathlib import Path
 from dataclasses import dataclass
 from dataclasses import fields
-import reconstruction
-import numpy as np
 
 __author__ = ["Evan Porter", "Ron Levitin"]
 __license__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
+
+def _img_dims(file_path, modality):
+    """
+    _img_dims gets the aspect ratio
+    
+    Parameters
+    ----------
+    file_path : str or pathlib.PosixPath
+        Path to patient directory with volumes
+    modality : str
+        String of the modality type to insert into the directory structure
+    
+    Returns
+    -------
+    asepct : Tuple
+        (*Pixel Spacing, SliceThickness) for use in setting aspect ratio in saggital/coronal plots
+    """
+    # If path is a string, convert to pathlib.Path
+    if not isinstance(file_path, Path):
+        file_path = Path(file_path).expanduser()
+
+    # find the RTSTRUCT dcm file
+    if file_path.is_file() and file_path.suffix == ".dcm":
+        struct_file = file_path
+    elif file_path.is_dir():
+        file_path_sub = file_path.joinpath(modality)
+        if file_path_sub.is_dir():
+            file_to_read = next(file_path_sub.iterdir())
+
+    ds = pydicom.dcmread(str(file_to_read), stop_before_pixels=True)
+    aspect = (*ds.PixelSpacing, ds.SliceThickness)
+    return aspect
 
 @dataclass
 class FileCollect:
@@ -102,10 +135,13 @@ for path in tqdm(pat_folders):
 
     if patient_group.MR:
         mr = reconstruction.mri(path)
+        aspect = _img_dims(path, 'MR') # 
     if patient_group.CT:
         ct = reconstruction.ct(path)
+        aspect = _img_dims(path, 'CT')
     if patient_group.PET:
         pet = reconstruction.pet(path)
+        aspect = _img_dims(path, 'PET')
     if patient_group.RTSTRUCT:
         if not options.contour_list:
             raise NameError('A .csv of contours must be specified with -l')
@@ -118,11 +154,12 @@ for path in tqdm(pat_folders):
                  'CT': ct,
                  'PET': pet,
                  'RTSTRUCT': rts,
-                 'RTDOSE': dose
+                 'RTDOSE': dose,
+                 'ASPECT': aspect
                 }
     if not os.path.exists(options.dest_dir):
         os.makedirs(options.dest_dir)
 
     np.save(Path(options.dest_dir) / 
-            (patient_group.project + '_' + patient_group.mrn),
+            (options.project + '_' + patient_group.mrn),
             pool_dict)
