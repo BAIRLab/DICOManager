@@ -8,6 +8,7 @@ import glob
 import struct
 import csv
 import optparse
+import traceback
 from tqdm import tqdm
 
 
@@ -33,7 +34,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
         A subfolder to be placed within the file_path
     """
     path_list = [dest_dir, patientID]
-    
+
     if subfolder:
         path_list.append(subfolder)
 
@@ -44,7 +45,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
 
     _, filename = os.path.split(dicom_file)
     destination = os.path.join(new_path, filename)
-    
+
     if options.move_file:
         shutil.move(dicom_file, destination)
     else:
@@ -74,16 +75,15 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
 
     try:
         if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list):
-            if "CBCT" in ds.StudyDescription:
+            if "StudyDescription" in ds and "CBCT" in ds.StudyDescription:
                 subfolder = "CBCT"
             else:
                 subfolder = ds.Modality
             write_params.update({"subfolder": subfolder})
             _write_to_path(**write_params)
-    except ValueError:
-        pass
-
-
+    except ValueError or AttributeError:
+        print(f"Patient: {ds.PatientID}\nModality: {ds.Modality}")
+        
 # Command line starts below here
 parser = optparse.OptionParser()
 
@@ -119,6 +119,7 @@ if options.move_file:
             bad_input = True
 
 dicom_files = glob.glob(os.path.join(options.base_dir, '**/*.dcm*'), recursive=True)
+dicom_files.sort(key=os.path.getmtime)
 
 try:
     csv_path = os.path.join(options.csv_file)
@@ -136,4 +137,4 @@ else:
             _specific_sort(dicom_file=dicom_file,
                            dest_dir=options.project_dir,
                            cohort_list=cohort_list,
-                           ds=ds) 
+                           ds=ds)
