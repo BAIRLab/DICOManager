@@ -8,6 +8,7 @@ import glob
 import struct
 import csv
 import optparse
+import traceback
 from tqdm import tqdm
 
 
@@ -73,17 +74,16 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
                     }
 
     try:
-        if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list): 
-            if "CBCT" in ds.StudyDescription:
+        if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list):
+            if "StudyDescription" in ds and "CBCT" in ds.StudyDescription:
                 subfolder = "CBCT"
             else:
                 subfolder = ds.Modality
             write_params.update({"subfolder": subfolder})
             _write_to_path(**write_params)
-    except ValueError:
-        pass
-
-
+    except ValueError or AttributeError:
+        print(f"Patient: {ds.PatientID}\nModality: {ds.Modality}")
+        
 # Command line starts below here
 parser = optparse.OptionParser()
 
@@ -119,6 +119,7 @@ if options.move_file:
             bad_input = True
 
 dicom_files = glob.glob(os.path.join(options.base_dir, '**/*.dcm*'), recursive=True)
+dicom_files.sort(key=os.path.getmtime)
 
 try:
     csv_path = os.path.join(options.csv_file)
