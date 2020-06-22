@@ -110,13 +110,13 @@ mrns.sort()
 
 if not options.read_only:
     for mrn in mrns:
-        struct_list = glob(os.path.join(options.base_dir, mrn, 'RTSTRUCT/*.dcm'))
+        struct_list = glob(os.path.join(options.base_dir, srt(mrn), 'RTSTRUCT/*.dcm'))
         if len(struct_list) > 1:
             times = [_creation_posix(struct) for struct in struct_list] 
             _ = struct_list.pop(times.index(max(times)))
             
             for struct in struct_list:
-                dest = os.path.join(options.dest_dir, mrn)
+                dest = os.path.join(options.dest_dir, str(mrn))
                 if not os.path.exists(dest):
                     os.makedirs(dest)
                 if options.verbose:
@@ -134,7 +134,7 @@ if options.summary or options.contour_list:
     print(f'        MRN   : # :   Contour Names')
     
     for mrn in mrns:
-        struct_list = glob(os.path.join(options.base_dir, mrn, 'RTSTRUCT/*.dcm'))
+        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'))
         if options.read_only:
             count_files = []
             for i, f in enumerate(struct_list):

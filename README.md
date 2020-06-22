@@ -40,10 +40,9 @@ data / base directory
 └── sorted_data
     └── <project>
         └── MRN0
-            └── DATE0 (Optional)
-                ├── MODAILITY0
-                └── MODAILITY1
-                    └── *.dcm
+            ├── MODAILITY0
+            └── MODAILITY1
+                └── *.dcm
  ```
 
 ## Project Overview
@@ -65,16 +64,14 @@ in the SeriesDesecription, in which the .dcm files will be stored under CBCT.
 
 Parsed arguments for this function include:
 ```
--a, --alt: str
-    Alternative directory of .dcm files that will be recursively unpacked and
-    copied into imported_data/ before being sorted into sorted_data/
 -b, --base: str (Default : pwd)
     Specify the base directory that sorting is occuring.  
 -c, --csv: str
     Specify the path to a .csv file contained within sort_csv directory
--d, --date: bool
-    Specify if sorting below MRN should include date before modality.
-    Hierarchy is AcquisitionDate then StudyDate
+-m, --move: bool
+    Specify if the dicom files are moved or copied to the sorted directory
+-p, --project-dest: str (Default : '/data/sorted_data/')
+    Specify the location of the sorted dicom directory
 ```
 
 

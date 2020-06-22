@@ -21,14 +21,14 @@ __status__ = "Research"
 def _img_dims(file_path, modality):
     """
     _img_dims gets the aspect ratio
-    
+
     Parameters
     ----------
     file_path : str or pathlib.PosixPath
         Path to patient directory with volumes
     modality : str
         String of the modality type to insert into the directory structure
-    
+
     Returns
     -------
     asepct : Tuple
@@ -71,7 +71,7 @@ class FileCollect:
     RTSTRUCT: list = None
     RTDOSE: list = None
 
-    
+
     def __repr__(self):
         unpack = ":".join(str(len(self[x])) for x in self)
         return (f'{self.mrn}-{unpack}')
@@ -111,7 +111,7 @@ parser.add_option('-j', '--json', action='store', dest='contour_list',
                   help='Path to json of dictionary of RTSTRUCTS to reconstruct', default=None)
 parser.add_option('-p', '--project_name', action='store', dest='project',
                     help='Project name to prepend to files', default=None)
- 
+
 options, args = parser.parse_args()
 
 if not options.base_dir:
@@ -123,7 +123,7 @@ if not options.dest_dir:
 file_tree = glob(os.path.join(options.base_dir, '**/*[!.dcm]'), recursive=True)
 
 with open(options.csv_file, mode='r') as MRN_csv:
-    filter_list = list(x[0] for x in csv.reader(MRN_csv))[1:]
+    filter_list = list(str(x[0][1:-1]) for x in csv.reader(MRN_csv))[1:]
 
 pat_folders = list(set([df.rpartition('/')[0]
                         for df in file_tree if df.split('/')[-2] in filter_list]))
@@ -135,7 +135,7 @@ for path in tqdm(pat_folders):
 
     if patient_group.MR:
         mr = reconstruction.mri(path)
-        aspect = _img_dims(path, 'MR') # 
+        aspect = _img_dims(path, 'MR') #
     if patient_group.CT:
         ct = reconstruction.ct(path)
         aspect = _img_dims(path, 'CT')
@@ -150,6 +150,7 @@ for path in tqdm(pat_folders):
         rts = reconstruction.struct(path, contour_list)
     if patient_group.RTDOSE:
         dose = reconstruction.dose(path)
+
     pool_dict = {'MR': mr,
                  'CT': ct,
                  'PET': pet,
@@ -160,6 +161,9 @@ for path in tqdm(pat_folders):
     if not os.path.exists(options.dest_dir):
         os.makedirs(options.dest_dir)
 
-    np.save(Path(options.dest_dir) / 
+    if not options.project:
+        options.project = patient_group.project
+
+    np.save(Path(options.dest_dir) /
             (options.project + '_' + patient_group.mrn),
             pool_dict)

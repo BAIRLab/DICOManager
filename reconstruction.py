@@ -43,6 +43,8 @@ def _key_list_creator(key_list, *args):
     ----------
     key_list : list
         A list of the desired index order of structures, if present
+    *args : list of arguments
+        Arguements to be passed to key_list.index(*)
 
     Returns
     ----------
@@ -101,9 +103,11 @@ def _img_dims(dicom_list):
     Returns
     ----------
     (thickness, n_slices, low, high, flip) : (float, int, float, float, boolean)
-        A tuple of values corresponding to the slice thickness,
-            total number of slices and the high / low value of the
-            image position in patient coordinates
+        0.Slice thickness computed from dicom locations, not header
+        1.Number of slices, computed from dicom locations, not header
+        2.Patient coordinate system location of lowest instance
+        3.Patient coordinate system location of highest instance
+        4.Boolean indicating if image location / instances are flipped
 
     Notes
     ----------
@@ -160,12 +164,12 @@ def _d_max_coords(patient_path, dose_volume, printing=True):
     dose_volume : array
         An array of the dose volume, as returned form the dose
             reconstruction function
-    printing : bool (Default=True)
+    printing : bool (Default = True)
         Prints a formatting of the results, along with the voxel size
 
     Returns
     ----------
-    (volume_max, ct_max_mm, dose_max_mm, ct_voxel_size) : tuple
+    (volume_max, ct_max_mm, dose_max_mm, ct_voxel_size) : (float, float, float, float)
         0.The dose maximum coordinates (x, y, z) in voxels of the volume
         1.The dose maximum coordinates (x, y, z) in mm relative to isocenter
             in the CT coordinate system
@@ -259,7 +263,7 @@ def _d_max_check(path, volume, printing):
     dose_volume : array
         An array of the dose volume, as returned form the dose
             reconstruction function
-    printing : bool (Default=True)
+    printing : bool (Default = True)
         Prints a formatting of the results, along with the voxel size
 
     Returns
@@ -514,22 +518,23 @@ def struct(patient_path, wanted_contours, raises=False):
     # Need the associated volume for the image space information
     volume_slice_files = _find_series_slices(
         str(struct_file), find_associated=True)
-    volume_dcm = pydicom.dcmread(
-        volume_slice_files[0], stop_before_pixels=True)
 
-    dimensions = (volume_dcm.Rows, volume_dcm.Columns, len(volume_slice_files))
+    for vfile in volume_slice_files:
+        volume_dcm = pydicom.dcmread(vfile, stop_before_pixels=True)
+        if volume_dcm.InstanceNumber == 1:
+            break
+
+    _, vol_n_z, _, _, _ = _img_dims(volume_slice_files)
+    dimensions = (volume_dcm.Rows, volume_dcm.Columns, vol_n_z)
     img_origin = np.array(volume_dcm.ImagePositionPatient)
     ix, iy, iz = (*volume_dcm.PixelSpacing, volume_dcm.SliceThickness)
 
     # inner function to convert the points to coords
     def _points_to_coords(contour_data, img_origin, ix, iy, iz):
         points = np.array(
-            np.round(
-                (contour_data - img_origin) / [ix, iy, abs(iz)]
-                    ), dtype=int
-                        )
+            np.round(abs(contour_data - img_origin) / [ix, iy, abs(iz)]), dtype=int)
         return points
-        
+
 
     # This function requires a list of the contours being looked for. Can be dict or list
     if type(wanted_contours) is dict:
@@ -944,7 +949,7 @@ def show_volume(volume_array, rows=2, cols=6, figsize=None):
     rows, cols : int (Default: rows = 2, cols = 6)
         Intergers representing the rows, columns of the displayed images
     figsize : int (Default = None)
-        An integer representing the pyplot figure size    
+        An integer representing the pyplot figure size
     """
     if not figsize:
         figsize = (cols * 4, rows * 3)
@@ -973,16 +978,16 @@ def show_contours(volume_arr, contour_arr, rows=2, cols=6,
     Paramters
     ----------
     volume_arr, contour_arr : np.array
-        Numpy arrays designating image and contour volumes     
+        Numpy arrays designating image and contour volumes
     rows, cols : int (Default: rows = 2, cols = 2)
         Intergers representing the rows, columns of the displayed images
     aspect : float (Default = 3)
-        An aspect ratio for image display 
+        An aspect ratio for image display
     orientation : str (Default = 'axial')
         Designates the axis from which to display the images. Options include
             'axial', 'sagittal' and 'coronal'
     figsize : int (Default = None)
-        An integer representing the pyplot figure size    
+        An integer representing the pyplot figure size
     """
 
     # Currently hard coded the aspect ratio for MRI context. May need to adapt it to make it more adaptible.

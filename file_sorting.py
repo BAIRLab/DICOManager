@@ -33,7 +33,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
         A subfolder to be placed within the file_path
     """
     path_list = [dest_dir, patientID]
-    
+
     if subfolder:
         path_list.append(subfolder)
 
@@ -44,7 +44,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
 
     _, filename = os.path.split(dicom_file)
     destination = os.path.join(new_path, filename)
-    
+
     if options.move_file:
         shutil.move(dicom_file, destination)
     else:
@@ -73,7 +73,7 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
                     }
 
     try:
-        if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list):
+        if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list): 
             if "CBCT" in ds.StudyDescription:
                 subfolder = "CBCT"
             else:
@@ -91,8 +91,8 @@ parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Directory containing unsorted files', default='/data/imported_data/')
 parser.add_option('-c', '--csv', action='store', dest='csv_file',
                   help='MRN csv to sort from, should be located in -b', default=None)
-parser.add_option('-d', '--date', action='store_true', dest='date',
-                  help='sort modalities by date', default=False)
+#parser.add_option('-d', '--date', action='store_true', dest='date',
+#                  help='sort modalities by date', default=False)
 parser.add_option('-m', '--move', action='store_true', dest='move_file',
                   help='Move instead of default of copy', default=False)
 parser.add_option('-p', '--project-dest', action='store', dest='project_dir',
@@ -136,4 +136,4 @@ else:
             _specific_sort(dicom_file=dicom_file,
                            dest_dir=options.project_dir,
                            cohort_list=cohort_list,
-                           ds=ds) 
+                           ds=ds)
