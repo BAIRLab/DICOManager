@@ -39,9 +39,9 @@ def _img_dims(file_path, modality):
         file_path = Path(file_path).expanduser()
 
     # find the RTSTRUCT dcm file
-    if file_path.is_file() and file_path.suffix == ".dcm":
-        struct_file = file_path
-    elif file_path.is_dir():
+    #if file_path.is_file() and file_path.suffix == ".dcm":
+    #    struct_file = file_path
+    if file_path.is_dir():
         file_path_sub = file_path.joinpath(modality)
         if file_path_sub.is_dir():
             file_to_read = next(file_path_sub.iterdir())
