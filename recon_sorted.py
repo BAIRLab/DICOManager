@@ -18,6 +18,7 @@ __license__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
 
+
 def _img_dims(file_path, modality):
     """
     _img_dims gets the aspect ratio
@@ -39,9 +40,9 @@ def _img_dims(file_path, modality):
         file_path = Path(file_path).expanduser()
 
     # find the RTSTRUCT dcm file
-    #if file_path.is_file() and file_path.suffix == ".dcm":
-    #    struct_file = file_path
-    if file_path.is_dir():
+    if file_path.is_file() and file_path.suffix == ".dcm":
+        file_to_read = file_path
+    elif file_path.is_dir():
         file_path_sub = file_path.joinpath(modality)
         if file_path_sub.is_dir():
             file_to_read = next(file_path_sub.iterdir())
@@ -49,6 +50,7 @@ def _img_dims(file_path, modality):
     ds = pydicom.dcmread(str(file_to_read), stop_before_pixels=True)
     aspect = (*ds.PixelSpacing, ds.SliceThickness)
     return aspect
+
 
 @dataclass
 class FileCollect:
@@ -65,11 +67,11 @@ class FileCollect:
     path: str
     project: str = None
     mrn: str = None
-    MR: list = None
-    CT: list = None
-    PET: list = None
-    RTSTRUCT: list = None
-    RTDOSE: list = None
+    mr: list = None
+    ct: list = None
+    pet: list = None
+    rtstruct: list = None
+    rtdose: list = None
 
 
     def __repr__(self):
@@ -111,44 +113,48 @@ parser.add_option('-j', '--json', action='store', dest='contour_list',
                   help='Path to json of dictionary of RTSTRUCTS to reconstruct', default=None)
 parser.add_option('-p', '--project_name', action='store', dest='project',
                     help='Project name to prepend to files', default=None)
-
 options, args = parser.parse_args()
 
-if not options.base_dir:
+BASE_DIR = options.base_dir
+CSV_FILE = options.csv_file
+DEST_DIR = options.dest_dir
+CONTOUR_LIST = options.contour_list
+PROJECT = options.project
+
+if not BASE_DIR:
     raise NameError('A sorted project folder must be provided to reconstruct')
 
-if not options.dest_dir:
-    options.dest_dir = options.base_dir
+if not DEST_DIR: 
+    DEST_DIR = BASE_DIR 
 
-file_tree = glob(os.path.join(options.base_dir, '**/*[!.dcm]'), recursive=True)
+file_tree = glob(os.path.join(BASE_DIR, '**/*[!.dcm]'), recursive=True)
 
-with open(options.csv_file, mode='r') as MRN_csv:
-    filter_list = list(str(x[0][1:-1]) for x in csv.reader(MRN_csv))[1:]
+with open(CSV_FILE, mode='r') as mrn_csv:
+    filter_list = list(str(x[0][1:-1]) for x in csv.reader(mrn_csv))[1:]
 
 pat_folders = list(set([df.rpartition('/')[0]
                         for df in file_tree if df.split('/')[-2] in filter_list]))
 
 for path in tqdm(pat_folders):
     patient_group = FileCollect(path)
-
     mr, ct, pet, rts, dose = [[] for _ in range(5)]
 
-    if patient_group.MR:
+    if patient_group.mr:
         mr = reconstruction.mri(path)
-        aspect = _img_dims(path, 'MR') #
-    if patient_group.CT:
+        aspect = _img_dims(path, 'MR')
+    if patient_group.ct:
         ct = reconstruction.ct(path)
         aspect = _img_dims(path, 'CT')
-    if patient_group.PET:
+    if patient_group.pet:
         pet = reconstruction.pet(path)
         aspect = _img_dims(path, 'PET')
-    if patient_group.RTSTRUCT:
-        if not options.contour_list:
+    if patient_group.rtstruct:
+        if not CONTOUR_LIST:
             raise NameError('A .csv of contours must be specified with -l')
-        with open(options.contour_list, mode='r') as json_file:
+        with open(CONTOUR_LIST, mode='r') as json_file:
             contour_list = json.load(json_file)
         rts = reconstruction.struct(path, contour_list)
-    if patient_group.RTDOSE:
+    if patient_group.rtdose:
         dose = reconstruction.dose(path)
 
     pool_dict = {'MR': mr,
@@ -158,12 +164,11 @@ for path in tqdm(pat_folders):
                  'RTDOSE': dose,
                  'ASPECT': aspect
                 }
-    if not os.path.exists(options.dest_dir):
-        os.makedirs(options.dest_dir)
 
-    if not options.project:
-        options.project = patient_group.project
+    if not os.path.exists(DEST_DIR):
+        os.makedirs(DEST_DIR)
 
-    np.save(Path(options.dest_dir) /
-            (options.project + '_' + patient_group.mrn),
-            pool_dict)
+    if not PROJECT:
+        PROJECT = patient_group.project
+
+    np.save(Path(DEST_DIR) / (PROJECT + '_' + patient_group.mrn), pool_dict)
