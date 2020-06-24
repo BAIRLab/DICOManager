@@ -4,15 +4,12 @@
 # write a DICOM RTSTRUCT file that contains predicted contours.
 #
 
-
-# May want to do less specific imports ... 
 import argparse, h5py, numpy as np, os, random, time
 from functools import partial
 from itertools import repeat
 import concurrent.futures
 from pydicom import dataset, read_file, sequence, uid
 
-# Will need to identify how Shapely is used, it is quite slow...
 from shapely import speedups
 from shapely.ops import unary_union
 from shapely.geometry import Polygon, MultiPoint, MultiPolygon
@@ -20,31 +17,43 @@ from shapely.geometry import Polygon, MultiPoint, MultiPolygon
 from skimage.transform import resize
 from skimage.measure import label, regionprops
 
+import tensorflow as tf
+from keras import backend as K
+from keras.models import load_model
+from keras.utils import to_categorical
+
 # Make shapely go fast
 if speedups.available:
     speedups.enable()
 
 # For randomness
-random.seed(datetime.now())
-np.random.seed(datetime.now())
+random.seed(123)
+np.random.seed(123)
 
 # Config parser
 parser = argparse.ArgumentParser(description="Run BEAUNET on a directory of CT images in DICOM format and write an RTSTRUCT with predicted contours")
 parser.add_argument("--input", required=True, help="The directory containing DICOM files to use as input")
+parser.add_argument("--model", required=True, help="The model file to use")
 parser.add_argument('--stats', required=True, help="The directory containing the stats files needed for modeling")
 parser.add_argument("--output", required=True, help="The output file to write")
+parser.add_argument("--gpu_id", required=False, help="The GPU IDs to use for this run")
+parser.add_argument("--batchsize", required=False, type=int, default=16, help="Minibatch size for predictions")
 parser.add_argument("--hierarchical", required=False, action='store_true', help='Run in hierachical mode')
 parser.add_argument("--postprocess", required=False, action='store_true', help='Postprocess contours')
 args = parser.parse_args()
 
+# Config flags
 INPUT_PATH = args.input
+MODEL_PATH = args.model
 STATS_PATH = args.stats
 OUTPUT_FILENAME = args.output
+BATCH_SIZE = args.batchsize
 HIERARCHICAL_MODE = args.hierarchical
 POSTPROCESS = args.postprocess
 
 if args.gpu_id is not None:
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
+
 print('BEAUNET AUTO-CONTOURING SYSTEM')
 print('Opening \'{0:s}\' in {1:s} mode'.format(INPUT_PATH, 'DIRECT' if not HIERARCHICAL_MODE else 'HIERARCHICAL'))
 print('Output to \'{0:s}\''.format(OUTPUT_FILENAME))
@@ -53,6 +62,48 @@ if POSTPROCESS:
     print('POSTPROCESSING is ENABLED')
 else:
     print('POSTPROCESSING is DISABLED')
+
+# Backend setup
+sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
+K.set_session(sess)
+K.set_image_data_format('channels_last') # TF image ordering if needed
+
+# Custom metric functions necessary to load model
+def avg_dice_coef(y_true, y_pred):
+    # Designed for channels-last format (Tensorflow)
+    y_true_shape = K.shape(y_true)
+    y_pred_shape = K.shape(y_pred)
+    y_true_size = y_true_shape[0]*y_true_shape[1]
+    y_pred_size = y_pred_shape[0]*y_pred_shape[1]
+
+    # Change ground truth and predictions to yes/no
+    y_true_boolean = K.one_hot(K.argmax(y_true, -1),y_true_shape[-1])
+    y_pred_boolean = K.one_hot(K.argmax(y_pred, -1),y_pred_shape[-1])
+    y_true_reshaped = K.reshape(y_true_boolean, (y_true_size, y_true_shape[-1]))
+    y_pred_reshaped = K.reshape(y_pred_boolean, (y_pred_size, y_pred_shape[-1]))
+
+    return K.mean((2.0 * K.sum(y_true_reshaped * y_pred_reshaped, axis=0) + 1.0) / (K.sum(y_true_reshaped, axis=0) + K.sum(y_pred_reshaped, axis=0) + 1.0))
+
+
+# Since dictionaries of metrics are no longer supported, this function generates a list of metric function references,
+# each corresponding to the Dice coefficient of a particular class. It uses partial functions internally to select each
+# class in turn. It sets the __name__ property to let Keras/TF figure out which metric is which.
+
+def perclass_dice_coef_metrics(seg_classes):
+    def class_dice_coef(y_true, y_pred, classid=None):
+        assert(classid != None)
+        y_true_f = K.flatten(K.one_hot(K.argmax(y_true, -1), K.shape(y_true)[-1])[:, :, classid])
+        y_pred_f = K.flatten(K.one_hot(K.argmax(y_pred, -1), K.shape(y_pred)[-1])[:, :, classid])
+        return (2. * K.sum(y_true_f * y_pred_f) + 1.0) / (K.sum(y_true_f) + K.sum(y_pred_f) + 1.0)
+    
+    metric_list = []
+    for idx,val in enumerate(list(seg_classes)):
+        metric_obj = partial(class_dice_coef, classid=idx)
+        metric_obj.__name__ = 'dice_'+val
+        metric_list.append(metric_obj)
+    return metric_list
+
+
 
 def __prepare_coordinate_mapping(image_slice):
     """
@@ -64,24 +115,18 @@ def __prepare_coordinate_mapping(image_slice):
 
     M = np.array(
         [[np.array(image_slice.ImageOrientationPatient[0:3])[0] * image_slice.PixelSpacing[1],
-          np.array(image_slice.ImageOrientationPatient[3:6])[0] * image_slice.PixelSpacing[0],
-          0,
+          np.array(image_slice.ImageOrientationPatient[3:6])[0] * image_slice.PixelSpacing[0], 0,
           np.array(image_slice.ImagePositionPatient)[0]],
 
          [np.array(image_slice.ImageOrientationPatient[0:3])[1] * image_slice.PixelSpacing[1],
-          np.array(image_slice.ImageOrientationPatient[3:6])[1] * image_slice.PixelSpacing[0],
-          0,
+          np.array(image_slice.ImageOrientationPatient[3:6])[1] * image_slice.PixelSpacing[0], 0,
           np.array(image_slice.ImagePositionPatient)[1]],
 
          [np.array(image_slice.ImageOrientationPatient[0:3])[2] * image_slice.PixelSpacing[1],
-          np.array(image_slice.ImageOrientationPatient[3:6])[2] * image_slice.PixelSpacing[0],
-          0,
+          np.array(image_slice.ImageOrientationPatient[3:6])[2] * image_slice.PixelSpacing[0], 0,
           np.array(image_slice.ImagePositionPatient)[2]],
 
-         [0,
-          0,
-          0,
-          1]
+         [0, 0, 0, 1]
          ])
 
     pixel_coord_array = np.zeros((image_slice.Rows, image_slice.Columns), dtype=(float, 3))
@@ -229,7 +274,7 @@ def __threaded_geom_op(item):
     except:
         print('Error in threaded op')
 
-# Can likely remove most, but will check first
+
 def __predict_slices(images, model, mean_pixel, class_list):
     """
     Core prediction function. Uses the Keras model in GPU mode to generate probability maps for each slice, then
@@ -239,6 +284,18 @@ def __predict_slices(images, model, mean_pixel, class_list):
     :param class_list: A list of contour names in order describing the output vector of the Keras model
     :return: A dictionary mapping slice UIDs to ROI names to a list of contours for that ROI.
     """
+
+    # Create data batch
+    x_data = np.zeros((len(images), 256, 256, 1), dtype=np.float32)
+    for image_idx, image_ds in enumerate(images):
+        x_data[image_idx, ...] = resize(np.float32(image_ds.pixel_array), output_shape=(256,256), order=1,
+                                        mode='constant', preserve_range=True)[...,np.newaxis] - mean_pixel
+
+    # Predict with neural network, designed for 256x256 data
+    y_data = model.predict_on_batch(x_data)
+
+    # Convert from soft classifier to hard classifier
+    y_data = to_categorical(np.argmax(y_data, axis=-1), y_data.shape[-1]).astype(np.uint8).reshape(len(images), 256, 256, len(class_list))
 
     # Process images in sequence
     slices_to_contours = {}
@@ -263,7 +320,12 @@ def main():
     if not os.path.isdir(INPUT_PATH):
         print('Input path \'{0:s}\' does not exist or is not a directory'.format(INPUT_PATH))
         exit(-1)
-    
+
+    # Check that model file exists
+    if not os.path.exists(MODEL_PATH):
+        print('Model file \'{0:s}\' does not exist'.format(MODEL_PATH))
+        exit(-1)
+
     # Check that stats directory exists
     if not os.path.isdir(STATS_PATH):
         print('Stats path \'{0:s}\' does not exist or is not a directory'.format(STATS_PATH))
@@ -298,12 +360,29 @@ def main():
             roi, r, g, b = line.split('\t')
             color_dict[roi] = (len(color_dict), int(r), int(g), int(b))
             class_list.append(roi)
-    
+
+    # Load model; if optimizer weights are in the file, we'll rename the group as workaround
+    # for bugs in loading
+
+    with h5py.File(MODEL_PATH, 'r+') as model_file:
+        if 'optimizer_weights' in model_file:
+            model_file.move('optimizer_weights', '_optimizer_weights')
+
+    # Redefine unserialized custom metrics
+    custom_metrics = {}
+    custom_metrics['avg_dice_coef'] = avg_dice_coef
+
+    for custom_metric in perclass_dice_coef_metrics(class_list):
+        custom_metrics[custom_metric.__name__] = custom_metric
+
+    model = load_model(MODEL_PATH, custom_objects=custom_metrics)
+    model._make_predict_function() # Needs to be initialized before threading
+
     SERIES = {}
 
     if HIERARCHICAL_MODE:
         # Scan through directory tree for studies and create listing
-        for dirpath, _, filenames in os.walk(INPUT_PATH):
+        for dirpath, dirnames, filenames in os.walk(INPUT_PATH):
             filtered_filenames = [f for f in filenames if os.path.splitext(f)[1].lower() == '.dcm']
             for filename in filtered_filenames:
                 ds = read_file(os.path.join(dirpath, filename), defer_size="4KB", stop_before_pixels=True)
@@ -436,7 +515,7 @@ def main():
         image_batch = []
         image_processing_order = sorted(contour_image_uids.keys())
 
-        for image_file_name, _ in [(contour_image_uids[key]['filename'], contour_image_uids[key]['key']) for key in image_processing_order]:
+        for image_file_name, image_file_id in [(contour_image_uids[key]['filename'], contour_image_uids[key]['key']) for key in image_processing_order]:
             try:
                 image_ds = read_file(os.path.join(dirpath, image_file_name))
                 # Do work if this DICOM file is a CT slice
@@ -467,74 +546,74 @@ def main():
                 contour_image_uids[slice_id]['contours'][roi_name] = contour_list
                 if roi_name not in roi_images:
                     roi_images[roi_name] = []
-                    roi_images[roi_name].append([slice_id, contour_list])
-            image_num += len(image_batch)
-            print('    Processed slices {0:d} of {1:d}'.format(image_num, len(image_processing_order)))
+                roi_images[roi_name].append([slice_id, contour_list])
 
-            # Now we have contours for each CT slice. We have a mapping of CT slice ID to data:
-            #   contour_image_uids[ID] = {ds: image_ds, filename: str, key: ID, contours: {roi_name: list}}
-            # And a mapping of ROI name to slices:
-            #   roi_images[roi_name] = [[ID, contourlist], ...]
-            # Let's construct the tags.
+        image_num += len(image_batch)
+        print('    Processed slices {0:d} of {1:d}'.format(image_num, len(image_processing_order)))
 
-            rtstruct_ds.StructureSetROISequence = sequence.Sequence([])
-            rtstruct_ds.ROIContourSequence = sequence.Sequence([])
-            rtstruct_ds.RTROIObservationsSequence = sequence.Sequence([])
-            roi_number = 1
+        # Now we have contours for each CT slice. We have a mapping of CT slice ID to data:
+        #   contour_image_uids[ID] = {ds: image_ds, filename: str, key: ID, contours: {roi_name: list}}
+        # And a mapping of ROI name to slices:
+        #   roi_images[roi_name] = [[ID, contourlist], ...]
+        # Let's construct the tags.
 
-            for roi_name in class_list:
-                # If the ROI exists in our image set...
-                if roi_name in roi_images:
-                    # Add ROI to Structure Set Sequence
-                    structure_set_roi_ds = dataset.Dataset()
-                    rtstruct_ds.StructureSetROISequence.append(structure_set_roi_ds)
-                    structure_set_roi_ds.ROINumber = roi_number
-                    structure_set_roi_ds.ReferencedFrameOfReferenceUID = rtstruct_ds.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
-                    structure_set_roi_ds.ROIName = roi_name
-                    structure_set_roi_ds.ROIGenerationAlgorithm = 'AUTOMATIC'
+        rtstruct_ds.StructureSetROISequence = sequence.Sequence([])
+        rtstruct_ds.ROIContourSequence = sequence.Sequence([])
+        rtstruct_ds.RTROIObservationsSequence = sequence.Sequence([])
+        roi_number = 1
 
-                    # Add ROI to ROI Contour Sequence
-                    roi_contour_ds = dataset.Dataset()
-                    rtstruct_ds.ROIContourSequence.append(roi_contour_ds)
-                    roi_contour_ds.ROIDisplayColor = list(color_dict[roi_name][1:])
-                    roi_contour_ds.ReferencedROINumber = roi_number
-                    roi_contour_ds.ContourSequence = sequence.Sequence([])
+        for roi_name in class_list:
+            # If the ROI exists in our image set...
+            if roi_name in roi_images:
+                # Add ROI to Structure Set Sequence
+                structure_set_roi_ds = dataset.Dataset()
+                rtstruct_ds.StructureSetROISequence.append(structure_set_roi_ds)
+                structure_set_roi_ds.ROINumber = roi_number
+                structure_set_roi_ds.ReferencedFrameOfReferenceUID = rtstruct_ds.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
+                structure_set_roi_ds.ROIName = roi_name
+                structure_set_roi_ds.ROIGenerationAlgorithm = 'AUTOMATIC'
+                # Add ROI to ROI Contour Sequence
+                roi_contour_ds = dataset.Dataset()
+                rtstruct_ds.ROIContourSequence.append(roi_contour_ds)
+                roi_contour_ds.ROIDisplayColor = list(color_dict[roi_name][1:])
+                roi_contour_ds.ReferencedROINumber = roi_number
+                roi_contour_ds.ContourSequence = sequence.Sequence([])
+                for slice_id, contour_list in roi_images[roi_name]:
+                    for contour in contour_list:
+                        contour_ds = dataset.Dataset()
+                        contour_ds.ContourImageSequence = sequence.Sequence([contour_image_uids[slice_id]['ds']])
+                        contour_ds.ContourGeometricType = 'CLOSED_PLANAR'
+                        contour_ds.NumberOfContourPoints = len(contour)
+                        contour_ds.ContourData = ['{0:0.2f}'.format(val) for p in contour for val in p]
+                        roi_contour_ds.ContourSequence.append(contour_ds)
 
-                    for slice_id, contour_list in roi_images[roi_name]:
-                        for contour in contour_list:
-                            contour_ds = dataset.Dataset()
-                            contour_ds.ContourImageSequence = sequence.Sequence([contour_image_uids[slice_id]['ds']])
-                            contour_ds.ContourGeometricType = 'CLOSED_PLANAR'
-                            contour_ds.NumberOfContourPoints = len(contour)
-                            contour_ds.ContourData = ['{0:0.2f}'.format(val) for p in contour for val in p]
-                            roi_contour_ds.ContourSequence.append(contour_ds)
+                # Add ROI to RT ROI Observations Sequence
+                rt_roi_obs = dataset.Dataset()
+                rtstruct_ds.RTROIObservationsSequence.append(rt_roi_obs)
+                rt_roi_obs.ObservationNumber = roi_number
+                rt_roi_obs.ReferencedROINumber = roi_number
+                rt_roi_obs.ROIObservationLabel = roi_name
+                rt_roi_obs.RTROIInterpretedType = 'ORGAN'
 
-                    # Add ROI to RT ROI Observations Sequence
-                    rt_roi_obs = dataset.Dataset()
-                    rtstruct_ds.RTROIObservationsSequence.append(rt_roi_obs)
-                    rt_roi_obs.ObservationNumber = roi_number
-                    rt_roi_obs.ReferencedROINumber = roi_number
-                    rt_roi_obs.ROIObservationLabel = roi_name
-                    rt_roi_obs.RTROIInterpretedType = 'ORGAN'
+                # Update ROI number
+                roi_number += 1
 
-                    # Update ROI number
-                    roi_number += 1
+        # RTSTRUCT creation complete. Write to output.
+        if HIERARCHICAL_MODE:
+            output_path = os.path.join(dirpath, OUTPUT_FILENAME)
+        else:
+            output_path = OUTPUT_FILENAME
 
-            # RTSTRUCT creation complete. Write to output.
-            if HIERARCHICAL_MODE:
-                output_path = os.path.join(dirpath, OUTPUT_FILENAME)
-            else:
-                output_path = OUTPUT_FILENAME
+        file_meta = dataset.Dataset()
+        file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.2'
+        file_meta.MediaStorageSOPInstanceUID = uid.generate_uid()
+        file_meta.ImplementationClassUID = uid.generate_uid()
 
-            file_meta = dataset.Dataset()
-            file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.2'
-            file_meta.MediaStorageSOPInstanceUID = uid.generate_uid()
-            file_meta.ImplementationClassUID = uid.generate_uid()
+        output_ds = dataset.FileDataset(output_path, {}, file_meta=file_meta, preamble="\0" * 128)
+        output_ds.update(rtstruct_ds)
+        output_ds.save_as(output_path)
 
-            output_ds = dataset.FileDataset(output_path, {}, file_meta=file_meta, preamble="\0" * 128)
-            output_ds.update(rtstruct_ds)
-            output_ds.save_as(output_path)
-            end_time = time.time()
+        end_time = time.time()
 
         # Write profiling to console
         seconds = int(end_time - start_time)

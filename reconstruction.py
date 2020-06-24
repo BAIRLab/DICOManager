@@ -433,7 +433,7 @@ def mri(patient_path, path_mod=False, raises=False):
             else:
                 print(err_msg)
 
-    slice_thick, n_z, loc0, _, flip = _img_dims(volume_slices)
+    slice_thick, n_z, loc0, loc1, flip = _img_dims(volume_slices)
     image_array = np.zeros((*dcmheader.pixel_array.shape,
                             n_z), dtype='float32')
 
@@ -556,24 +556,24 @@ def struct(patient_path, wanted_contours, raises=False):
             break
 
         contours.append(contour.ROIName.lower())
+
         fill_array = np.zeros(shape=dimensions)
+        if hasattr(struct_dcm.ROIContourSequence[index], 'ContourSequence'):
+            contour_list = struct_dcm.ROIContourSequence[index].ContourSequence
+            all_points = np.empty((0, 3))
 
-        if not hasattr(struct_dcm.ROIContourSequence[index], 'ContourSequence'):
-            break
-        #contour_list = struct_dcm.ROIContourSequence[index].ContourSequence
-        #all_points = np.empty((0, 3))
+            for contour_slice in contour_list:
+                try:
+                    contour_data = np.array(
+                        contour_slice.ContourData).reshape(-1, 3)
+                except ValueError:
+                    err_msg = f'Contour {contour.ROIName} in {struct_file} is corrupt'
+                    raise ValueError(err_msg) if raises else print(err_msg)
 
-        for c_slice in struct_dcm.ROIContourSequence[index].ContourSequence:
-            try:
-                contour_data = np.array(c_slice.ContourData).reshape(-1, 3)
-            except ValueError:
-                err_msg = f'Contour {contour.ROIName} in {struct_file} is corrupt'
-                raise ValueError(err_msg) if raises else print(err_msg)
+                points = _points_to_coords(contour_data, img_origin, ix, iy, iz)
+                y_poly, x_poly = skdraw.polygon(*points[:, :2].T)
 
-            points = _points_to_coords(contour_data, img_origin, ix, iy, iz)
-            y_poly, x_poly = skdraw.polygon(*points[:, :2].T)
-
-            fill_array[x_poly, y_poly, points[0,2]] = 1
+                fill_array[x_poly, y_poly, points[0,2]] = 1
 
         masks.append(fill_array)
     # Reorders the list to match the wanted contours
@@ -622,7 +622,7 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     ct_files.sort()
     ct_dcm = pydicom.dcmread(ct_files[0])
 
-    ct_thick, ct_n_z, ct_loc0, _, flip = _img_dims(ct_files)
+    ct_thick, ct_n_z, ct_loc0, ct_loc1, flip = _img_dims(ct_files)
     ct_array = np.zeros((*ct_dcm.pixel_array.shape,
                          ct_n_z), dtype='float32')
 
@@ -690,7 +690,7 @@ def pet(patient_path, path_mod=None, raises=False):
     pet_files = glob.glob(patient_path + 'PET' + str(path_mod) + '/*.dcm')
     pet_dcm = pydicom.dcmread(pet_files[0])
 
-    pet_thick, pet_n_z, pet_loc0, _, flip = _img_dims(pet_files)
+    pet_thick, pet_n_z, pet_loc0, pet_loc1, flip = _img_dims(pet_files)
     pet_array = np.zeros((*pet_dcm.pixel_array.shape,
                           pet_n_z), dtype='float32')
 
@@ -703,7 +703,7 @@ def pet(patient_path, path_mod=None, raises=False):
                 f'These two images are not registered: {ct_files[0]} & {pet_files[0]}')
     else:
         try:
-            for _, pet_file in enumerate(pet_files):
+            for index, pet_file in enumerate(pet_files):
                 ds = pydicom.dcmread(pet_file)
                 loc = round(abs((pet_loc0 - ds.SliceLocation) / pet_thick))
                 pet_array[:, :, loc] = ds.pixel_array
