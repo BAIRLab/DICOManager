@@ -6,7 +6,7 @@
 
 
 # May want to do less specific imports ... 
-from scipy.ndimage.morphology import binary_erosion, binary_dilation
+from scipy.ndimage.morphology import binary_erosion
 import scipy
 import numpy as np
 import argparse, h5py, numpy as np, os, random, time
@@ -64,34 +64,7 @@ Will nest these all within the deconstruction.py file / class
 """
 
 
-def __wire_mask(array):
-    # Returns a boolean array of the unique surface points of a contour
-    array = np.array(array, dtype='bool')
-    return binary_erosion(array) ^ array
-
-'''
-def _surf_coords_2D(array, ct_dcm):
-    # Will need to write a function to compute 
-    img_map = __prepare_coordinate_mapping(ct_dcm)
-    surf = __wire_mask(array)
-    coords = img_map * surf
-    return np.transpose(coords.nonzero()).unravel()
-'''
-
-def _array_to_coords_2D(array, ct_dcm, flatten=True):
-    # Used to convert the wire mask to coordinates flattened for DICOM
-    # Will want to use with a 2D slice, for which we fill into 
-    # Known location, saving form dealing with an additional dimension
-    mask = __wire_mask(array)
-    coords = __prepare_coordinate_mapping(ct_dcm)
-
-    if not flatten:
-        return coords[tuple(mask.nonzero()) + np.index_exp[:]].T
-    return coords[tuple(mask.nonzero()) + np.index_exp[:]].T.flatten()
-
-#print(_mask_to_coords(rands, test2).flatten().shape)
-
-def __prepare_coordinate_mapping(ct_dcm):
+def _prepare_coordinate_mapping(ct_dcm):
     """
     Function
     ----------
@@ -99,7 +72,7 @@ def __prepare_coordinate_mapping(ct_dcm):
 
     Parameters
     ----------
-    dcm : pydicom.dataset.FileDataset
+    ct_dcm : pydicom.dataset.FileDataset
         A CT dicom object to compute the image coordinate locations upon
 
     Returns
@@ -116,6 +89,7 @@ def __prepare_coordinate_mapping(ct_dcm):
         D_i, D_j = (Column, Row)
         PixelSpacing = (Row, Column)
     """
+    # Unpacking arrays is poor form, but I'm feeling rebellious...
     X_x, X_y, X_z = np.array(ct_dcm.ImageOrientationPatient[:3]).T
     Y_x, Y_y, Y_z = np.array(ct_dcm.ImageOrientationPatient[3:]).T
     S_x, S_y, S_z = np.array(ct_dcm.ImagePositionPatient)
@@ -129,11 +103,82 @@ def __prepare_coordinate_mapping(ct_dcm):
 
     C = np.array([i, j, 0, 1])
 
-    # Returns coordinates in [x, y, 3]
+    # Returns coordinates in [x, y, 3], with [:-1] to reduce runtime
     return np.rollaxis(np.stack(np.dot(M[:-1], C)), 0, 3)
 
 
-def __threaded_geom_op(item):
+def _wire_mask(arr):
+    """
+    Function
+    ----------
+    Given an 2D boolean array, returns those pixels on the surface
+
+    Parameters
+    ----------
+    arr : numpy.ndarray
+        A 2D array corresponding to the segmentation mask
+
+    Returns
+    ----------
+    numpy.ndarray
+        A 2D boolean array, with points representing the contour surface
+
+    Notes
+    ----------
+    The resultant surface is not the minimium points to fully enclose the
+        surface, like the standard DICOM RTSTRUCT uses. Instead this gives
+        all points along the surface. Should construct the same, but this
+        calculation is faster than using Shapely. 
+    """
+    if arr.dtype != 'bool':
+        arr = np.array(arr, dtype='bool')
+    return binary_erosion(arr) ^ arr
+
+
+def _array_to_coords_2D(arr, ct_dcm, flatten=True):
+    """
+    Function
+    ----------
+    Given 2D boolean array, eturns an array of surface coordinates in
+        the patient coordinate system
+
+    Parameters
+    ----------
+    ct_dcm : pydicom.dataset.FileDataset
+        A CT dicom object to compute the image coordinate locations upon
+    arr : numpy.ndarray
+        A 2D boolean mask array corresponding to the segmentation mask
+    flatten : bool (Default = True)
+        Specifies if the returned coordinates are flattened into DICOM
+        RT standard, as single dimensional array
+
+    Returns
+    ----------
+    numpy.ndarray
+        An array of binary mask surface coordinates in the patient
+        coordinate space. Flattened, if specified, into DICOM RT format
+    
+    Raises
+    ----------
+    AssertionError
+        Raised if arr.ndim is not 2
+        Raised if ct_dcm is not a pydicom dataset 
+    """
+    # These will be helpful for my troubleshooting later in the process
+    # after which, they will likely become unnecessary due to protections upstream
+    assert arr.ndim != 2, 'The input boolean mask is not 2D'
+    # TODO: Check if this should be dataset of fileset ... 
+    assert type(ct_dcm) is pydicom.dataset.Dataset, 'ct_dcm is not a pydicom dataset'
+
+    mask = _wire_mask(arr)
+    coords = _prepare_coordinate_mapping(ct_dcm)
+
+    if not flatten:
+        return coords[tuple(mask.nonzero()) + np.index_exp[:]].T
+    return coords[tuple(mask.nonzero()) + np.index_exp[:]].T.flatten()
+
+
+def _threaded_geom_op(item):
     try:
         image_ds = item[0]
         y_elem = item[1]
@@ -145,7 +190,7 @@ def __threaded_geom_op(item):
         contour_list_pred = {}  # This will contain contours for this slice represented as lists of polygons
         p_s_x = float(image_ds.PixelSpacing[0])
         p_s_y = float(image_ds.PixelSpacing[1])
-        p_coords = __prepare_coordinate_mapping(
+        p_coords = _prepare_coordinate_mapping(
             image_ds)  # X,Y,3 matrix containing at each voxel the coordinates of the center of that voxel
 
         for roi_name, label_img in zip(class_list[1:], np.rollaxis(y_elem, 2, 0)[1:, ...]):
@@ -252,7 +297,7 @@ def __threaded_geom_op(item):
         print('Error in threaded op')
 
 # Can likely remove most, but will check first
-def __predict_slices(images, model, mean_pixel, class_list):
+def _predict_slices(images, model, mean_pixel, class_list):
     """
     Core prediction function. Uses the Keras model in GPU mode to generate probability maps for each slice, then
     uses Shapely geometry processing with multiprocessing to convert those raster maps to vector data.
@@ -266,7 +311,7 @@ def __predict_slices(images, model, mean_pixel, class_list):
     slices_to_contours = {}
 
     executor = concurrent.futures.ProcessPoolExecutor(24)
-    futures = [executor.submit(__threaded_geom_op, item) for item in zip(images, y_data, repeat(class_list, len(images)))]
+    futures = [executor.submit(_threaded_geom_op, item) for item in zip(images, y_data, repeat(class_list, len(images)))]
     concurrent.futures.wait(futures)
     results = [output.result() for output in futures]
 
@@ -402,7 +447,7 @@ def from_ct(ct_series):
             # Do work if this DICOM file is a CT slice
             if image_ds.SOPClassUID == uid.UID('1.2.840.10008.5.1.4.1.1.2'):
                 if len(image_batch) >= 24:
-                    predict_slices_contours = __predict_slices(image_batch, model, mean_pixel, class_list)
+                    predict_slices_contours = _predict_slices(image_batch, model, mean_pixel, class_list)
                     # Add predictions to general list
                     for slice_id, contour_dict in predict_slices_contours.iteritems():
                         contour_image_uids[slice_id]['contours'] = {}
@@ -418,7 +463,7 @@ def from_ct(ct_series):
         except Exception as e:
             print('Exception: {0:s}'.format(e.message))
 
-    predict_slices_contours = __predict_slices(image_batch, model, mean_pixel, class_list)
+    predict_slices_contours = _predict_slices(image_batch, model, mean_pixel, class_list)
     # Add predictions to general list
 
     for slice_id, contour_dict in predict_slices_contours.iteritems():
@@ -480,12 +525,6 @@ def from_ct(ct_series):
                 # Update ROI number
                 roi_number += 1
 
-        # RTSTRUCT creation complete. Write to output.
-        if HIERARCHICAL_MODE:
-            output_path = os.path.join(dirpath, OUTPUT_FILENAME)
-        else:
-            output_path = OUTPUT_FILENAME
-
         file_meta = dataset.Dataset()
         file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.2'
         file_meta.MediaStorageSOPInstanceUID = uid.generate_uid()
@@ -494,6 +533,5 @@ def from_ct(ct_series):
         output_ds = dataset.FileDataset(output_path, {}, file_meta=file_meta, preamble="\0" * 128)
         output_ds.update(rt_dcm)
         output_ds.save_as(output_path)
-        end_time = time.time()
 
     return True
