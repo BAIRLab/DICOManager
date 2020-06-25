@@ -107,6 +107,16 @@ test1 = leonid(dcm)
 test2 = evan(dcm)
 
 np.testing.assert_almost_equal(test1, test2)
+
+rands = np.random.randint(2, size=(512, 512))
+
+def mask_to_coords(array, coords):
+    return coords[tuple(array.nonzero()) + np.index_exp[:]].T
+
+print(np.sum(rands))
+print(mask_to_coords(rands, test2))
+print(mask_to_coords(rands, test2).flatten().shape)
+
 '''
 start = time.time()
 for _ in range(10000):
