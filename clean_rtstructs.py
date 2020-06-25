@@ -110,7 +110,7 @@ mrns.sort()
 
 if not options.read_only:
     for mrn in mrns:
-        struct_list = glob(os.path.join(options.base_dir, srt(mrn), 'RTSTRUCT/*.dcm'))
+        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'))
         if len(struct_list) > 1:
             times = [_creation_posix(struct) for struct in struct_list] 
             _ = struct_list.pop(times.index(max(times)))

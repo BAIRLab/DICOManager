@@ -56,46 +56,46 @@ if POSTPROCESS:
 else:
     print('POSTPROCESSING is DISABLED')
 
-def __prepare_coordinate_mapping(image_slice):
+def __prepare_coordinate_mapping(ct_dcm):
     """
-    Given a DICOM CT image slice, returns a numpy array with the coordinates of each pixel.
-    :param image_slice: A pydicom dataset representing a CT slice in DICOM format.
-    :return: A numpy array of shape Mx2 where M is image_slice.rows x image_slice.cols, the number of(x,y) pairs
-             representing coordinates of each pixel.
-    """
-    # Components of Orientation, Position and Thickness vectors to compute M
-    X_x, X_y, X_z = np.array(image_slice.ImageOrientationPatient[:3]).T
-    Y_x, Y_y, Y_z = np.array(image_slice.ImageOrientationPatient[3:]).T
-    S_x, S_y, S_z = np.array(image_slice.ImagePositionPatient)
-    D_x, D_y = np.array(image_slice.PixelSpacing)
+    Function
+    ----------
+    Given a DICOM CT image slice, returns an array of pixel coordinates
 
-    # Computes M via DICOM Standard Equation C.7.6.2.1-1
-    # TODO: Check the compliance of this notation wit DICOM's
-    M = np.array([[X_x * D_y, Y_x * D_x, 0, S_x],
-                  [X_y * D_y, Y_y * D_x, 0, S_y],
-                  [X_z * D_y, Y_z * D_x, 0, S_z], 
+    Parameters
+    ----------
+    dcm : pydicom.dataset.FileDataset
+        A CT dicom object to compute the image coordinate locations upon
+
+    Returns
+    ----------
+    numpy.ndarray
+        A numpy array of shape Mx2 where M is the dcm.Rows x dcm.Cols,
+        the number of (x, y) pairs represnting coordinates of each pixel
+
+    Notes
+    ----------
+    Computes M via DICOM Standard Equation C.7.6.2.1-1
+        https://dicom.innolitics.com/ciods/ct-image/image-plane/00200037
+    Due to DICOM header orientation:
+        D_i, D_j = (Column, Row)
+        PixelSpacing = (Row, Column)
+    """
+    X_x, X_y, X_z = np.array(ct_dcm.ImageOrientationPatient[:3]).T
+    Y_x, Y_y, Y_z = np.array(ct_dcm.ImageOrientationPatient[3:]).T
+    S_x, S_y, S_z = np.array(ct_dcm.ImagePositionPatient)
+    D_j, D_i = np.array(ct_dcm.PixelSpacing)
+    j, i = np.indices((ct_dcm.Rows, ct_dcm.Columns))
+
+    M = np.array([[X_x*D_i, Y_x*D_j, 0, S_x],
+                  [X_y*D_i, Y_y*D_j, 0, S_y],
+                  [X_z*D_i, Y_z*D_j, 0, S_z],
                   [0, 0, 0, 1]])
 
-    pixel_coord_array = np.zeros((image_slice.Rows, image_slice.Columns), dtype=(float, 3))
-    pixel_idx_array = np.indices((image_slice.Rows, image_slice.Columns))
+    C = np.array([i, j, 0, 1])
 
-    it = np.nditer(op=[pixel_idx_array[0],  # Array of pixel row indices (j)
-                       pixel_idx_array[1],  # Array of pixel col indices (i)
-                       pixel_coord_array[:, :, 0],  # Output array of pixel x coords
-                       pixel_coord_array[:, :, 1],  # Output array of pixel y coords
-                       pixel_coord_array[:, :, 2]],  # Output array of pixel z coords
-                   flags=['external_loop', 'buffered'],
-                   op_flags=[['readonly'],
-                             ['readonly'],
-                             ['writeonly', 'no_broadcast'],
-                             ['writeonly', 'no_broadcast'],
-                             ['writeonly', 'no_broadcast']])
-
-    for (j, i, P_x, P_y, P_z) in it:
-        C = np.array([i, j, 0, 1])
-        P_x[...], P_y[...], P_z[...], _ = np.dot(M, C) 
-    
-    return pixel_coord_array
+    # Returns coordinates in [x, y, 3]
+    return np.rollaxis(np.stack(np.dot(M[:-1], C)), 0, 3)
 
 
 def __threaded_geom_op(item):
