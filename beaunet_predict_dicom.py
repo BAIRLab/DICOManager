@@ -9,6 +9,7 @@
 from scipy.ndimage.morphology import binary_erosion
 import scipy
 import numpy as np
+# This is a strange import, clean up
 import argparse, h5py, numpy as np, os, random, time
 from functools import partial
 from itertools import repeat
@@ -43,6 +44,9 @@ use the interesction of those two to get the patient coordinates
     surface points
 with those points, unravel them and project them into the DICOM tree
     with the correct additional information (UID Tags, Names, Colors)
+when we generate the RTSTRUCT, we need a list of all image series, and
+    their corresponding image slice locations, so we can save the UID
+    for each slice in the DICOM header info
 
 NOTE: IMPORTED ACCESSORY FILES AND DIRS
 color_dictionary.txt : declares a mapping from seg type to RGB color value
@@ -177,6 +181,235 @@ def _array_to_coords_2D(arr, ct_dcm, flatten=True):
         return coords[tuple(mask.nonzero()) + np.index_exp[:]].T
     return coords[tuple(mask.nonzero()) + np.index_exp[:]].T.flatten()
 
+
+def _slice_thickness(dcm0, dcm1):
+    """
+    Function
+    ----------
+    Computes the slice thickness for a DICOM set
+    -- *NOTE* Calculates based on slice location and instance number. Does not trust SliceThickness DICOM Header
+
+    Parameters
+    ----------
+    dcm0, dcm1 : str or pydicom.dataset.FileDataset
+        Either a string to the dicom path or a pydicom dataset
+
+    Returns
+    ----------
+    slice_thickness : float
+        A float representing the robustly calculated slice thickness
+    """
+
+    if type(dcm0) != pydicom.dataset.FileDataset:
+        dcm0 = pydicom.dcmread(dcm0)
+    if type(dcm1) != pydicom.dataset.FileDataset:
+        dcm1 = pydicom.dcmread(dcm1)
+
+    loc0 = dcm0.SliceLocation
+    loc1 = dcm1.SliceLocation
+    inst0 = dcm0.InstanceNumber
+    inst1 = dcm1.InstanceNumber
+
+    return abs((loc1-loc0) / (inst1-inst0))
+
+
+# This is coming from reconstruction
+# TODO: #8 Move common utilities into a shared library for re and deconstruction
+def _img_dims(dicom_list):
+    """
+    Function
+    ----------
+    Computation of the image dimensions for slice thickness and number
+        of z slices in total
+
+    Parameters
+    ----------
+    dicom_list : list
+        A list of the paths to every dicom for the given image
+
+    Returns
+    ----------
+    (thickness, n_slices, low, high, flip) : (float, int, float, float, boolean)
+        0.Slice thickness computed from dicom locations, not header
+        1.Number of slices, computed from dicom locations, not header
+        2.Patient coordinate system location of lowest instance
+        3.Patient coordinate system location of highest instance
+        4.Boolean indicating if image location / instances are flipped
+
+    Notes
+    ----------
+    The values of high and low are for the highest and lowest instance,
+        meaning high > low is not always true
+    """
+    # We need to save the location and instance, to know if counting up or down
+    low = [float('inf'), 0]
+    high = [-float('inf'), 0]
+
+    instances = []
+    for f in dicom_list:
+        ds = pydicom.dcmread(f, stop_before_pixels=True)
+        if float(ds.SliceLocation) < low[0]:
+            low = [float(ds.SliceLocation), round(ds.InstanceNumber)]
+        if float(ds.SliceLocation) > high[0]:
+            high = [float(ds.SliceLocation), round(ds.InstanceNumber)]
+        instances.append(round(ds.InstanceNumber))
+    instances.sort()
+
+    thickness = _slice_thickness(dicom_list[0], dicom_list[1])
+    n_slices = 1 + (abs(high[0]-low[0]) / thickness)
+
+    # We need to cover for if instance 1 is missing
+    # Unfortunately, we don't know how many upper instances could be missing
+    if 1 != min(instances):
+        diff = min(instances) - 1
+        n_slices += diff
+        if low[1] < high[1]:
+            low[0] -= thickness * diff
+        else:
+            high[0] += thickness * diff
+
+    flip = True
+    if low[1] > high[1]:
+        flip = False
+        low[0], high[0] = high[0], low[0]
+
+    return thickness, round(n_slices), low[0], high[0], flip
+
+
+def _get_z_loc(hdr, ct_thick, ct_loc0):
+    return round(abs((ct_loc0-hdr.SliceLocation) / ct_thick))
+
+# A function to collect all the UIDs and store them as a dictionary with keyword
+# as the image coordinate z-slice location
+def _generate_uid_dict(ct_series):
+    uid_dict = {}
+    ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
+    for ct in ct_series:
+        hdr = pydicom.dcmread(ct, stop_before_pixels=True)
+        # TODO: Check compatiablity with the volume flipping
+        uid_dict.update({_get_z_loc(hdr, ct_thick, ct_loc0): hdr.InstanceUID})
+    return uid_dict
+
+
+# I don't know if this will work...
+def _initialize_rt_dcm(ct_series):
+    # TODO: Order the initializtion of header in the order of header fields
+    # Start crafting the RTSTRUCT
+    rt_dcm = pydicom.dataset.Dataset()
+    # Read the ct to build the header from
+    ct_dcm = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
+
+    # Time specific DICOM header info
+    current_time = time.localtime()
+    rt_dcm.SpecificCharacterSet = 'ISO_IR 100'
+    # DICOM date format
+    rt_dcm.InstanceCreationDate = time.strftime('%Y%m%d', current_time)
+    # DICOM time format
+    rt_dcm.InstanceCreationTime = time.strftime('%H%M%S.%f', current_time)[:-3]
+    rt_dcm.StructureSetDate = time.strftime('%Y%m%d', current_time)
+    rt_dcm.StructureSetTime = time.strftime('%H%M%S.%f', current_time)[:-3]
+
+    # UID Header Info
+    # RT Structure Set Storage Class
+    rt_dcm.SOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
+    rt_dcm.SOPInstanceUID = pydicom.uid.generate_uid()
+    rt_dcm.Modality = 'RTSTRUCT'
+    rt_dcm.Manufacturer = 'Beaumont Health'
+    rt_dcm.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
+    rt_dcm.StructureSetLabel = 'Auto-Segmented Contours'
+    rt_dcm.StructureSetName = 'Auto-Segmented Contours'
+    rt_dcm.SoftwareVersions = ['0.1.0']
+
+    # Referenced study
+    ref_study_ds = pydicom.dataset.Dataset()
+    # Study Component Management SOP Class
+    ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
+    ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
+    rt_dcm.ReferencedStudySequence = pydicom.sequence.Sequence([ref_study_ds])
+
+    # Demographics
+    if 'PatientsName' in ct_dcm:
+        rt_dcm.PatientsName = ct_dcm.PatientsName
+    else:
+        rt_dcm.PatientsName = 'UNKNOWN^UNKNOWN^^'
+
+    if 'PatientID' in ct_dcm:
+        rt_dcm.PatientID = ct_dcm.PatientID
+    else:
+        rt_dcm.PatientID = '0000000'
+
+    if 'PatientsBirthDate' in ct_dcm:
+        rt_dcm.PatientsBirthDate = ct_dcm.PatientsBirthDate
+    else:
+        rt_dcm.PatientsBirthDate = ''
+
+    if 'PatientsSex' in ct_dcm:
+        rt_dcm.PatientsSex = ct_dcm.PatientsSex
+    else:
+        rt_dcm.PatientsSex = ''
+
+    # This study
+    rt_dcm.StudyInstanceUID = ct_dcm.StudyInstanceUID
+    rt_dcm.SeriesInstanceUID = pydicom.uid.generate_uid()
+
+    if 'StudyID' in ct_dcm:
+        rt_dcm.StudyID = ct_dcm.StudyID
+    if 'SeriesNumber' in ct_dcm:
+        rt_dcm.SeriesNumber = ct_dcm.SeriesNumber
+    if 'StudyDate' in ct_dcm:
+        rt_dcm.StudyDate = ct_dcm.StudyDate
+    if 'StudyTime' in ct_dcm:
+        rt_dcm.StudyTime = ct_dcm.StudyTime
+
+    # Referenced frame of reference
+    ref_frame_of_ref_ds = pydicom.dataset.Dataset()
+    rt_dcm.ReferencedFrameOfReferenceSequence = pydicom.sequence.Sequence([ref_frame_of_ref_ds])
+    ref_frame_of_ref_ds.FrameOfReferenceUID = ct_dcm.FrameOfReferenceUID
+
+    # Referenced study
+    # TODO: Determine difference between this and the above call
+    rt_ref_study_ds = pydicom.dataset.Dataset()
+    ref_frame_of_ref_ds.RTReferencedStudySequence = pydicom.sequence.Sequence([rt_ref_study_ds])
+    # Study Component Management SOP Class
+    rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
+    rt_ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
+
+    # Referenced sereis
+    rt_ref_series_ds = pydicom.dataset.Dataset()
+    rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
+    rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
+    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence()
+
+    # TODO: Return all the ref frame, study and series, or find a way to integrate them into the dcm
+
+    return rt_dcm 
+
+
+# A function to add to an RT
+def to_rt(source_rt, ct_series):
+    return False
+
+# A function to create new from an RT
+def from_rt(source_rt, ct_series):
+    return False
+
+def from_ct(ct_series):
+    rt_dcm = _initialize_rt_dcm(ct_series)
+      
+    for index, ct_file in enumerate(ct_series):
+        ct_dcm = pydicom.dcmread(ct_file)
+        # We only store the final contourimagesequence after all is done to maintain ordering
+        contour_image_ds = dataset.Dataset()
+        # CT Image Storage
+        contour_image_ds.ReferencedSOPClassUID = pydicom.uid.UID(
+            '1.2.840.10008.5.1.4.1.1.2')
+        contour_image_ds.ReferencedSOPInstanceUID = ct_dcm.SOPInstanceUID
+        contour_image_uids[ct_dcm.SOPInstanceUID] = {'ds': contour_ct_dcm,
+                                                     'filename': image_file_name,
+                                                     'key': ct_dcm.SOPInstanceUID}
+    return rt_dcm
+
+# ------------------ Legacy Code ---------------------------------
 
 def _threaded_geom_op(item):
     try:
@@ -323,13 +556,6 @@ def _predict_slices(images, model, mean_pixel, class_list):
     # Return mapping of slices to contours and ROI names to slices/contours
     return slices_to_contours
 
-# A function to add to an RT
-def to_rt():
-    return False
-
-# A function to create new from an RT
-def from_rt():
-    return False
 
 # A function to create new from CT
 def from_ct(ct_series):
