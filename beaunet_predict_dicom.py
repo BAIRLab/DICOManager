@@ -3,7 +3,13 @@
 # This script will use a trained Beaunet model to run on a directory of DICOM-format image files (CT only) and
 # write a DICOM RTSTRUCT file that contains predicted contours.
 #
-
+'''
+TODO:
+Finish with the construction of the rtstruct header
+Determine how Leonid used shapely to compute the surface points. (poly.points.exterior, it looks like)
+Assert that the Polygon reconstruction is equaivalent between Leonid's and my method
+Determine how Leonid packed the points into the RTSTRUCT file format
+'''
 
 # May want to do less specific imports ... 
 from scipy.ndimage.morphology import binary_erosion
@@ -16,12 +22,14 @@ from itertools import repeat
 import concurrent.futures
 import pydicom
 # TODO: Remove these subfucntion imports
-from pydicom import dataset, read_file, sequence, uid
+#from pydicom import dataset, read_file, sequence, uid
 
+'''
 # TODO : Identify how Shapely is used, it is quite slow...
 from shapely import speedups
 from shapely.ops import unary_union
 from shapely.geometry import Polygon, MultiPoint, MultiPolygon
+'''
 
 from skimage.transform import resize
 from skimage.measure import label, regionprops
@@ -133,6 +141,10 @@ def _wire_mask(arr):
         surface, like the standard DICOM RTSTRUCT uses. Instead this gives
         all points along the surface. Should construct the same, but this
         calculation is faster than using Shapely. 
+    Could also use skimage.measure.approximate_polygon(arr, 0.001)
+        To compute an approximate polygon. Better yet, do it after doing
+        the binary erosion techniqe, and compare that to the speed of 
+        using shapely to find the surface
     """
     if arr.dtype != 'bool':
         arr = np.array(arr, dtype='bool')
@@ -171,8 +183,7 @@ def _array_to_coords_2D(arr, ct_dcm, flatten=True):
     # These will be helpful for my troubleshooting later in the process
     # after which, they will likely become unnecessary due to protections upstream
     assert arr.ndim != 2, 'The input boolean mask is not 2D'
-    # TODO: Check if this should be dataset of fileset ... 
-    assert type(ct_dcm) is pydicom.dataset.Dataset, 'ct_dcm is not a pydicom dataset'
+    assert type(ct_dcm) is pydicom.dataset.FileDataset, 'ct_dcm is not a pydicom dataset'
 
     mask = _wire_mask(arr)
     coords = _prepare_coordinate_mapping(ct_dcm)
@@ -187,7 +198,8 @@ def _slice_thickness(dcm0, dcm1):
     Function
     ----------
     Computes the slice thickness for a DICOM set
-    -- *NOTE* Calculates based on slice location and instance number. Does not trust SliceThickness DICOM Header
+        NOTE Calculates based on slice location and instance number
+        Does not trust SliceThickness DICOM Header
 
     Parameters
     ----------
@@ -399,7 +411,7 @@ def from_ct(ct_series):
     for index, ct_file in enumerate(ct_series):
         ct_dcm = pydicom.dcmread(ct_file)
         # We only store the final contourimagesequence after all is done to maintain ordering
-        contour_image_ds = dataset.Dataset()
+        contour_image_ds = pydicom.dataset.Dataset()
         # CT Image Storage
         contour_image_ds.ReferencedSOPClassUID = pydicom.uid.UID(
             '1.2.840.10008.5.1.4.1.1.2')
