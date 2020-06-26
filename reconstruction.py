@@ -440,8 +440,8 @@ def mri(patient_path, path_mod=False, raises=False):
     try:
         for slice_file in volume_slices:
             ds = pydicom.dcmread(str(slice_file))
-            loc = round(abs((loc0-ds.SliceLocation) / slice_thick))
-            image_array[:, :, loc] = ds.pixel_array
+            z_loc = round(abs((loc0-ds.SliceLocation) / slice_thick))
+            image_array[:, :, z_loc] = ds.pixel_array
     except IndexError:
         if raises:
             raise IndexError(f'There is a discontinuity in {patient_path}/MR')
@@ -629,8 +629,8 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     try:
         for ct_file in ct_files:
             ds = pydicom.dcmread(ct_file)
-            loc = round(abs((ct_loc0-ds.SliceLocation) / ct_thick))
-            ct_array[:, :, loc] = ds.pixel_array
+            z_loc = round(abs((ct_loc0-ds.SliceLocation) / ct_thick))
+            ct_array[:, :, z_loc] = ds.pixel_array
     except IndexError:
         if raises:
             raise IndexError(f'There is a discontinuity in {patient_path}/CT')
@@ -705,8 +705,8 @@ def pet(patient_path, path_mod=None, raises=False):
         try:
             for index, pet_file in enumerate(pet_files):
                 ds = pydicom.dcmread(pet_file)
-                loc = round(abs((pet_loc0 - ds.SliceLocation) / pet_thick))
-                pet_array[:, :, loc] = ds.pixel_array
+                z_loc = round(abs((pet_loc0 - ds.SliceLocation) / pet_thick))
+                pet_array[:, :, z_loc] = ds.pixel_array
         except IndexError:
             if raises:
                 raise IndexError('There is a discontinuity in your images')
