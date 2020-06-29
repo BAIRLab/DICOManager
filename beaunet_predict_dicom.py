@@ -21,28 +21,14 @@ from functools import partial
 from itertools import repeat
 import concurrent.futures
 import pydicom
+from dataclasses import dataclass
 # TODO: Remove these subfucntion imports
 #from pydicom import dataset, read_file, sequence, uid
-
-'''
-# TODO : Identify how Shapely is used, it is quite slow...
-from shapely import speedups
-from shapely.ops import unary_union
-from shapely.geometry import Polygon, MultiPoint, MultiPolygon
-'''
 
 from skimage.transform import resize
 from skimage.measure import label, regionprops
 
 from datetime import datetime
-
-# Make shapely go fast
-if speedups.available:
-    speedups.enable()
-
-# For randomness
-random.seed(datetime.now())
-np.random.seed(datetime.now())
 
 """
 NOTE: Reconstruction plan:
@@ -55,28 +41,10 @@ with those points, unravel them and project them into the DICOM tree
 when we generate the RTSTRUCT, we need a list of all image series, and
     their corresponding image slice locations, so we can save the UID
     for each slice in the DICOM header info
-
-NOTE: IMPORTED ACCESSORY FILES AND DIRS
-color_dictionary.txt : declares a mapping from seg type to RGB color value
-pixel_stats.txt : Contains "mean_pixel	203.629169"
-anonymization.txt : Contains a mapping from patient to encoded number
-dataset.hdf5 : A h5 file of the constructed dataset
-Classifications/ : A directory of the segmentation classifications of each
-                   encoded, anonymized patient file
-DICOMImages/ : A directory of all anonymized encoded dicom images
-OverlayImages/ : A directory of all encoded 'overlay images' in .png
-Segmentatoins/ : A directory of segmentations saved a .png files
-                 This indicates he may not have been able to save RTSTRUCT .dcms
-
-CHANGES: 
-1. Remove color dict and make all imported contours Red [255, 0, 0] 
-2. Remove pixel_stats.txt import
-
-Will nest these all within the deconstruction.py file / class
 """
 
 
-def _prepare_coordinate_mapping(ct_dcm):
+def _prepare_coordinate_mapping(ct_hdr):
     """
     Function
     ----------
@@ -84,8 +52,9 @@ def _prepare_coordinate_mapping(ct_dcm):
 
     Parameters
     ----------
-    ct_dcm : pydicom.dataset.FileDataset
+    ct_hdr : pydicom.dataset.FileDataset
         A CT dicom object to compute the image coordinate locations upon
+        where _hdr means that the PixelData field is not required
 
     Returns
     ----------
@@ -102,11 +71,11 @@ def _prepare_coordinate_mapping(ct_dcm):
         PixelSpacing = (Row, Column)
     """
     # Unpacking arrays is poor form, but I'm feeling rebellious...
-    X_x, X_y, X_z = np.array(ct_dcm.ImageOrientationPatient[:3]).T
-    Y_x, Y_y, Y_z = np.array(ct_dcm.ImageOrientationPatient[3:]).T
-    S_x, S_y, S_z = np.array(ct_dcm.ImagePositionPatient)
-    D_j, D_i = np.array(ct_dcm.PixelSpacing)
-    j, i = np.indices((ct_dcm.Rows, ct_dcm.Columns))
+    X_x, X_y, X_z = np.array(ct_hdr.ImageOrientationPatient[:3]).T
+    Y_x, Y_y, Y_z = np.array(ct_hdr.ImageOrientationPatient[3:]).T
+    S_x, S_y, S_z = np.array(ct_hdr.ImagePositionPatient)
+    D_j, D_i = np.array(ct_hdr.PixelSpacing)
+    j, i = np.indices((ct_hdr.Rows, ct_hdr.Columns))
 
     M = np.array([[X_x*D_i, Y_x*D_j, 0, S_x],
                   [X_y*D_i, Y_y*D_j, 0, S_y],
@@ -145,13 +114,16 @@ def _wire_mask(arr):
         To compute an approximate polygon. Better yet, do it after doing
         the binary erosion techniqe, and compare that to the speed of 
         using shapely to find the surface
+    The most accurate way would be with ITK using: 
+        itk.GetImageFromArray
+        itk.ContourExtractor2DImageFilter
     """
     if arr.dtype != 'bool':
         arr = np.array(arr, dtype='bool')
     return binary_erosion(arr) ^ arr
 
 
-def _array_to_coords_2D(arr, ct_dcm, flatten=True):
+def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     """
     Function
     ----------
@@ -160,8 +132,9 @@ def _array_to_coords_2D(arr, ct_dcm, flatten=True):
 
     Parameters
     ----------
-    ct_dcm : pydicom.dataset.FileDataset
+    ct_hdr : pydicom.dataset.FileDataset
         A CT dicom object to compute the image coordinate locations upon
+        where _hdr means that the PixelData field is not required
     arr : numpy.ndarray
         A 2D boolean mask array corresponding to the segmentation mask
     flatten : bool (Default = True)
@@ -183,10 +156,10 @@ def _array_to_coords_2D(arr, ct_dcm, flatten=True):
     # These will be helpful for my troubleshooting later in the process
     # after which, they will likely become unnecessary due to protections upstream
     assert arr.ndim != 2, 'The input boolean mask is not 2D'
-    assert type(ct_dcm) is pydicom.dataset.FileDataset, 'ct_dcm is not a pydicom dataset'
+    assert type(ct_hdr) is pydicom.dataset.FileDataset, 'ct_dcm is not a pydicom dataset'
 
     mask = _wire_mask(arr)
-    coords = _prepare_coordinate_mapping(ct_dcm)
+    coords = _prepare_coordinate_mapping(ct_hdr)
 
     if not flatten:
         return coords[tuple(mask.nonzero()) + np.index_exp[:]].T
@@ -288,19 +261,24 @@ def _img_dims(dicom_list):
     return thickness, round(n_slices), low[0], high[0], flip
 
 
-def _get_z_loc(hdr, ct_thick, ct_loc0):
-    return round(abs((ct_loc0-hdr.SliceLocation) / ct_thick))
+def _get_z_loc(ct_hdr, ct_thick, ct_loc0):
+    return round(abs((ct_loc0-ct_hdr.SliceLocation) / ct_thick))
+
 
 # A function to collect all the UIDs and store them as a dictionary with keyword
 # as the image coordinate z-slice location
 def _generate_uid_dict(ct_series):
     uid_dict = {}
-    ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
+    #ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
     for ct in ct_series:
         hdr = pydicom.dcmread(ct, stop_before_pixels=True)
-        # TODO: Check compatiablity with the volume flipping
-        uid_dict.update({_get_z_loc(hdr, ct_thick, ct_loc0): hdr.InstanceUID})
-    return uid_dict
+        ct_store = pydicom.dataset.Dataset()
+        ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
+        ct_store.ReferencedSOPInstanceUID = hdr.SOPInstanceUID
+        uid_dict.update({hdr.SOPInstanceUID: ct_store})
+        #uid_dict.update({_get_z_loc(hdr, ct_thick, ct_loc0): hdr.InstanceUID})
+        #May need to save the z-axis location as well...
+    return dict(sorted(uid_dict.items()))
 
 
 # I don't know if this will work...
@@ -390,183 +368,47 @@ def _initialize_rt_dcm(ct_series):
     rt_ref_series_ds = pydicom.dataset.Dataset()
     rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
+    ct_uids = _generate_uid_dict(ct_series) 
+    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence([list(ct_uids.values())])
+    ''' 
+    # More explicit way of saving Image UIDs
     rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence()
 
+    ct_uids = _generate_uid_dict(ct_series) 
+    for uid in ct_uids:
+        rt_ref_series_ds.ContourImageSequence.append(ct_uids[uid])
+    '''
     # TODO: Return all the ref frame, study and series, or find a way to integrate them into the dcm
+
+    rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
+    rt_dcm.ROIContourSequence = pydicom.sequence.Sequence()
+    rt_dcm.RTROIObservationsSequence = pydicom.sequence.Sequence()
 
     return rt_dcm 
 
+# A function which takes the RT Struct and wire mask and appends to the rt file
+def _append_contour_to_dcm(source_rt, coords):
+
+    return False
+
 
 # A function to add to an RT
-def to_rt(source_rt, ct_series):
+def to_rt(source_rt, ct_series, contour_array):
+    ct_hdr = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
+    for contour in contour_array:
+        coords = _array_to_coords_2D(contour, ct_hdr)
+        source_rt = _append_contour_to_dcm(source_rt, coords)  
     return False
 
 # A function to create new from an RT
-def from_rt(source_rt, ct_series):
+def from_rt(source_rt, ct_series, contour_array):
     return False
 
-def from_ct(ct_series):
+def from_ct(ct_series, contour_array):
+    # Essentially this is the same as to_rt except we need to build a fresh RT
     rt_dcm = _initialize_rt_dcm(ct_series)
-      
-    for index, ct_file in enumerate(ct_series):
-        ct_dcm = pydicom.dcmread(ct_file)
-        # We only store the final contourimagesequence after all is done to maintain ordering
-        contour_image_ds = pydicom.dataset.Dataset()
-        # CT Image Storage
-        contour_image_ds.ReferencedSOPClassUID = pydicom.uid.UID(
-            '1.2.840.10008.5.1.4.1.1.2')
-        contour_image_ds.ReferencedSOPInstanceUID = ct_dcm.SOPInstanceUID
-        contour_image_uids[ct_dcm.SOPInstanceUID] = {'ds': contour_ct_dcm,
-                                                     'filename': image_file_name,
-                                                     'key': ct_dcm.SOPInstanceUID}
+    rt_dcm = to_rt(rt_dcm, ct_series, contour_array)
     return rt_dcm
-
-# ------------------ Legacy Code ---------------------------------
-
-def _threaded_geom_op(item):
-    try:
-        image_ds = item[0]
-        y_elem = item[1]
-        class_list = item[2]
-
-        y_elem = resize(y_elem, output_shape=(image_ds.Rows, image_ds.Columns), order=0, mode='constant', preserve_range=True)
-
-        # Process prediction into contours
-        contour_list_pred = {}  # This will contain contours for this slice represented as lists of polygons
-        p_s_x = float(image_ds.PixelSpacing[0])
-        p_s_y = float(image_ds.PixelSpacing[1])
-        p_coords = _prepare_coordinate_mapping(
-            image_ds)  # X,Y,3 matrix containing at each voxel the coordinates of the center of that voxel
-
-        for roi_name, label_img in zip(class_list[1:], np.rollaxis(y_elem, 2, 0)[1:, ...]):
-            connected_comps_pred = label(label_img, connectivity=2)
-            contour_list_roi = []
-            region_count = 0
-            
-            for region in regionprops(connected_comps_pred):
-                region_count += 1
-                multi_poly_list = []
-
-                for point in MultiPoint([(p_coords[p[0], p[1], :]) for p in region.coords]):
-                    # We have converted now from pixel coordinates to RCS coordinates. When
-                    # we divide pixelspacing by 2, we get all sorts of ugly disjoint contours.
-                    # Instead, we divide by 1.5 for a bit of overlap.
-                    point_poly = Polygon([(point.x - p_s_x / 1.5, point.y - p_s_y / 1.5, point.z),
-                                          (point.x + p_s_x / 1.5, point.y - p_s_y / 1.5, point.z),
-                                          (point.x + p_s_x / 1.5, point.y + p_s_y / 1.5, point.z),
-                                          (point.x - p_s_x / 1.5, point.y + p_s_y / 1.5, point.z)])
-
-                    multi_poly_list.append(point_poly)
-
-                dissolve_poly = unary_union(MultiPolygon(multi_poly_list))
-                shape_polys = []
-
-                if isinstance(dissolve_poly, Polygon):
-                    shape_polys.append(dissolve_poly)
-                elif isinstance(dissolve_poly, MultiPolygon):
-                    shape_polys.extend([poly for poly in dissolve_poly])
-
-                # Old and busted: This region's shapes get coordified at the time of region processing.
-                # for poly in shape_polys:
-                #     coord_list = poly.exterior.coords[:]
-                #     coord_list = [(x[0], x[1], x[2]) for x in coord_list]
-                #     contour_list_roi.append(coord_list)
-
-                # New hotness: We store the polygons for the region and postprocess the whole ROI at once.
-
-                contour_list_roi.extend(shape_polys)
-
-            # If there are any contours for this ROI, we'll add it to the list of contours for this slice
-            # Postprocessing based on contour geometry, etc, may go here if we store it somewhere.
-
-            if contour_list_roi:
-                postprocessed_roi_list = contour_list_roi
-
-                if POSTPROCESS:
-                    # Step 1: Eliminate free pixels.
-                    #    A 'free' pixel is a polygon with area less than min_poly_area, and
-                    #    more than max_poly_dist away from its closest neighbor.
-
-                    min_poly_area = 5.5 # Hardcoded magic number, will change with resolution/upsampling
-                    max_poly_dist = max(p_s_x, p_s_y)
-
-                    # We find all polys smaller than our cutoff, and measure the minimum distance between them and any
-                    # other poly in this ROI (that is not them)
-
-                    small_polys = [(poly, min([poly.distance(cand_poly) for cand_poly in contour_list_roi])) for poly in contour_list_roi if poly.area < min_poly_area]
-                    big_polys = [poly for poly in contour_list_roi if poly.area >= min_poly_area]
-
-                    for poly, min_dist in small_polys:
-                        if min_dist > 0.0 and min_dist < max_poly_dist:
-                            big_polys.append(poly) # A small poly that is closer than max_poly_dist isn't really small.
-
-                    postprocessed_roi_list = big_polys
-
-                    if not postprocessed_roi_list:
-                        continue # Don't add anything if there aren't contours left
-
-                    # Step 2: Close gaps. We dilate and erode polygons using buffers.
-
-                    buffer_radius = 5*max_poly_dist
-                    current_z = postprocessed_roi_list[0].exterior.coords[0][2]
-                    buffer_poly = MultiPolygon(postprocessed_roi_list).buffer(buffer_radius).buffer(-buffer_radius)
-
-                    if isinstance(buffer_poly, MultiPolygon):
-                        postprocessed_roi_list = [Polygon([(p[0], p[1], current_z) for p in poly.exterior.coords[:]]) for poly in buffer_poly]
-                    elif isinstance(buffer_poly, Polygon):
-                        postprocessed_roi_list = [Polygon([(p[0], p[1], current_z) for p in buffer_poly.exterior.coords[:]])]
-                    if not postprocessed_roi_list:
-                        continue # Don't add anything if there aren't contours left
-
-                    # Step 3: ROI-specific contour number restriction
-                    if roi_name == 'RtLung' or roi_name == 'LtLung':
-                        # Up to 3 lung contours allowed - take biggest by area
-                        if len(postprocessed_roi_list) > 3:
-                            postprocessed_roi_list = sorted(postprocessed_roi_list, key=lambda x: x.area, reverse=True)[0:3]
-                    else:
-                        # Up to 1 contour allowed for most structures - take biggest by area
-                        if len(postprocessed_roi_list) > 1:
-                            postprocessed_roi_list = [sorted(postprocessed_roi_list, key=lambda x: x.area, reverse=True)[0]]
-
-                # Set list of geometries for this ROI
-                contour_list_pred[roi_name] = postprocessed_roi_list
-
-        #Additional postprocessing based on ROI-on-ROI interactions goes here
-        output_dict = {}
-        for k,v in contour_list_pred.iteritems():
-            output_dict[k] = [poly.exterior.coords[:] for poly in v]
-
-        return output_dict
-
-    except:
-        print('Error in threaded op')
-
-# Can likely remove most, but will check first
-def _predict_slices(images, model, mean_pixel, class_list):
-    """
-    Core prediction function. Uses the Keras model in GPU mode to generate probability maps for each slice, then
-    uses Shapely geometry processing with multiprocessing to convert those raster maps to vector data.
-    :param images: A list of pydicom Datasets representing the CT slices to predict contours for
-    :param model: A pre-trained and initialized Beaunet Keras model
-    :param class_list: A list of contour names in order describing the output vector of the Keras model
-    :return: A dictionary mapping slice UIDs to ROI names to a list of contours for that ROI.
-    """
-
-    # Process images in sequence
-    slices_to_contours = {}
-
-    executor = concurrent.futures.ProcessPoolExecutor(24)
-    futures = [executor.submit(_threaded_geom_op, item) for item in zip(images, y_data, repeat(class_list, len(images)))]
-    concurrent.futures.wait(futures)
-    results = [output.result() for output in futures]
-
-    for image_ds, predicted_contours in zip(images, results):
-        slices_to_contours[image_ds.SOPInstanceUID] = {}
-        for roi_name, contour_list in predicted_contours.iteritems():
-            slices_to_contours[image_ds.SOPInstanceUID][roi_name] = contour_list
-
-    # Return mapping of slices to contours and ROI names to slices/contours
-    return slices_to_contours
 
 
 # A function to create new from CT
@@ -673,7 +515,7 @@ def from_ct(ct_series):
     rt_dcm.StructureSetROISequence = sequence.Sequence()
     rt_dcm.ROIContourSequence = sequence.Sequence()
     rt_dcm.RTROIObservationsSequence = sequence.Sequence()
-
+    # -------------------- Where _initialize_rt ends and other functions begin to be sourced ------------------------------------
     # Process the images one by one in order of contour sequence.
     image_num = 0
     image_batch = []
