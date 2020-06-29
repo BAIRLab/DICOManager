@@ -383,36 +383,86 @@ def _initialize_rt_dcm(ct_series):
     rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
     rt_dcm.ROIContourSequence = pydicom.sequence.Sequence()
     rt_dcm.RTROIObservationsSequence = pydicom.sequence.Sequence()
+    
+    file_meta = pydicom.dataset.Dataset()
+    file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.2'
+    file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+    file_meta.ImplementationClassUID = pydicom.uid.generate_uid()
 
-    return rt_dcm 
+    # Need to investigate what this does. 
+    output_ds = pydicom.dataset.FileDataset(None, rt_dcm, file_meta=file_meta, preamble="\0" * 128)
+    return output_ds 
 
 # A function which takes the RT Struct and wire mask and appends to the rt file
-def _append_contour_to_dcm(source_rt, coords):
+# This should have a uid_list which is a list of the uid values per contour list  
+def _append_contour_to_dcm(source_rt, coords_list, uid_list, roi_name):
+    roi_number = len(source_rt.StructureSetROISequence) + 1
+    # Add ROI to Structure Set Sequence
+    str_set_roi = pydicom.dataset.Dataset()
+    str_set_roi.ROINumber = roi_number
+    str_set_roi.ROIName = roi_name
+    str_set_roi.ReferencedFrameOfReferenceUID = source_rt.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
+    str_set_roi.ROIGenerationAlgorithm = 'AUTOMATIC'
+    source_rt.StructureSetROISequence.append(str_set_roi)
 
-    return False
+    # Add ROI to ROI Contour Sequence
+    roi_contour_ds = pydicom.dataset.Dataset()
+    roi_contour_ds.ROIDisplayColor = [255, 0, 0] 
+    roi_contour_ds.ReferencedROINumber = roi_number
+    roi_contour_ds.ContourSequence = pydicom.sequence.Sequence([])
+    source_rt.ROIContourSequence.append(roi_contour_ds)
+    
+    for index, coords_list in enumerate(coords_list):
+        contour_ds = pydicom.dataset.Dataset()
+        # TODO: This is where we need the UIDs from the slices.
+        contour_ds.ContourImageSequence = pydicom.sequence.Sequence(uid_list[index])
+        contour_ds.ContourGeometricType = 'CLOSED_PLANAR'
+        contour_ds.NumberOfContourPoints = len(coords) // 3
+        contour_ds.ContourData = [f'{p:0.2f}' for p in coords]
+        roi_contour_ds.ContourSequence.append(contour_ds)
+
+    # Add ROI to RT ROI Observations Sequence
+    rt_roi_obs = pydicom.dataset.Dataset()
+    rt_roi_obs.ObservationNumber = roi_number
+    rt_roi_obs.ReferencedROINumber = roi_number
+    rt_roi_obs.ROIObservationLabel = roi_name
+    rt_roi_obs.RTROIInterpretedType = 'ORGAN'
+    source_rt.RTROIObservationsSequence.append(rt_roi_obs)
+    
+    return source_rt
 
 
 # A function to add to an RT
-def to_rt(source_rt, ct_series, contour_array):
+def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     ct_hdr = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
-    for contour in contour_array:
+    # Need to have the contour slices in relation to the individual image UIDs
+    # We can do that with the help of the z-axis location data. Will likely 
+    # want to have the data stored in a nice-to-use struct
+    # Could also find the nearest image slice to a given contour location
+    # I think I will try this until I know that the robustness of this solution
+    for index, contour in enumerate(contour_array):
+        if roi_name_list:
+            roi_name = roi_name_list[index]
+        else:
+            roi_name = 'GeneratedContour' + str(index)
         coords = _array_to_coords_2D(contour, ct_hdr)
-        source_rt = _append_contour_to_dcm(source_rt, coords)  
+        source_rt = _append_contour_to_dcm(source_rt, coords, roi_name)  
     return False
 
 # A function to create new from an RT
-def from_rt(source_rt, ct_series, contour_array):
+def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     return False
 
-def from_ct(ct_series, contour_array):
+# Could make this into an actual wrapper, instead of what it is now...
+def from_ct(ct_series, contour_array, roi_name_list=None):
     # Essentially this is the same as to_rt except we need to build a fresh RT
     rt_dcm = _initialize_rt_dcm(ct_series)
-    rt_dcm = to_rt(rt_dcm, ct_series, contour_array)
+    rt_dcm = to_rt(rt_dcm, ct_series, contour_array, roi_name_list)
     return rt_dcm
 
 
 # A function to create new from CT
-def from_ct(ct_series):
+def leonid_main(ct_series):
     # Start crafting the RTSTRUCT
     rt_dcm = pydicom.dataset.Dataset()
 
@@ -521,15 +571,18 @@ def from_ct(ct_series):
     image_batch = []
     image_processing_order = sorted(contour_image_uids.keys())
 
+    # Generate and store predictions
     for image_file_name, _ in [(contour_image_uids[key]['filename'], contour_image_uids[key]['key']) for key in image_processing_order]:
         try:
             image_ds = read_file(os.path.join(dirpath, image_file_name))
             # Do work if this DICOM file is a CT slice
             if image_ds.SOPClassUID == uid.UID('1.2.840.10008.5.1.4.1.1.2'):
+                # Builds a list of 24 images and then predicts
                 if len(image_batch) >= 24:
                     predict_slices_contours = _predict_slices(image_batch, model, mean_pixel, class_list)
                     # Add predictions to general list
                     for slice_id, contour_dict in predict_slices_contours.iteritems():
+                        # Saves contour and roi name with the UIDs and the contour_image_ds
                         contour_image_uids[slice_id]['contours'] = {}
                         for roi_name, contour_list in contour_dict.iteritems():
                             contour_image_uids[slice_id]['contours'][roi_name] = contour_list
