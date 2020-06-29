@@ -3,32 +3,25 @@
 # This script will use a trained Beaunet model to run on a directory of DICOM-format image files (CT only) and
 # write a DICOM RTSTRUCT file that contains predicted contours.
 #
-'''
-TODO:
-Finish with the construction of the rtstruct header
-Determine how Leonid used shapely to compute the surface points. (poly.points.exterior, it looks like)
-Assert that the Polygon reconstruction is equaivalent between Leonid's and my method
-Determine how Leonid packed the points into the RTSTRUCT file format
-'''
 
 # May want to do less specific imports ... 
-from scipy.ndimage.morphology import binary_erosion
-import scipy
+import concurrent.futures
 import numpy as np
-# This is a strange import, clean up
-import argparse, h5py, numpy as np, os, random, time
+import pydicom
+import scipy
+import time
+from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 from itertools import repeat
-import concurrent.futures
-import pydicom
-from dataclasses import dataclass
+from scipy.ndimage.morphology import binary_erosion
 # TODO: Remove these subfucntion imports
 #from pydicom import dataset, read_file, sequence, uid
+# This is a strange import, clean up
+#import argparse, h5py, numpy as np, os, random, time
+#from skimage.transform import resize
+#from skimage.measure import label, regionprops
 
-from skimage.transform import resize
-from skimage.measure import label, regionprops
-
-from datetime import datetime
 
 """
 NOTE: Reconstruction plan:
@@ -412,7 +405,7 @@ def _append_contour_to_dcm(source_rt, coords_list, uid_list, roi_name):
     roi_contour_ds.ContourSequence = pydicom.sequence.Sequence([])
     source_rt.ROIContourSequence.append(roi_contour_ds)
     
-    for index, coords_list in enumerate(coords_list):
+    for index, coords in enumerate(coords_list):
         contour_ds = pydicom.dataset.Dataset()
         # TODO: This is where we need the UIDs from the slices.
         contour_ds.ContourImageSequence = pydicom.sequence.Sequence(uid_list[index])
@@ -446,7 +439,9 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
         else:
             roi_name = 'GeneratedContour' + str(index)
         coords = _array_to_coords_2D(contour, ct_hdr)
-        source_rt = _append_contour_to_dcm(source_rt, coords, roi_name)  
+        # We could probably save this from being called twice...
+        uid_dict = _generate_uid_dict(ct_series)
+        source_rt = _append_contour_to_dcm(source_rt, coords, uid_dict, roi_name)  
     return False
 
 # A function to create new from an RT
@@ -459,212 +454,3 @@ def from_ct(ct_series, contour_array, roi_name_list=None):
     rt_dcm = _initialize_rt_dcm(ct_series)
     rt_dcm = to_rt(rt_dcm, ct_series, contour_array, roi_name_list)
     return rt_dcm
-
-
-# A function to create new from CT
-def leonid_main(ct_series):
-    # Start crafting the RTSTRUCT
-    rt_dcm = pydicom.dataset.Dataset()
-
-    # Time specific DICOM header info
-    current_time = time.localtime()
-    rt_dcm.SpecificCharacterSet = 'ISO_IR 100'
-    rt_dcm.InstanceCreationDate = time.strftime('%Y%m%d', current_time) # DICOM date format
-    rt_dcm.InstanceCreationTime = time.strftime('%H%M%S.%f', current_time)[:-3] # DICOM time format
-    rt_dcm.StructureSetDate = time.strftime('%Y%m%d', current_time)
-    rt_dcm.StructureSetTime = time.strftime('%H%M%S.%f', current_time)[:-3]
-
-    # UID Header Info
-    rt_dcm.SOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3' # RT Structure Set Storage Class
-    rt_dcm.SOPInstanceUID = uid.generate_uid()
-    rt_dcm.Modality = 'RTSTRUCT'
-    rt_dcm.Manufacturer = 'Beaumont Health'
-    rt_dcm.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
-    rt_dcm.StructureSetLabel = 'Auto-Segmented Contours'
-    rt_dcm.StructureSetName = 'Auto-Segmented Contours'
-    rt_dcm.SoftwareVersions = ['0.1.0']
-
-    # Scan through input directory and grab common data; first file will be used to initialize demographics
-    # and study-level variables
-    rtstruct_init = False
-    contour_image_uids = {}
-    roi_images = {}
-
-    for image_file_name in filenames:
-        # Don't try to force a read; instead, just attempt, and if it doesn't work,
-        # or if this is not a CT slice, go to the next image.
-        image_ds = read_file(os.path.join(dirpath, image_file_name), force=False)
-        if not image_ds.SOPClassUID == uid.UID('1.2.840.10008.5.1.4.1.1.2'):
-            continue
-        if not rtstruct_init:
-            # Referenced study
-            referenced_study_ds = dataset.Dataset()
-            referenced_study_ds.ReferencedSOPClassUID = uid.UID('1.2.840.10008.3.1.2.3.2') # Study Component Management SOP Class
-            referenced_study_ds.ReferencedSOPInstanceUID = image_ds.StudyInstanceUID
-            rt_dcm.ReferencedStudySequence = sequence.Sequence([referenced_study_ds])
-            # Demographics
-            if 'PatientsName' in image_ds:
-                rt_dcm.PatientsName = image_ds.PatientsName
-            else:
-                rt_dcm.PatientsName = 'UNKNOWN^UNKNOWN^^'
-            if 'PatientID' in image_ds:
-                rt_dcm.PatientID = image_ds.PatientID
-            else:
-                rt_dcm.PatientID = '0000000'
-
-            if 'PatientsBirthDate' in image_ds:
-                rt_dcm.PatientsBirthDate = image_ds.PatientsBirthDate
-            else:
-                rt_dcm.PatientsBirthDate = ''
-
-            if 'PatientsSex' in image_ds:
-                rt_dcm.PatientsSex = image_ds.PatientsSex
-            else:
-                rt_dcm.PatientsSex = ''
-
-            # This study
-            rt_dcm.StudyInstanceUID = image_ds.StudyInstanceUID
-            rt_dcm.SeriesInstanceUID = uid.generate_uid()
-
-            if 'StudyID' in image_ds:
-                rt_dcm.StudyID = image_ds.StudyID
-            if 'SeriesNumber' in image_ds:
-                rt_dcm.SeriesNumber = image_ds.SeriesNumber
-            if 'StudyDate' in image_ds:
-                rt_dcm.StudyDate = image_ds.StudyDate
-            if 'StudyTime' in image_ds:
-                rt_dcm.StudyTime = image_ds.StudyTime
-
-            # Referenced frame of reference
-            referenced_frame_of_reference_ds = dataset.Dataset()
-            rt_dcm.ReferencedFrameOfReferenceSequence = sequence.Sequence([referenced_frame_of_reference_ds])
-            referenced_frame_of_reference_ds.FrameOfReferenceUID = image_ds.FrameOfReferenceUID
-            rt_referenced_study_ds = dataset.Dataset()
-            referenced_frame_of_reference_ds.RTReferencedStudySequence = sequence.Sequence([rt_referenced_study_ds])
-            rt_referenced_study_ds.ReferencedSOPClassUID = uid.UID('1.2.840.10008.3.1.2.3.2') # Study Component Management SOP Class
-            rt_referenced_study_ds.ReferencedSOPInstanceUID = image_ds.StudyInstanceUID
-            rt_referenced_series_ds = dataset.Dataset()
-            rt_referenced_study_ds.RTReferencedSeriesSequence = sequence.Sequence([rt_referenced_series_ds])
-            rt_referenced_series_ds.SeriesInstanceUID = image_ds.SeriesInstanceUID
-            rt_referenced_series_ds.ContourImageSequence = sequence.Sequence()
-
-            # Once all is done, mark initialized
-            rtstruct_init = True
-
-        # We only store the final contourimagesequence after all is done to maintain ordering
-        contour_image_ds = dataset.Dataset()
-        contour_image_ds.ReferencedSOPClassUID = uid.UID('1.2.840.10008.5.1.4.1.1.2') # CT Image Storage
-        contour_image_ds.ReferencedSOPInstanceUID = image_ds.SOPInstanceUID
-        contour_image_uids[image_ds.SOPInstanceUID] = {'ds':contour_image_ds, 'filename':image_file_name, 'key': image_ds.SOPInstanceUID}
-
-    # All images scanned (not processed!), build more sequences
-    # This is all the images in the referenced series, regardless of whether they have contours or not
-    rt_referenced_series_ds.ContourImageSequence.extend([contour_image_uids[key]['ds'] for key in sorted(contour_image_uids.keys())])
-
-    # Create sequence objects for contours - these may be empty if no contours are created
-    rt_dcm.StructureSetROISequence = sequence.Sequence()
-    rt_dcm.ROIContourSequence = sequence.Sequence()
-    rt_dcm.RTROIObservationsSequence = sequence.Sequence()
-    # -------------------- Where _initialize_rt ends and other functions begin to be sourced ------------------------------------
-    # Process the images one by one in order of contour sequence.
-    image_num = 0
-    image_batch = []
-    image_processing_order = sorted(contour_image_uids.keys())
-
-    # Generate and store predictions
-    for image_file_name, _ in [(contour_image_uids[key]['filename'], contour_image_uids[key]['key']) for key in image_processing_order]:
-        try:
-            image_ds = read_file(os.path.join(dirpath, image_file_name))
-            # Do work if this DICOM file is a CT slice
-            if image_ds.SOPClassUID == uid.UID('1.2.840.10008.5.1.4.1.1.2'):
-                # Builds a list of 24 images and then predicts
-                if len(image_batch) >= 24:
-                    predict_slices_contours = _predict_slices(image_batch, model, mean_pixel, class_list)
-                    # Add predictions to general list
-                    for slice_id, contour_dict in predict_slices_contours.iteritems():
-                        # Saves contour and roi name with the UIDs and the contour_image_ds
-                        contour_image_uids[slice_id]['contours'] = {}
-                        for roi_name, contour_list in contour_dict.iteritems():
-                            contour_image_uids[slice_id]['contours'][roi_name] = contour_list
-                            if roi_name not in roi_images:
-                                roi_images[roi_name] = []
-                            roi_images[roi_name].append([slice_id, contour_list])
-                    image_num += len(image_batch)
-                    print('    Processed slices {0:d} of {1:d}'.format(image_num, len(image_processing_order)))
-                    image_batch = []
-                image_batch.append(image_ds)
-        except Exception as e:
-            print('Exception: {0:s}'.format(e.message))
-
-    predict_slices_contours = _predict_slices(image_batch, model, mean_pixel, class_list)
-    # Add predictions to general list
-
-    for slice_id, contour_dict in predict_slices_contours.iteritems():
-        contour_image_uids[slice_id]['contours'] = {}
-        for roi_name, contour_list in contour_dict.iteritems():
-            contour_image_uids[slice_id]['contours'][roi_name] = contour_list
-            if roi_name not in roi_images:
-                roi_images[roi_name] = []
-                roi_images[roi_name].append([slice_id, contour_list])
-        image_num += len(image_batch)
-        print('    Processed slices {0:d} of {1:d}'.format(image_num, len(image_processing_order)))
-
-        # Now we have contours for each CT slice. We have a mapping of CT slice ID to data:
-        #   contour_image_uids[ID] = {ds: image_ds, filename: str, key: ID, contours: {roi_name: list}}
-        # And a mapping of ROI name to slices:
-        #   roi_images[roi_name] = [[ID, contourlist], ...]
-        # Let's construct the tags.
-
-        rt_dcm.StructureSetROISequence = sequence.Sequence([])
-        rt_dcm.ROIContourSequence = sequence.Sequence([])
-        rt_dcm.RTROIObservationsSequence = sequence.Sequence([])
-        roi_number = 1
-
-        for roi_name in class_list:
-            # If the ROI exists in our image set...
-            if roi_name in roi_images:
-                # Add ROI to Structure Set Sequence
-                structure_set_roi_ds = dataset.Dataset()
-                rt_dcm.StructureSetROISequence.append(structure_set_roi_ds)
-                structure_set_roi_ds.ROINumber = roi_number
-                structure_set_roi_ds.ReferencedFrameOfReferenceUID = rt_dcm.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
-                structure_set_roi_ds.ROIName = roi_name
-                structure_set_roi_ds.ROIGenerationAlgorithm = 'AUTOMATIC'
-
-                # Add ROI to ROI Contour Sequence
-                roi_contour_ds = dataset.Dataset()
-                rt_dcm.ROIContourSequence.append(roi_contour_ds)
-                roi_contour_ds.ROIDisplayColor = list(color_dict[roi_name][1:])
-                roi_contour_ds.ReferencedROINumber = roi_number
-                roi_contour_ds.ContourSequence = sequence.Sequence([])
-
-                for slice_id, contour_list in roi_images[roi_name]:
-                    for contour in contour_list:
-                        contour_ds = dataset.Dataset()
-                        contour_ds.ContourImageSequence = sequence.Sequence([contour_image_uids[slice_id]['ds']])
-                        contour_ds.ContourGeometricType = 'CLOSED_PLANAR'
-                        contour_ds.NumberOfContourPoints = len(contour)
-                        contour_ds.ContourData = ['{0:0.2f}'.format(val) for p in contour for val in p]
-                        roi_contour_ds.ContourSequence.append(contour_ds)
-
-                # Add ROI to RT ROI Observations Sequence
-                rt_roi_obs = dataset.Dataset()
-                rt_dcm.RTROIObservationsSequence.append(rt_roi_obs)
-                rt_roi_obs.ObservationNumber = roi_number
-                rt_roi_obs.ReferencedROINumber = roi_number
-                rt_roi_obs.ROIObservationLabel = roi_name
-                rt_roi_obs.RTROIInterpretedType = 'ORGAN'
-
-                # Update ROI number
-                roi_number += 1
-
-        file_meta = dataset.Dataset()
-        file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.2'
-        file_meta.MediaStorageSOPInstanceUID = uid.generate_uid()
-        file_meta.ImplementationClassUID = uid.generate_uid()
-
-        output_ds = dataset.FileDataset(output_path, {}, file_meta=file_meta, preamble="\0" * 128)
-        output_ds.update(rt_dcm)
-        output_ds.save_as(output_path)
-
-    return True
