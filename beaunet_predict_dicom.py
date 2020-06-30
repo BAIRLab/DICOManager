@@ -1,10 +1,5 @@
 #! /usr/bin/python
-#
-# This script will use a trained Beaunet model to run on a directory of DICOM-format image files (CT only) and
-# write a DICOM RTSTRUCT file that contains predicted contours.
-#
 
-# May want to do less specific imports ... 
 import concurrent.futures
 import numpy as np
 import pydicom
@@ -12,29 +7,7 @@ import scipy
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from functools import partial
-from itertools import repeat
 from scipy.ndimage.morphology import binary_erosion
-# TODO: Remove these subfucntion imports
-#from pydicom import dataset, read_file, sequence, uid
-# This is a strange import, clean up
-#import argparse, h5py, numpy as np, os, random, time
-#from skimage.transform import resize
-#from skimage.measure import label, regionprops
-
-
-"""
-NOTE: Reconstruction plan:
-use __prepare_coordinate_mapping to get image to patient coordinates
-use __compute_surface2D to get the surface of a contour
-use the interesction of those two to get the patient coordinates
-    surface points
-with those points, unravel them and project them into the DICOM tree
-    with the correct additional information (UID Tags, Names, Colors)
-when we generate the RTSTRUCT, we need a list of all image series, and
-    their corresponding image slice locations, so we can save the UID
-    for each slice in the DICOM header info
-"""
 
 
 def _prepare_coordinate_mapping(ct_hdr):
@@ -127,7 +100,7 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     ----------
     ct_hdr : pydicom.dataset.FileDataset
         A CT dicom object to compute the image coordinate locations upon
-        where _hdr means that the PixelData field is not required
+        where 'hdr' means that the PixelData field is not required
     arr : numpy.ndarray
         A 2D boolean mask array corresponding to the segmentation mask
     flatten : bool (Default = True)
@@ -254,23 +227,45 @@ def _img_dims(dicom_list):
     return thickness, round(n_slices), low[0], high[0], flip
 
 
-def _get_z_loc(ct_hdr, ct_thick, ct_loc0):
-    return round(abs((ct_loc0-ct_hdr.SliceLocation) / ct_thick))
+
+@dataclass
+class UidItem:
+    hdr: pydicom.dataset.Dataset()
+    ct_thick: float
+    ct_loc0: float
+    uid: str = None
+    loc: int = None
+    ct_store: pydicom.dataset.Dataset() = None
 
 
-# A function to collect all the UIDs and store them as a dictionary with keyword
-# as the image coordinate z-slice location
+    def __getitem__(self, name):
+        return self.__dict__[name]
+
+
+    def __setitem__(self, name, value):
+        self.__dict__[name] = value
+
+    
+    def _get_z_loc(self):
+        diff = self.ct_loc0 - self.hdr.SliceLocation
+        return round(abs(diff / self.ct_thick))
+
+
+    def __post_init__(self):
+        self.loc = self._get_z_loc()
+        self.uid = self.hdr.SOPInstanceUID
+        self.ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
+        self.ct_store.ReferencedSOPInstanceUID = self.hdr.SOPInstanceUID
+        self.hdr = None # Clear out the header because its not needed
+
+
+# Could make this entire dictionary into a dataclass ... will need to evaluate it
 def _generate_uid_dict(ct_series):
     uid_dict = {}
-    #ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
+    ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
     for ct in ct_series:
         hdr = pydicom.dcmread(ct, stop_before_pixels=True)
-        ct_store = pydicom.dataset.Dataset()
-        ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
-        ct_store.ReferencedSOPInstanceUID = hdr.SOPInstanceUID
-        uid_dict.update({hdr.SOPInstanceUID: ct_store})
-        #uid_dict.update({_get_z_loc(hdr, ct_thick, ct_loc0): hdr.InstanceUID})
-        #May need to save the z-axis location as well...
+        uid_dict.update({hdr.SOPInstanceUID: UidItem(hdr, ct_thick, ct_loc0)})
     return dict(sorted(uid_dict.items()))
 
 
@@ -295,6 +290,7 @@ def _initialize_rt_dcm(ct_series):
     # UID Header Info
     # RT Structure Set Storage Class
     rt_dcm.SOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
+    # TODO: Need to see if the UIDs are the same if generated here or after data filling
     rt_dcm.SOPInstanceUID = pydicom.uid.generate_uid()
     rt_dcm.Modality = 'RTSTRUCT'
     rt_dcm.Manufacturer = 'Beaumont Health'
@@ -311,22 +307,22 @@ def _initialize_rt_dcm(ct_series):
     rt_dcm.ReferencedStudySequence = pydicom.sequence.Sequence([ref_study_ds])
 
     # Demographics
-    if 'PatientsName' in ct_dcm:
+    if hasattr(ct_dcm, 'PatientsName'):
         rt_dcm.PatientsName = ct_dcm.PatientsName
     else:
         rt_dcm.PatientsName = 'UNKNOWN^UNKNOWN^^'
 
-    if 'PatientID' in ct_dcm:
-        rt_dcm.PatientID = ct_dcm.PatientID
+    if hasattr(ct_dcm, 'PatientID'):
+        rt_dcm.PatientID = ct_dcm.PatientID 
     else:
         rt_dcm.PatientID = '0000000'
 
-    if 'PatientsBirthDate' in ct_dcm:
+    if hasattr(ct_dcm, 'PatientsBirthDate'):
         rt_dcm.PatientsBirthDate = ct_dcm.PatientsBirthDate
     else:
         rt_dcm.PatientsBirthDate = ''
 
-    if 'PatientsSex' in ct_dcm:
+    if hasattr(ct_dcm, 'PatientsSex'):
         rt_dcm.PatientsSex = ct_dcm.PatientsSex
     else:
         rt_dcm.PatientsSex = ''
@@ -362,15 +358,9 @@ def _initialize_rt_dcm(ct_series):
     rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
     ct_uids = _generate_uid_dict(ct_series) 
+    # Now that the function was updated, this needs to be fixed as well
     rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence([list(ct_uids.values())])
-    ''' 
-    # More explicit way of saving Image UIDs
-    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence()
-
-    ct_uids = _generate_uid_dict(ct_series) 
-    for uid in ct_uids:
-        rt_ref_series_ds.ContourImageSequence.append(ct_uids[uid])
-    '''
+    
     # TODO: Return all the ref frame, study and series, or find a way to integrate them into the dcm
 
     rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
@@ -400,7 +390,7 @@ def _append_contour_to_dcm(source_rt, coords_list, uid_list, roi_name):
 
     # Add ROI to ROI Contour Sequence
     roi_contour_ds = pydicom.dataset.Dataset()
-    roi_contour_ds.ROIDisplayColor = [255, 0, 0] 
+    roi_contour_ds.ROIDisplayColor = [255, 0, 0]  # All red for simplicity
     roi_contour_ds.ReferencedROINumber = roi_number
     roi_contour_ds.ContourSequence = pydicom.sequence.Sequence([])
     source_rt.ROIContourSequence.append(roi_contour_ds)
@@ -408,6 +398,7 @@ def _append_contour_to_dcm(source_rt, coords_list, uid_list, roi_name):
     for index, coords in enumerate(coords_list):
         contour_ds = pydicom.dataset.Dataset()
         # TODO: This is where we need the UIDs from the slices.
+        # Could compute the boolean sum of slices and index a complete uid list 
         contour_ds.ContourImageSequence = pydicom.sequence.Sequence(uid_list[index])
         contour_ds.ContourGeometricType = 'CLOSED_PLANAR'
         contour_ds.NumberOfContourPoints = len(coords) // 3
@@ -437,7 +428,7 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
         if roi_name_list:
             roi_name = roi_name_list[index]
         else:
-            roi_name = 'GeneratedContour' + str(index)
+            roi_name = 'GeneratedContour' + str(index + 1)
         coords = _array_to_coords_2D(contour, ct_hdr)
         # We could probably save this from being called twice...
         uid_dict = _generate_uid_dict(ct_series)
@@ -446,7 +437,14 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
 
 # A function to create new from an RT
 def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
-    return False
+    # Need to build a function which copies the relevant information from an RT Struct,
+    # or creates a seocnd one without the prexisiting contour files.
+    # The way to do this will be looking at two DICOM RT files and identifying the
+    # difference between the two files
+    new_rt = pydicom.dataset.Dataset(source_rt.copy())
+    # Then, we need to figure out which items we need to delete or change
+    # Need to delete all the stored contour names, colors, references and points
+    return new_rt 
 
 # Could make this into an actual wrapper, instead of what it is now...
 def from_ct(ct_series, contour_array, roi_name_list=None):
