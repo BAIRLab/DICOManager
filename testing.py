@@ -3,132 +3,112 @@ import os
 import pydicom
 import glob
 import time
+from dataclasses import dataclass
 
-dcm = pydicom.dcmread(glob.glob('/home/eporter/eporter_data/hippo_data/1112686/CT/*.dcm')[0])
 
-def evan(dcm):
+@dataclass
+class UidItem:
+    hdr: pydicom.dataset.Dataset()
+    ct_thick: float
+    ct_loc0: float
+    uid: str = None
+    loc: int = None
+    ct_store: pydicom.dataset.Dataset() = None
+
+    def __getitem__(self, name):
+        return self.__dict__[name]
+
+    def __setitem__(self, name, value):
+        self.__dict__[name] = value
+
+    def _get_z_loc(self):
+        diff = self.ct_loc0 - self.hdr.SliceLocation
+        return round(abs(diff / self.ct_thick))
+
+    def __post_init__(self):
+        self.loc = self._get_z_loc()
+        self.uid = self.hdr.SOPInstanceUID
+        self.ct_store = pydicom.dataset.Dataset()
+        self.ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
+        self.ct_store.ReferencedSOPInstanceUID = self.hdr.SOPInstanceUID
+        self.hdr = None
+
+
+# Could make this entire dictionary into a dataclass ... will need to evaluate it
+def _generate_uid_dict(ct_series):
+    uid_dict = {}
+    ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
+    for ct in ct_series:
+        hdr = pydicom.dcmread(ct, stop_before_pixels=True)
+        uid_dict.update({hdr.SOPInstanceUID: UidItem(hdr, ct_thick, ct_loc0)})
+    return dict(sorted(uid_dict.items()))
+
+
+def _img_dims(dicom_list):
     """
     Function
     ----------
-    Given a DICOM CT image slice, returns an array of pixel coordinates
+    Computation of the image dimensions for slice thickness and number
+        of z slices in total
 
     Parameters
     ----------
-    dcm : pydicom.dataset.FileDataset
-        A CT dicom object to compute the image coordinate locations upon
+    dicom_list : list
+        A list of the paths to every dicom for the given image
 
     Returns
     ----------
-    numpy.ndarray
-        A numpy array of shape Mx2 where M is the dcm.Rows x dcm.Cols,
-        the number of (x, y) pairs represnting coordinates of each pixel
+    (thickness, n_slices, low, high, flip) : (float, int, float, float, boolean)
+        0.Slice thickness computed from dicom locations, not header
+        1.Number of slices, computed from dicom locations, not header
+        2.Patient coordinate system location of lowest instance
+        3.Patient coordinate system location of highest instance
+        4.Boolean indicating if image location / instances are flipped
 
     Notes
     ----------
-    Computes M via DICOM Standard Equation C.7.6.2.1-1
-        https://dicom.innolitics.com/ciods/ct-image/image-plane/00200037
-    Due to DICOM header orientation:
-        D_i, D_j = (Column, Row)
-        PixelSpacing = (Row, Column)
+    The values of high and low are for the highest and lowest instance,
+        meaning high > low is not always true
     """
-    X_x, X_y, X_z = np.array(dcm.ImageOrientationPatient[:3]).T
-    Y_x, Y_y, Y_z = np.array(dcm.ImageOrientationPatient[3:]).T
-    S_x, S_y, S_z = np.array(dcm.ImagePositionPatient)
-    D_j, D_i = np.array(dcm.PixelSpacing)
-    j, i = np.indices((dcm.Rows, dcm.Columns))
+    # Build dict of instance num -> location
+    int_list = []
+    loc_list = []
+    
+    for f in dicom_list:
+        dcm = pydicom.dcmread(f, stop_before_pixels=True)
+        int_list.append(round(dcm.InstanceNumber))
+        loc_list.append(float(dcm.SliceLocation))
+    
+    # Sort both lists based on the int_list ordering 
+    int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
-    M = np.array([[X_x*D_i, Y_x*D_j, 0, S_x],
-                  [X_y*D_i, Y_y*D_j, 0, S_y],
-                  [X_z*D_i, Y_z*D_j, 0, S_z],
-                  [0, 0, 0, 1]])
+    # Calculate slice thickness 
+    loc0, loc1 = loc_list[:2]
+    inst0, inst1 = int_list[:2]
+    thickness = abs((loc1-loc0) / (inst1-inst0))
 
-    C = np.array([i, j, 0, 1])
+    # Compute if Patient and Image coords are flipped relatively
+    flip = False if loc0 > loc1 else True  # Check
 
-    # Returns coordinates in [x, y, 3]
-    return np.rollaxis(np.stack(np.dot(M[:-1], C)), 0, 3)
+    # Compute number of slices and account for missing dicom files
+    n_slices = round(1 + (loc_list.max() - loc_list.min()) / thickness)
+    
+    if int_list.min() > 1:
+        diff = int_list.min() - 1
+        # Probably could save runtime by rewriting to use arrays
+        int_list, loc_list = list(int_list), list(loc_list)
+        n_slices += diff
+        int_list += [*range(1, diff + 1)]
+        if flip:
+            loc_list += list(loc0 - np.arange(1, diff + 1) * thickness)
+        else:
+            loc_list += list(loc0 + np.arange(1, diff + 1) * thickness)
+        
+        int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
+
+    return thickness, n_slices, loc_list.min(), loc_list.max(), flip
 
 
-def leonid(image_slice):
-    """
-    Given a DICOM CT image slice, returns a numpy array with the coordinates of each pixel.
-    :param image_slice: A pydicom dataset representing a CT slice in DICOM format.
-    :return: A numpy array of shape Mx2 where M is image_slice.rows x image_slice.cols, the number of(x,y) pairs
-             representing coordinates of each pixel.
-    """
-    M = np.array(
-        [[np.array(image_slice.ImageOrientationPatient[0:3])[0] * image_slice.PixelSpacing[1],
-          np.array(image_slice.ImageOrientationPatient[3:6])[0] * image_slice.PixelSpacing[0],
-          0,
-          np.array(image_slice.ImagePositionPatient)[0]],
-
-         [np.array(image_slice.ImageOrientationPatient[0:3])[1] * image_slice.PixelSpacing[1],
-          np.array(image_slice.ImageOrientationPatient[3:6])[1] * image_slice.PixelSpacing[0],
-          0,
-          np.array(image_slice.ImagePositionPatient)[1]],
-
-         [np.array(image_slice.ImageOrientationPatient[0:3])[2] * image_slice.PixelSpacing[1],
-          np.array(image_slice.ImageOrientationPatient[3:6])[2] * image_slice.PixelSpacing[0],
-          0,
-          np.array(image_slice.ImagePositionPatient)[2]],
-
-         [0, 0, 0, 1]
-         ])
-
-    pixel_coord_array = np.zeros(
-        (image_slice.Rows, image_slice.Columns), dtype=(float, 3))
-
-    pixel_idx_array = np.indices((image_slice.Rows, image_slice.Columns))
-
-    it = np.nditer(op=[pixel_idx_array[0],  # Array of pixel row indices (j)
-                       pixel_idx_array[1],  # Array of pixel col indices (i)
-                       # Output array of pixel x coords
-                       pixel_coord_array[:, :, 0],
-                       # Output array of pixel y coords
-                       pixel_coord_array[:, :, 1],
-                       pixel_coord_array[:, :, 2]],  # Output array of pixel z coords
-                   flags=['external_loop', 'buffered'],
-                   op_flags=[['readonly'],
-                             ['readonly'],
-                             ['writeonly', 'no_broadcast'],
-                             ['writeonly', 'no_broadcast'],
-                             ['writeonly', 'no_broadcast']])
-
-    for (j, i, Px, Py, Pz) in it:
-        C = np.array([i, j, 0, 1])
-        P = np.dot(M, C)
-
-        Px[...] = P[0]
-        Py[...] = P[1]
-        Pz[...] = P[2]
-
-    return pixel_coord_array
-
-test1 = leonid(dcm)
-test2 = evan(dcm)
-
-np.testing.assert_almost_equal(test1, test2)
-
-rands = np.random.randint(2, size=(512, 512))
-
-def mask_to_coords(array, coords):
-    return coords[tuple(array.nonzero()) + np.index_exp[:]].T
-
-print(np.sum(rands))
-print(mask_to_coords(rands, test2))
-print(mask_to_coords(rands, test2).flatten().shape)
-
-'''
-start = time.time()
-for _ in range(10000):
-    _ = leonid(dcm)
-end = time.time()
-totl = end - start
-
-start = time.time()
-for _ in range(10000):
-    _ = evan(dcm)
-end = time.time()
-tote = end - start
-
-print(tote / totl)
-'''
+ct_series = glob.glob('/home/eporter/eporter_data/hippo_data/1112686/CT/*.dcm')
+print(_img_dims(ct_series))
+print(refact(ct_series))

@@ -132,38 +132,6 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     return coords[tuple(mask.nonzero()) + np.index_exp[:]].T.flatten()
 
 
-def _slice_thickness(dcm0, dcm1):
-    """
-    Function
-    ----------
-    Computes the slice thickness for a DICOM set
-        NOTE Calculates based on slice location and instance number
-        Does not trust SliceThickness DICOM Header
-
-    Parameters
-    ----------
-    dcm0, dcm1 : str or pydicom.dataset.FileDataset
-        Either a string to the dicom path or a pydicom dataset
-
-    Returns
-    ----------
-    slice_thickness : float
-        A float representing the robustly calculated slice thickness
-    """
-
-    if type(dcm0) != pydicom.dataset.FileDataset:
-        dcm0 = pydicom.dcmread(dcm0)
-    if type(dcm1) != pydicom.dataset.FileDataset:
-        dcm1 = pydicom.dcmread(dcm1)
-
-    loc0 = dcm0.SliceLocation
-    loc1 = dcm1.SliceLocation
-    inst0 = dcm0.InstanceNumber
-    inst1 = dcm1.InstanceNumber
-
-    return abs((loc1-loc0) / (inst1-inst0))
-
-
 # This is coming from reconstruction
 # TODO: #8 Move common utilities into a shared library for re and deconstruction
 def _img_dims(dicom_list):
@@ -192,39 +160,45 @@ def _img_dims(dicom_list):
     The values of high and low are for the highest and lowest instance,
         meaning high > low is not always true
     """
-    # We need to save the location and instance, to know if counting up or down
-    low = [float('inf'), 0]
-    high = [-float('inf'), 0]
+    # Build dict of instance num -> location
+    int_list = []
+    loc_list = []
 
-    instances = []
     for f in dicom_list:
-        ds = pydicom.dcmread(f, stop_before_pixels=True)
-        if float(ds.SliceLocation) < low[0]:
-            low = [float(ds.SliceLocation), round(ds.InstanceNumber)]
-        if float(ds.SliceLocation) > high[0]:
-            high = [float(ds.SliceLocation), round(ds.InstanceNumber)]
-        instances.append(round(ds.InstanceNumber))
-    instances.sort()
+        dcm = pydicom.dcmread(f, stop_before_pixels=True)
+        int_list.append(round(dcm.InstanceNumber))
+        loc_list.append(float(dcm.SliceLocation))
 
-    thickness = _slice_thickness(dicom_list[0], dicom_list[1])
-    n_slices = 1 + (abs(high[0]-low[0]) / thickness)
+    # Sort both lists based on the int_list ordering
+    int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
-    # We need to cover for if instance 1 is missing
-    # Unfortunately, we don't know how many upper instances could be missing
-    if 1 != min(instances):
-        diff = min(instances) - 1
+    # Calculate slice thickness
+    loc0, loc1 = loc_list[:2]
+    inst0, inst1 = int_list[:2]
+    thickness = abs((loc1-loc0) / (inst1-inst0))
+
+    # Compute if Patient and Image coords are flipped relatively
+    flip = False if loc0 > loc1 else True  # Check
+
+    # Compute number of slices and account for missing dicom files
+    n_slices = round(1 + (loc_list.max() - loc_list.min()) / thickness)
+
+    # Accounts for known missing instances on the low end. This is likely
+    # unnecessary but good edge conditon protection for missing slices
+    # Probably could save runtime by rewriting to use arrays
+    if int_list.min() > 1:
+        diff = int_list.min() - 1
+        int_list, loc_list = list(int_list), list(loc_list)
         n_slices += diff
-        if low[1] < high[1]:
-            low[0] -= thickness * diff
+        int_list += [*range(1, diff + 1)]
+        if flip:
+            loc_list += list(loc0 - np.arange(1, diff + 1) * thickness)
         else:
-            high[0] += thickness * diff
+            loc_list += list(loc0 + np.arange(1, diff + 1) * thickness)
 
-    flip = True
-    if low[1] > high[1]:
-        flip = False
-        low[0], high[0] = high[0], low[0]
+        int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
-    return thickness, round(n_slices), low[0], high[0], flip
+    return thickness, n_slices, loc_list.min(), loc_list.max(), flip
 
 
 
