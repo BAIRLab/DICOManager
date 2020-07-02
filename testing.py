@@ -4,7 +4,6 @@ import pydicom
 import glob
 import time
 from dataclasses import dataclass
-'''
 
 @dataclass
 class UidItem:
@@ -174,23 +173,3 @@ test = np.transpose(surf.nonzero())
 out = alpha_shape(test, alpha= 1.65)
 print(test)
 print(out)
-'''
-
-import numpy as np
-
-def ccw_sort(points):
-    CoM = np.mean(points, axis=0)
-    
-    def _angle(v1):
-        v1 = np.array([0, -CoM[1]]) 
-        v2 = v1 - CoM
-        v1_u = v1 / np.linalg.norm(v1)
-        v2_u = v2 / np.linalg.norm(v2)
-        if v1[0] > CoM[1]:
-            return np.arccos(np.dot(v1_u, v2_u))
-        return 10 - np.arccos(np.dot(v1_u, v2_u))
-    
-    return np.array(sorted(points, key=_angle))
-
-i_sort = ccw_sort(indx)
-print(i_sort)

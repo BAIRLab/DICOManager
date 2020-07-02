@@ -4,6 +4,7 @@ import concurrent.futures
 import numpy as np
 import pydicom
 import scipy
+import skimage
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -90,6 +91,39 @@ def _wire_mask(arr):
     return binary_erosion(arr) ^ arr
 
 
+def _ccw_sort(points):
+    '''
+    Function
+    ----------
+    Computes the counterclockwise angle between CoM to point and x-axis
+
+    Parameters
+    ----------
+    points: numpy.ndarray
+        A Nx2 numpy array of (x, y) coordinates
+    
+    Returns
+    ----------
+    numpy.ndarray
+        The points array sorted in a counterclockwise direction
+    '''
+    CoM = np.mean(points, axis=0)
+
+    def _angle(v1):
+        # Compute the ccw angle of x-axis and CoM
+        v1 = np.array([0, -CoM[1]])
+        v2 = v1 - CoM
+        v1_u = v1 / np.linalg.norm(v1)
+        v2_u = v2 / np.linalg.norm(v2)
+
+        # Prevents polynomial symmetry
+        if v1[0] > CoM[1]:
+            return np.arccos(np.dot(v1_u, v2_u))
+        return 10 - np.arccos(np.dot(v1_u, v2_u))
+
+    return np.array(sorted(points, key=_angle))
+
+
 # DICOM stores each polygon as a unique item in the ContourImageSequence
 def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     """
@@ -128,10 +162,11 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
 
     mask = _wire_mask(arr)
     coords = _prepare_coordinate_mapping(ct_hdr)
-
+    points = _ccw_sort(coords[tuple(mask.nonzero()) + np.index_exp[:]].T)
+     
     if not flatten:
-        return coords[tuple(mask.nonzero()) + np.index_exp[:]].T
-    return coords[tuple(mask.nonzero()) + np.index_exp[:]].T.flatten()
+        return points
+    return points.flatten()
 
 
 # This is coming from reconstruction
@@ -193,11 +228,12 @@ def _img_dims(dicom_list):
         int_list, loc_list = list(int_list), list(loc_list)
         n_slices += diff
         int_list += [*range(1, diff + 1)]
+        # Adds the new locations to correspond with instances
         if flip:
             loc_list += list(loc0 - np.arange(1, diff + 1) * thickness)
         else:
             loc_list += list(loc0 + np.arange(1, diff + 1) * thickness)
-
+        # Resorts the list with the new points
         int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
     return thickness, n_slices, loc_list.min(), loc_list.max(), flip
@@ -334,7 +370,7 @@ def _initialize_rt_dcm(ct_series):
     rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
     ct_uid_dict = _generate_uid_dict(ct_series) 
-    ct_uids = [x.ct_store for x in ct_uid_dict.values]
+    ct_uids = [x.ct_store for x in ct_uid_dict.values()]
     rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(ct_uids)
 
     rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
@@ -406,7 +442,7 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
         # We could probably save this from being called twice...
         uid_dict = _generate_uid_dict(ct_series)
         # Need to wrap this function in another which takes each unique polygon fron the contour and saves it
-        individual_polygons = skimage.measure.label(contour, conectivity=2)
+        individual_polygons = skimage.measure.label(contour, connectivity=2)
         for poly in individual_polygons:
             coords = _array_to_coords_2D(poly, ct_hdr)
             source_rt = _append_contour_to_dcm(source_rt, coords, uid_dict, roi_name)  
