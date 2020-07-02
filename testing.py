@@ -4,7 +4,7 @@ import pydicom
 import glob
 import time
 from dataclasses import dataclass
-
+'''
 
 @dataclass
 class UidItem:
@@ -164,7 +164,6 @@ def alpha_shape(points, alpha, only_outer=True):
             add_edge(edges, ic, ia)
     return edges
 
-
 rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/RTSTRUCT/*.dcm')
 ds = pydicom.dcmread(rt_series[0])
 names = [x.ROIName for x in ds.StructureSetROISequence]
@@ -175,35 +174,23 @@ test = np.transpose(surf.nonzero())
 out = alpha_shape(test, alpha= 1.65)
 print(test)
 print(out)
+'''
 
-import math
-from scipy.ndimage.measurements import center_of_mass as com
-from functools import reduce
-import operator
-import math
+import numpy as np
 
-CoM = np.mean(indx, axis=0)
-print(CoM)
+def ccw_sort(points):
+    CoM = np.mean(points, axis=0)
+    
+    def _angle(v1):
+        v1 = np.array([0, -CoM[1]]) 
+        v2 = v1 - CoM
+        v1_u = v1 / np.linalg.norm(v1)
+        v2_u = v2 / np.linalg.norm(v2)
+        if v1[0] > CoM[1]:
+            return np.arccos(np.dot(v1_u, v2_u))
+        return 10 - np.arccos(np.dot(v1_u, v2_u))
+    
+    return np.array(sorted(points, key=_angle))
 
-def unit_vector(vector):
-    """ Returns the unit vector of the vector.  """
-    return vector / np.linalg.norm(vector)
-
-def angle_between(v1):
-    """ Returns the angle in radians between vectors 'v1' and 'v2'::
-
-            >>> angle_between((1, 0, 0), (0, 1, 0))
-            1.5707963267948966
-            >>> angle_between((1, 0, 0), (1, 0, 0))
-            0.0
-            >>> angle_between((1, 0, 0), (-1, 0, 0))
-            3.141592653589793
-    """
-    v2_u = unit_vector(v1 - CoM)
-    v1_u = unit_vector(np.array([0, -CoM[1]]))
-    if v1[1] > CoM[1]:
-        return np.arccos(np.dot(v1_u, v2_u))
-    return 10 - np.arccos(np.dot(v1_u, v2_u))
-
-i_sort = np.array(sorted(np.transpose(surf.nonzero()), key=angle_between))
+i_sort = ccw_sort(indx)
 print(i_sort)
