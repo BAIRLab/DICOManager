@@ -571,6 +571,7 @@ def struct(patient_path, wanted_contours, raises=False):
                     raise ValueError(err_msg) if raises else print(err_msg)
 
                 points = _points_to_coords(contour_data, img_origin, ix, iy, iz)
+                # TODO: #11 I'm not 100% certain that skdraw.polygon is inclusive with the surface points. MIM likely uses an ITK call, which we should use too.
                 y_poly, x_poly = skdraw.polygon(*points[:, :2].T)
 
                 fill_array[x_poly, y_poly, points[0,2]] = 1

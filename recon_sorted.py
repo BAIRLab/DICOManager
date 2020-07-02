@@ -19,7 +19,7 @@ __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
 
 
-def _img_dims(file_path, modality):
+def _aspect_ratio(file_path, modality):
     """
     _img_dims gets the aspect ratio
 
@@ -112,7 +112,7 @@ parser.add_option('-d', '--dest_dir', action='store', dest='dest_dir',
 parser.add_option('-j', '--json', action='store', dest='contour_list',
                   help='Path to json of dictionary of RTSTRUCTS to reconstruct', default=None)
 parser.add_option('-p', '--project_name', action='store', dest='project',
-                    help='Project name to prepend to files', default=None)
+                  help='Project name to prepend to files', default=None)
 options, args = parser.parse_args()
 
 BASE_DIR = options.base_dir
@@ -141,13 +141,13 @@ for path in tqdm(pat_folders):
 
     if patient_group.mr:
         mr = reconstruction.mri(path)
-        aspect = _img_dims(path, 'MR')
+        aspect = _aspect_ratio(path, 'MR')
     if patient_group.ct:
         ct = reconstruction.ct(path)
-        aspect = _img_dims(path, 'CT')
+        aspect = _aspect_ratio(path, 'CT')
     if patient_group.pet:
         pet = reconstruction.pet(path)
-        aspect = _img_dims(path, 'PET')
+        aspect = _aspect_ratio(path, 'PET')
     if patient_group.rtstruct:
         if not CONTOUR_LIST:
             raise NameError('A .csv of contours must be specified with -l')

@@ -84,11 +84,13 @@ def _wire_mask(arr):
         itk.GetImageFromArray
         itk.ContourExtractor2DImageFilter
     """
+    # TODO: #10 While this returns the surface, the vertex ordering is incorrect. We need to use ITK's ContourExtractor2DImageFilter function 
     if arr.dtype != 'bool':
         arr = np.array(arr, dtype='bool')
     return binary_erosion(arr) ^ arr
 
 
+# DICOM stores each polygon as a unique item in the ContourImageSequence
 def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     """
     Function
@@ -331,11 +333,9 @@ def _initialize_rt_dcm(ct_series):
     rt_ref_series_ds = pydicom.dataset.Dataset()
     rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
-    ct_uids = _generate_uid_dict(ct_series) 
-    # Now that the function was updated, this needs to be fixed as well
-    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence([list(ct_uids.values())])
-    
-    # TODO: Return all the ref frame, study and series, or find a way to integrate them into the dcm
+    ct_uid_dict = _generate_uid_dict(ct_series) 
+    ct_uids = [x.ct_store for x in ct_uid_dict.values]
+    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(ct_uids)
 
     rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
     rt_dcm.ROIContourSequence = pydicom.sequence.Sequence()
@@ -403,10 +403,13 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
             roi_name = roi_name_list[index]
         else:
             roi_name = 'GeneratedContour' + str(index + 1)
-        coords = _array_to_coords_2D(contour, ct_hdr)
         # We could probably save this from being called twice...
         uid_dict = _generate_uid_dict(ct_series)
-        source_rt = _append_contour_to_dcm(source_rt, coords, uid_dict, roi_name)  
+        # Need to wrap this function in another which takes each unique polygon fron the contour and saves it
+        individual_polygons = skimage.measure.label(contour, conectivity=2)
+        for poly in individual_polygons:
+            coords = _array_to_coords_2D(poly, ct_hdr)
+            source_rt = _append_contour_to_dcm(source_rt, coords, uid_dict, roi_name)  
     return False
 
 # A function to create new from an RT
