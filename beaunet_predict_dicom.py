@@ -86,13 +86,15 @@ def _wire_mask(arr):
         itk.ContourExtractor2DImageFilter
     """
     # TODO: #10 While this returns the surface, the vertex ordering is incorrect. We need to use ITK's ContourExtractor2DImageFilter function 
+    assert arr.ndim == 2, 'The input boolean mask is not 2D'
     if arr.dtype != 'bool':
         arr = np.array(arr, dtype='bool')
+    
     return binary_erosion(arr) ^ arr
 
 
 def _ccw_sort(points):
-    '''
+    """
     Function
     ----------
     Computes the counterclockwise angle between CoM to point and x-axis
@@ -106,20 +108,18 @@ def _ccw_sort(points):
     ----------
     numpy.ndarray
         The points array sorted in a counterclockwise direction
-    '''
+    """
     CoM = np.mean(points, axis=0)
 
-    def _angle(v1):
-        # Compute the ccw angle of x-axis and CoM
-        v1 = np.array([0, -CoM[1]])
-        v2 = v1 - CoM
+    def _angle(v1_og):
+        v1 = v1_og - CoM
+        v2 = np.array([0, -CoM[1], CoM[2]])
         v1_u = v1 / np.linalg.norm(v1)
         v2_u = v2 / np.linalg.norm(v2)
 
-        # Prevents polynomial symmetry
-        if v1[0] > CoM[1]:
+        if v1_og[0] > CoM[1]:
             return np.arccos(np.dot(v1_u, v2_u))
-        return 10 - np.arccos(np.dot(v1_u, v2_u))
+        return 100 - np.arccos(np.dot(v1_u, v2_u))
 
     return np.array(sorted(points, key=_angle))
 
@@ -157,13 +157,17 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     """
     # These will be helpful for my troubleshooting later in the process
     # after which, they will likely become unnecessary due to protections upstream
-    assert arr.ndim != 2, 'The input boolean mask is not 2D'
+    assert arr.ndim == 2, 'The input boolean mask is not 2D'
     assert type(ct_hdr) is pydicom.dataset.FileDataset, 'ct_dcm is not a pydicom dataset'
+    
+    # If there is no contour on the slice, return no points
+    if not np.sum(arr):
+        return None  
 
     mask = _wire_mask(arr)
     coords = _prepare_coordinate_mapping(ct_hdr)
-    points = _ccw_sort(coords[tuple(mask.nonzero()) + np.index_exp[:]].T)
-     
+    points = _ccw_sort(np.rollaxis(coords[tuple(mask.nonzero()) + np.index_exp[:]].T, 0, 2))
+
     if not flatten:
         return points
     return points.flatten()
@@ -242,12 +246,12 @@ def _img_dims(dicom_list):
 
 @dataclass
 class UidItem:
-    hdr: pydicom.dataset.Dataset()
+    hdr: pydicom.dataset.Dataset
     ct_thick: float
     ct_loc0: float
     uid: str = None
     loc: int = None
-    ct_store: pydicom.dataset.Dataset() = None
+    ct_store: pydicom.dataset.Dataset = None
 
 
     def __getitem__(self, name):
@@ -266,6 +270,7 @@ class UidItem:
     def __post_init__(self):
         self.loc = self._get_z_loc()
         self.uid = self.hdr.SOPInstanceUID
+        self.ct_store = pydicom.dataset.Dataset()
         self.ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
         self.ct_store.ReferencedSOPInstanceUID = self.hdr.SOPInstanceUID
         self.hdr = None # Clear out the header because its not needed
@@ -426,6 +431,12 @@ def _append_contour_to_dcm(source_rt, coords_list, uid_list, roi_name):
     return source_rt
 
 
+def _empty_rt(source_rt):
+    # Need to remove existing contours
+    # Then need to redeclare the UIDs for a new RTSTRUCT file
+    return False
+
+
 # A function to add to an RT
 def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     ct_hdr = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
@@ -455,6 +466,7 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     # The way to do this will be looking at two DICOM RT files and identifying the
     # difference between the two files
     new_rt = pydicom.dataset.Dataset(source_rt.copy())
+    new_rt = _empty_rt(new_rt) 
     # Then, we need to figure out which items we need to delete or change
     # Need to delete all the stored contour names, colors, references and points
     return new_rt 
