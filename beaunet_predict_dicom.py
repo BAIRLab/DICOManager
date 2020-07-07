@@ -279,6 +279,28 @@ class UidItem:
 
 # Could make this entire dictionary into a dataclass ... will need to evaluate it
 def _generate_dicts(ct_series):
+    """
+    Function
+    ----------
+    Generates two dictionaries for the uid structure and ct header. Both
+        dictionaries are keyed to the image coordinate z-slice locataion
+
+    Parameters
+    ----------
+    ct_series : list
+        A list of absolute paths to each CT DICOM file
+
+    Returns
+    ----------
+    (uid_dict, ct_dict) : (dict, dict)
+        0. Dictionary for the UID info to store in the RTSTRUCT
+        1. The header for each CT DICOM
+
+    Notes
+    ----------
+    Not all the DICOM header is necessary down-stream. Memory footprint
+        could be reduced by removing private tags and other info
+    """
     uid_dict = {}
     ct_dict = {}
     ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
@@ -292,6 +314,25 @@ def _generate_dicts(ct_series):
 
 # I don't know if this will work...
 def _initialize_rt_dcm(ct_series):
+    """
+    Function
+    ----------
+    Initializes a newly registered DICOM RTSTRUCT from a CT image
+
+    Parameters
+    ----------
+    ct_series : list
+        A list of absolute paths to each CT DICOM file
+
+    Returns
+    ----------
+    pydicom.dataset.FileDataset
+        A pydicom dataset object corresponding to an empty DICOM RT file
+
+    Notes
+    ----------
+    Currently experimental
+    """
     # TODO: Order the initializtion of header in the order of header fields
     # Start crafting the RTSTRUCT
     rt_dcm = pydicom.dataset.Dataset()
@@ -398,6 +439,27 @@ def _initialize_rt_dcm(ct_series):
 # A function which takes the RT Struct and wire mask and appends to the rt file
 # This should have a uid_list which is a list of the uid values per contour list  
 def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
+    """
+    Function
+    ----------
+    Appends coordinates and metadata into a pre-built DICOM RTSTRUCT
+
+    Parameters
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        An RTSTRUCT pydicom dataset object
+    coords_list : numpy.ndarray
+        A 1xN array of flattened floating point patient coordinates
+    uid_list : list
+        A list of UIDItem objects to store in source_rt.ContourImageSequence
+    roi_name : string
+        The name of the ROI to be saved in the RTSTRUCT
+
+    Returns
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        The provided pydicom object is returned with appended contour
+    """
     roi_number = len(source_rt.StructureSetROISequence) + 1
     # Add ROI to Structure Set Sequence
     str_set_roi = pydicom.dataset.Dataset()
@@ -436,6 +498,22 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
 
 
 def _empty_rt(source_rt):
+    """
+    Function
+    ----------
+    Given an RTSTRUCT pydicom object, all contours are removed
+
+    Parameters
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        An RTSTRUCT pydicom dataset object
+
+    Returns
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        The provided RTSTRUCT pydicom dataset object without contours
+
+    """
     # Need to remove existing contours
     # Then need to redeclare the UIDs for a new RTSTRUCT file
     return False
@@ -443,6 +521,35 @@ def _empty_rt(source_rt):
 
 # A function to add to an RT
 def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
+    """
+    Function
+    ----------
+    Adds numpy boolean array contours to a DICOM RTSTRUCT
+
+    Parameters
+    ----------
+    source_rt : string
+        An absolute path to a DICOM RTSTRUCT file, for which the 
+            contour will be added
+    ct_series : list
+        A list of absolute paths to each DICOM CT file
+    contour_array : numpy.ndarray
+        A boolean numpy.ndarray of contour masks to be added to the
+            DICOM RTSTRUCT file of dims [N, X, Y, Z] where N is the
+            number of contours to be added
+    roi_name_list : list (Defualt = None)
+        A list of N names corresponding to each added structure. If
+            not provided, the ROIs are named 'GeneratedContour#'
+
+    Returns
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        A RTSTRUCT pydicom dataset object for the new object
+
+    Notes
+    ----------
+    This function is without input error checking. Will be added later
+    """
     # Need to have the contour slices in relation to the individual image UIDs
     # We can do that with the help of the z-axis location data. Will likely 
     # want to have the data stored in a nice-to-use struct
@@ -467,6 +574,35 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
 
 # A function to create new from an RT
 def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
+    """
+    Function
+    ----------
+    Creates an empty RTSTRUCT and adds a numpy boolean array contours to it
+
+    Parameters
+    ----------
+    source_rt : string
+        An absolute path to a DICOM RTSTRUCT file, for which the
+            new RTSTRUCT DICOM will be based
+    ct_series : list
+        A list of absolute paths to each DICOM CT file
+    contour_array : numpy.ndarray
+        A boolean numpy.ndarray of contour masks to be added to the
+            DICOM RTSTRUCT file of dims [N, X, Y, Z] where N is the
+            number of contours to be added
+    roi_name_list : list (Defualt = None)
+        A list of N names corresponding to each added structure. If
+            not provided, the ROIs are named 'GeneratedContour#'
+
+    Returns
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        A RTSTRUCT pydicom dataset object for the new object
+
+    Notes
+    ----------
+    This function is without input error checking. Will be added later
+    """
     # Need to build a function which copies the relevant information from an RT Struct,
     # or creates a seocnd one without the prexisiting contour files.
     # The way to do this will be looking at two DICOM RT files and identifying the
@@ -480,6 +616,34 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
 
 # Could make this into an actual wrapper, instead of what it is now...
 def from_ct(ct_series, contour_array, roi_name_list=None):
+    """
+    Function
+    ----------
+    Generates an entirely new RTSTRUCT DICOM file and saves the contours
+
+    Parameters
+    ----------
+    ct_series : list
+        A list of absolute paths to each DICOM CT file
+    contour_array : numpy.ndarray
+        A boolean numpy.ndarray of contour masks to be added to the
+            DICOM RTSTRUCT file of dims [N, X, Y, Z] where N is the
+            number of contours to be added
+    roi_name_list : list (Defualt = None)
+        A list of N names corresponding to each added structure. If
+            not provided, the ROIs are named 'GeneratedContour#'
+
+    Returns
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        A RTSTRUCT pydicom dataset object for the new object
+
+    Notes
+    ----------
+    This creates MIM compatiable RTSTRUCT files. Compatiablity with other
+        systems is unknown. This will be updated with compatiable / 
+        incompatiable going forward
+    """
     # Essentially this is the same as to_rt except we need to build a fresh RT
     new_rt = _initialize_rt_dcm(ct_series)
     new_rt = to_rt(new_rt, ct_series, contour_array, roi_name_list)

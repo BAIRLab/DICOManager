@@ -146,3 +146,20 @@ the RTDOSE file.
 
 #### MRI: mri
 Creates an MRI volume and returns a numpy array of float32 values.
+
+### deconstruction.py (currently called beaunet_predict_dicom.py)
+Deconstruct boolean mask numpy arrays into DICOM compliant RTSTRUCT files
+with reference to a series of registered CT DICOM files. 
+
+#### to_rt
+Appends a boolean numpy array to a provided rtstruct DICOM file with the
+corresponding CT DICOMs.
+
+#### from_rt
+Creates a new RTSTRUCT DICOM file from a provided RTSTRUCT file with the
+corresponding CT DICOMs. Then appends a boolean numpy array to the created
+DICOM file.
+
+#### from_ct
+Creates a new RTSTRUCT DICOM file from the corresponding CT DICOMs. Appends
+a boolean numpy array to the created DICOM file.

@@ -4,7 +4,6 @@ import pydicom
 import glob
 import time
 from dataclasses import dataclass
-from beaunet_predict_dicom import _generate_uid_dict
 from beaunet_predict_dicom import _img_dims
 import beaunet_predict_dicom as decon
 import reconstruction as recon
@@ -71,11 +70,9 @@ ct_series.sort()
 built = recon.struct(rt_series[0], wanted_contours=['skull'])
 mask = []
 
-print(built.shape)
-
-for i, z in enumerate(range(built.shape[-1])):
-    ct_hdr = pydicom.dcmread(ct_series[i], stop_before_pixels=True)
-    mask.append(decon._array_to_coords_2D(built[0, :, :, z], ct_hdr))
+uid_dict, ct_dict = decon._generate_dicts(ct_series)
+for z in range(built.shape[-1]):
+    mask.append(decon._array_to_coords_2D(built[0, :, :, z], ct_dict[z]))
 
 rt = pydicom.dcmread(rt_series[0])
 z_locs = []
