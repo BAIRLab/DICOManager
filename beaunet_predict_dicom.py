@@ -117,7 +117,7 @@ def _ccw_sort(points):
         v1_u = v1 / np.linalg.norm(v1)
         v2_u = v2 / np.linalg.norm(v2)
 
-        if v1_og[0] > CoM[1]:
+        if v1_og[0] > CoM[0]:
             return np.arccos(np.dot(v1_u, v2_u))
         return 100 - np.arccos(np.dot(v1_u, v2_u))
 
@@ -166,7 +166,8 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
 
     mask = _wire_mask(arr)
     coords = _prepare_coordinate_mapping(ct_hdr)
-    points = _ccw_sort(np.rollaxis(coords[tuple(mask.nonzero()) + np.index_exp[:]].T, 0, 2))
+    points = np.rollaxis(coords[tuple(mask.nonzero()) + np.index_exp[:]].T, 0, 2)
+    points_sorted = _ccw_sort(points)
 
     if not flatten:
         return points
@@ -277,13 +278,16 @@ class UidItem:
 
 
 # Could make this entire dictionary into a dataclass ... will need to evaluate it
-def _generate_uid_dict(ct_series):
+def _generate_dicts(ct_series):
     uid_dict = {}
+    ct_dict = {}
     ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
     for ct in ct_series:
         hdr = pydicom.dcmread(ct, stop_before_pixels=True)
-        uid_dict.update({hdr.SOPInstanceUID: UidItem(hdr, ct_thick, ct_loc0)})
-    return dict(sorted(uid_dict.items()))
+        z_index = round(abs((ct_loc0-hdr.SliceLocation) / ct_thick))
+        uid_dict.update({z_index: UidItem(hdr, ct_thick, ct_loc0)})
+        ct_dict.update({z_index: hdr})
+    return dict(sorted(uid_dict.items())), dict(sorted(ct_dict.items()))
 
 
 # I don't know if this will work...
@@ -374,8 +378,8 @@ def _initialize_rt_dcm(ct_series):
     rt_ref_series_ds = pydicom.dataset.Dataset()
     rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
-    ct_uid_dict = _generate_uid_dict(ct_series) 
-    ct_uids = [x.ct_store for x in ct_uid_dict.values()]
+    uid_dict, ct_dict = _generate_dicts(ct_series) 
+    ct_uids = [x.ct_store for x in uid_dict.values()]
     rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(ct_uids)
 
     rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
@@ -393,7 +397,7 @@ def _initialize_rt_dcm(ct_series):
 
 # A function which takes the RT Struct and wire mask and appends to the rt file
 # This should have a uid_list which is a list of the uid values per contour list  
-def _append_contour_to_dcm(source_rt, coords_list, uid_list, roi_name):
+def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     roi_number = len(source_rt.StructureSetROISequence) + 1
     # Add ROI to Structure Set Sequence
     str_set_roi = pydicom.dataset.Dataset()
@@ -439,25 +443,27 @@ def _empty_rt(source_rt):
 
 # A function to add to an RT
 def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
-    ct_hdr = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
     # Need to have the contour slices in relation to the individual image UIDs
     # We can do that with the help of the z-axis location data. Will likely 
     # want to have the data stored in a nice-to-use struct
     # Could also find the nearest image slice to a given contour location
     # I think I will try this until I know that the robustness of this solution
+
+    uid_dict, ct_dict = _generate_dicts(ct_series)
+
+    # Enumerate through contours
     for index, contour in enumerate(contour_array):
         if roi_name_list:
             roi_name = roi_name_list[index]
         else:
             roi_name = 'GeneratedContour' + str(index + 1)
-        # We could probably save this from being called twice...
-        uid_dict = _generate_uid_dict(ct_series)
-        # Need to wrap this function in another which takes each unique polygon fron the contour and saves it
-        individual_polygons = skimage.measure.label(contour, connectivity=2)
-        for poly in individual_polygons:
-            coords = _array_to_coords_2D(poly, ct_hdr)
-            source_rt = _append_contour_to_dcm(source_rt, coords, uid_dict, roi_name)  
-    return False
+        # Enumerate through each z-axis slice
+        for z_index in range(contour.shape[-1]):
+            polygons = skimage.measure.label(contour[z_index], connectivity=2)
+            for polygon in polygons:
+                coords = _array_to_coords_2D(polygon, ct_dict[z_index])
+                source_rt = _append_to_rt(source_rt, coords, uid_dict, roi_name)
+    return source_rt 
 
 # A function to create new from an RT
 def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
@@ -466,7 +472,8 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     # The way to do this will be looking at two DICOM RT files and identifying the
     # difference between the two files
     new_rt = pydicom.dataset.Dataset(source_rt.copy())
-    new_rt = _empty_rt(new_rt) 
+    new_rt = _empty_rt(new_rt)
+    new_rt = to_rt(source_rt, ct_series, contour_array, roi_name_list)
     # Then, we need to figure out which items we need to delete or change
     # Need to delete all the stored contour names, colors, references and points
     return new_rt 
@@ -474,6 +481,6 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
 # Could make this into an actual wrapper, instead of what it is now...
 def from_ct(ct_series, contour_array, roi_name_list=None):
     # Essentially this is the same as to_rt except we need to build a fresh RT
-    rt_dcm = _initialize_rt_dcm(ct_series)
-    rt_dcm = to_rt(rt_dcm, ct_series, contour_array, roi_name_list)
-    return rt_dcm
+    new_rt = _initialize_rt_dcm(ct_series)
+    new_rt = to_rt(new_rt, ct_series, contour_array, roi_name_list)
+    return new_rt 

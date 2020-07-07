@@ -68,18 +68,25 @@ def alpha_shape(points, alpha, only_outer=True):
 rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/RTSTRUCT/*.dcm')
 ct_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/CT/*.dcm')
 ct_series.sort()
-ct_hdr = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
 built = recon.struct(rt_series[0], wanted_contours=['skull'])
 mask = []
 
-for z in range(built.shape[-1]):
+print(built.shape)
+
+for i, z in enumerate(range(built.shape[-1])):
+    ct_hdr = pydicom.dcmread(ct_series[i], stop_before_pixels=True)
     mask.append(decon._array_to_coords_2D(built[0, :, :, z], ct_hdr))
 
-print(np.sum(built))
-print(len(mask))
+rt = pydicom.dcmread(rt_series[0])
+z_locs = []
+for seq in rt.ROIContourSequence[0].ContourSequence:
+    z_locs.append(seq.ContourData[2])
+
+print(z_locs)
+print(len(z_locs), len(mask))
 
 for i, m in enumerate(mask):
     if m is not None:
-        print(f'{i}: {len(m)}')
+        print(m[2])
     else:
-        print(i)
+        continue
