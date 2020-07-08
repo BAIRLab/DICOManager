@@ -1,11 +1,11 @@
 #! /usr/bin/python
 
 import concurrent.futures
+from datetime import datetime
 import numpy as np
 import pydicom
 import scipy
 import skimage
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from scipy.ndimage.morphology import binary_erosion
@@ -347,15 +347,14 @@ def _initialize_rt_dcm(ct_series):
     # Read the ct to build the header from
     ct_dcm = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
 
-    # Time specific DICOM header info
-    current_time = time.localtime()
+    # DICOM date / time format per Section 6.2
+    date = datetime.now().date().strftime('%Y%m%d')
+    time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
+    rt_dcm.InstanceCreationDate = date
+    rt_dcm.InstanceCreationTime = time
+    rt_dcm.StructureSetDate = date
+    rt_dcm.StructureSetTime = time
     rt_dcm.SpecificCharacterSet = 'ISO_IR 100'
-    # DICOM date format
-    rt_dcm.InstanceCreationDate = time.strftime('%Y%m%d', current_time)
-    # DICOM time format
-    rt_dcm.InstanceCreationTime = time.strftime('%H%M%S.%f', current_time)[:-3]
-    rt_dcm.StructureSetDate = time.strftime('%Y%m%d', current_time)
-    rt_dcm.StructureSetTime = time.strftime('%H%M%S.%f', current_time)[:-3]
 
     # UID Header Info
     # RT Structure Set Storage Class
@@ -506,7 +505,7 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     return source_rt
 
 
-def _empty_rt(source_rt):
+def _update_rt_dcm(source_rt, empty=False):
     """
     Function
     ----------
@@ -523,29 +522,38 @@ def _empty_rt(source_rt):
         The provided RTSTRUCT pydicom dataset object without contours
     """
     # Time specific DICOM header info
-    current_time = time.localtime()
-    source_rt.InstanceCreationDate = time.strftime('%Y%m%d', current_time)
-    source_rt.InstanceCreationTime = time.strftime('%H%M%S.%f', current_time)[:-3]
-    source_rt.StructureSetDate = time.strftime('%Y%m%d', current_time)
-    source_rt.StructureSetTime = time.strftime('%H%M%S.%f', current_time)[:-3]
+    date = datetime.now().date().strftime('%Y%m%d')
+    time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
+    source_rt.InstanceCreationDate = date
+    source_rt.InstanceCreationTime = time
+    source_rt.SeriesDate = date
+    source_rt.SeriesTime = time
+    source_rt.StructureSetDate = date
+    source_rt.StructureSetTime = time
 
-    # Meta data
-    rt_dcm.SOPInstanceUID = pydicom.uid.generate_uid()
-    rt_dcm.Manufacturer = 'Beaumont Health'
-    rt_dcm.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
-    rt_dcm.StructureSetLabel = 'Auto-Segmented Contours'
-    rt_dcm.StructureSetName = 'Auto-Segmented Contours'
-    rt_dcm.SoftwareVersions = ['0.1.0']
+    # UIDs
+    instance_uid = pydicom.uid.generate_uid()
+    source_rt.MediaStorageSOPInstanceUID = instance_uid 
+    source_rt.SOPInstanceUID = instance_uid 
+    source_rt.SeriesInstanceUID = instance_uid 
 
-    # Removal of all contour data, maintain referenced image data
-    source_rt.StructureSetROISequence.clear()
-    source_rt.ROIContourSequence.clear()
-    source_rt.RTROIObservationsSequence.clear()
+    # Meta data updated
+    source_rt.Manufacturer = 'Beaumont Health'
+    source_rt.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
+    source_rt.StructureSetLabel = 'Auto-Segmented Contours'
+    source_rt.StructureSetName = 'Auto-Segmented Contours'
+    source_rt.SoftwareVersions = ['0.1.0']
+
+    if empty:
+        # Removal of all contour data, maintain referenced image data
+        source_rt.StructureSetROISequence.clear()
+        source_rt.ROIContourSequence.clear()
+        source_rt.RTROIObservationsSequence.clear()
 
     return source_rt
 
 # A function to add to an RT
-def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
+def to_rt(source_rt, ct_series, contour_array, roi_name_list=None, empty=False):
     """
     Function
     ----------
@@ -581,6 +589,8 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     # Could also find the nearest image slice to a given contour location
     # I think I will try this until I know that the robustness of this solution
 
+    # Need to check if this is all the time specific values
+    source_rt = _update_rt_dcm(source_rt, empty=empty)
     uid_dict, ct_dict = _generate_dicts(ct_series)
 
     # Enumerate through contours
@@ -628,16 +638,8 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     ----------
     This function is without input error checking. Will be added later
     """
-    # Need to build a function which copies the relevant information from an RT Struct,
-    # or creates a seocnd one without the prexisiting contour files.
-    # The way to do this will be looking at two DICOM RT files and identifying the
-    # difference between the two files
     new_rt = pydicom.dataset.Dataset(source_rt.copy())
-    new_rt = _empty_rt(new_rt)
-    new_rt = to_rt(source_rt, ct_series, contour_array, roi_name_list)
-    # Then, we need to figure out which items we need to delete or change
-    # Need to delete all the stored contour names, colors, references and points
-    return new_rt 
+    return to_rt(new_rt, ct_series, contour_array, roi_name_list, empty=True)
 
 # Could make this into an actual wrapper, instead of what it is now...
 def from_ct(ct_series, contour_array, roi_name_list=None):
@@ -669,7 +671,5 @@ def from_ct(ct_series, contour_array, roi_name_list=None):
         systems is unknown. This will be updated with compatiable / 
         incompatiable going forward
     """
-    # Essentially this is the same as to_rt except we need to build a fresh RT
     new_rt = _initialize_rt_dcm(ct_series)
-    new_rt = to_rt(new_rt, ct_series, contour_array, roi_name_list)
-    return new_rt 
+    return to_rt(new_rt, ct_series, contour_array, roi_name_list)

@@ -67,15 +67,18 @@ def alpha_shape(points, alpha, only_outer=True):
 rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/RTSTRUCT/*.dcm')
 ct_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/CT/*.dcm')
 rt = pydicom.dcmread(rt_series[0])
-print(rt.RTROIObservationsSequence)
-#rt.RTROIObservationsSequence = pydicom.sequence.Sequence([])
-rt.RTROIObservationsSequence.clear()
-print('empty')
-print(rt.RTROIObservationsSequence)
-rt.save_as('test.dcm')
-new_rt = pydicom.dcmread('test.dcm')
-print('Reading')
-print(new_rt.RTROIObservationsSequence)
+
+'''
+print(rt.SeriesInstanceUID)
+print(rt.SeriesDate)
+print(rt.SeriesTime)
+rt = decon._update_rt_dcm(rt)
+print(rt.SOPInstanceUID)
+print(rt.MediaStorageSOPInstanceUID)
+print(rt.SeriesInstanceUID)
+print(rt.SeriesDate)
+print(rt.SeriesTime)
+'''
 '''
 ct_series.sort()
 built = recon.struct(rt_series[0], wanted_contours=['skull'])
@@ -99,3 +102,30 @@ for i, m in enumerate(mask):
     else:
         continue
 '''
+import uuid
+import hashlib
+import os
+import random
+
+
+def generate_uid():
+    # Modified from pydicom.uid.generate_uid
+    entropy_srcs = [
+        str(uuid.uuid1()),  # 128-bit from MAC/time/randomness
+        str(os.getpid()),  # Current process ID
+        hex(random.getrandbits(64))  # 64 bits randomness
+    ]
+
+    # Create UTF-8 hash value
+    hash_val = hashlib.sha512(''.join(entropy_srcs).encode('utf-8'))
+    
+    # Convert this to an int with the maximum available digits
+    hv = str(int(hash_val.hexdigest(), 16))
+    parts = hv[:6], hv[6], hv[7:15], hv[15:26], hv[26:35], hv[35:38], hv[38:41]
+    return '2.16.840.1.' + '.'.join(parts)
+
+
+print(rt.SOPInstanceUID)
+rt.SOPInstanceUID = generate_uid()
+print(rt.SOPInstanceUID)
+rt.save_as('test.dcm')
