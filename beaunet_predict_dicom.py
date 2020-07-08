@@ -170,8 +170,8 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     points_sorted = _ccw_sort(points)
 
     if not flatten:
-        return points
-    return points.flatten()
+        return points_sorted
+    return points_sorted.flatten()
 
 
 # This is coming from reconstruction
@@ -243,15 +243,23 @@ def _img_dims(dicom_list):
 
     return thickness, n_slices, loc_list.min(), loc_list.max(), flip
 
-
-
 @dataclass
 class UidItem:
-    hdr: pydicom.dataset.Dataset
+    """
+    Function
+    ----------
+    A dataclass for collecting and storing UID information    
+
+    Parameters
+    ----------
+    ct_hdr : pydicom.dataset.Dataset
+        A pydicom dataset object for the CT slice DICOM object
+    """
+    ct_hdr: pydicom.dataset.Dataset
     ct_thick: float
     ct_loc0: float
     uid: str = None
-    loc: int = None
+    z_loc: int = None
     ct_store: pydicom.dataset.Dataset = None
 
 
@@ -264,17 +272,17 @@ class UidItem:
 
     
     def _get_z_loc(self):
-        diff = self.ct_loc0 - self.hdr.SliceLocation
+        diff = self.ct_loc0 - self.ct_hdr.SliceLocation
         return round(abs(diff / self.ct_thick))
 
 
     def __post_init__(self):
-        self.loc = self._get_z_loc()
-        self.uid = self.hdr.SOPInstanceUID
+        self.z_loc = self._get_z_loc()
+        self.uid = self.ct_hdr.SOPInstanceUID
         self.ct_store = pydicom.dataset.Dataset()
         self.ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
-        self.ct_store.ReferencedSOPInstanceUID = self.hdr.SOPInstanceUID
-        self.hdr = None # Clear out the header because its not needed
+        self.ct_store.ReferencedSOPInstanceUID = self.ct_hdr.SOPInstanceUID
+        self.ct_hdr = None # Clear out the header because its not needed
 
 
 # Could make this entire dictionary into a dataclass ... will need to evaluate it
@@ -305,12 +313,12 @@ def _generate_dicts(ct_series):
     ct_dict = {}
     ct_thick, _, ct_loc0, _, _ = _img_dims(ct_series)
     for ct in ct_series:
-        hdr = pydicom.dcmread(ct, stop_before_pixels=True)
-        z_index = round(abs((ct_loc0-hdr.SliceLocation) / ct_thick))
-        uid_dict.update({z_index: UidItem(hdr, ct_thick, ct_loc0)})
-        ct_dict.update({z_index: hdr})
-    return dict(sorted(uid_dict.items())), dict(sorted(ct_dict.items()))
-
+        ct_hdr = pydicom.dcmread(ct, stop_before_pixels=True)
+        item = UidItem(ct_hdr, ct_thick, ct_loc0)
+        uid_dict.update({item.z_loc: item})
+        ct_dict.update({item.z_loc: ct_hdr})
+    return uid_dict, ct_dict
+    #return dict(sorted(uid_dict.items())), dict(sorted(ct_dict.items()))
 
 # I don't know if this will work...
 def _initialize_rt_dcm(ct_series):
@@ -465,6 +473,7 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     str_set_roi = pydicom.dataset.Dataset()
     str_set_roi.ROINumber = roi_number
     str_set_roi.ROIName = roi_name
+    # I think this is the sequence number of the roi or image number, not just zero
     str_set_roi.ReferencedFrameOfReferenceUID = source_rt.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
     str_set_roi.ROIGenerationAlgorithm = 'AUTOMATIC'
     source_rt.StructureSetROISequence.append(str_set_roi)
@@ -512,12 +521,28 @@ def _empty_rt(source_rt):
     ----------
     source_rt : pydicom.dataset.FileDataset
         The provided RTSTRUCT pydicom dataset object without contours
-
     """
-    # Need to remove existing contours
-    # Then need to redeclare the UIDs for a new RTSTRUCT file
-    return False
+    # Time specific DICOM header info
+    current_time = time.localtime()
+    source_rt.InstanceCreationDate = time.strftime('%Y%m%d', current_time)
+    source_rt.InstanceCreationTime = time.strftime('%H%M%S.%f', current_time)[:-3]
+    source_rt.StructureSetDate = time.strftime('%Y%m%d', current_time)
+    source_rt.StructureSetTime = time.strftime('%H%M%S.%f', current_time)[:-3]
 
+    # Meta data
+    rt_dcm.SOPInstanceUID = pydicom.uid.generate_uid()
+    rt_dcm.Manufacturer = 'Beaumont Health'
+    rt_dcm.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
+    rt_dcm.StructureSetLabel = 'Auto-Segmented Contours'
+    rt_dcm.StructureSetName = 'Auto-Segmented Contours'
+    rt_dcm.SoftwareVersions = ['0.1.0']
+
+    # Removal of all contour data, maintain referenced image data
+    source_rt.StructureSetROISequence.clear()
+    source_rt.ROIContourSequence.clear()
+    source_rt.RTROIObservationsSequence.clear()
+
+    return source_rt
 
 # A function to add to an RT
 def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):

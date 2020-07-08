@@ -66,6 +66,17 @@ def alpha_shape(points, alpha, only_outer=True):
 '''
 rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/RTSTRUCT/*.dcm')
 ct_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/CT/*.dcm')
+rt = pydicom.dcmread(rt_series[0])
+print(rt.RTROIObservationsSequence)
+#rt.RTROIObservationsSequence = pydicom.sequence.Sequence([])
+rt.RTROIObservationsSequence.clear()
+print('empty')
+print(rt.RTROIObservationsSequence)
+rt.save_as('test.dcm')
+new_rt = pydicom.dcmread('test.dcm')
+print('Reading')
+print(new_rt.RTROIObservationsSequence)
+'''
 ct_series.sort()
 built = recon.struct(rt_series[0], wanted_contours=['skull'])
 mask = []
@@ -87,3 +98,4 @@ for i, m in enumerate(mask):
         print(m[2])
     else:
         continue
+'''
