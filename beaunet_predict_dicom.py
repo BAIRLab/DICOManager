@@ -1,19 +1,17 @@
 #! /usr/bin/python
 
-import concurrent.futures
 import copy
-from datetime import datetime
+import hashlib
 import numpy as np
 import pydicom
+import os
+import random
 import scipy
 import skimage
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from scipy.ndimage.morphology import binary_erosion
-import uuid
-import hashlib
-import os
-import random
 
 
 def _prepare_coordinate_mapping(ct_hdr):
@@ -92,6 +90,7 @@ def _wire_mask(arr):
     """
     # TODO: #10 While this returns the surface, the vertex ordering is incorrect. We need to use ITK's ContourExtractor2DImageFilter function 
     assert arr.ndim == 2, 'The input boolean mask is not 2D'
+
     if arr.dtype != 'bool':
         arr = np.array(arr, dtype='bool')
     
@@ -160,8 +159,6 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
         Raised if arr.ndim is not 2
         Raised if ct_dcm is not a pydicom dataset 
     """
-    # These will be helpful for my troubleshooting later in the process
-    # after which, they will likely become unnecessary due to protections upstream
     assert arr.ndim == 2, 'The input boolean mask is not 2D'
     assert type(ct_hdr) is pydicom.dataset.FileDataset, 'ct_dcm is not a pydicom dataset'
     
@@ -237,7 +234,7 @@ def _img_dims(dicom_list):
         diff = int_list.min() - 1
         int_list, loc_list = list(int_list), list(loc_list)
         n_slices += diff
-        int_list += [*range(1, diff + 1)]
+        int_list += list(range(1, diff + 1))
         # Adds the new locations to correspond with instances
         if flip:
             loc_list += list(loc0 - np.arange(1, diff + 1) * thickness)
@@ -265,7 +262,7 @@ class UidItem:
     ct_loc0: float
     uid: str = None
     z_loc: int = None
-    ct_store: pydicom.dataset.Dataset = None
+    ref_sop: pydicom.dataset.Dataset = None
 
 
     def __getitem__(self, name):
@@ -284,9 +281,9 @@ class UidItem:
     def __post_init__(self):
         self.z_loc = self._get_z_loc()
         self.uid = self.ct_hdr.SOPInstanceUID
-        self.ct_store = pydicom.dataset.Dataset()
-        self.ct_store.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
-        self.ct_store.ReferencedSOPInstanceUID = self.ct_hdr.SOPInstanceUID
+        self.ref_sop = pydicom.dataset.Dataset()
+        self.ref_sop.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
+        self.ref_sop.ReferencedSOPInstanceUID = self.ct_hdr.SOPInstanceUID
         self.ct_hdr = None # Clear out the header because its not needed
 
 
@@ -344,109 +341,151 @@ def _initialize_rt_dcm(ct_series):
 
     Notes
     ----------
-    Currently experimental
+    Modules referenced throughout code based on DICOM standard layout:
+        http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.html
+    In-line references follow the format of Part (P) and Chapter (C) as P.#.C.#
+    Common names references are provided with the byte location (XXXX, XXXX),
+        and then therein referred to with the byte locations
     """
     # TODO: Order the initializtion of header in the order of header fields
-    # Start crafting the RTSTRUCT
-    rt_dcm = pydicom.dataset.Dataset()
     # Read the ct to build the header from
     ct_dcm = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
+    
+    # Start crafting the RTSTRUCT
+    rt_dcm = pydicom.dataset.Dataset()
 
-    # DICOM date / time format per Section 6.2
+    # Info to populate header below
     date = datetime.now().date().strftime('%Y%m%d')
     time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-    rt_dcm.InstanceCreationDate = date
-    rt_dcm.InstanceCreationTime = time
-    rt_dcm.StructureSetDate = date
-    rt_dcm.StructureSetTime = time
-    rt_dcm.SpecificCharacterSet = 'ISO_IR 100'
+    instance_uid = _generate_instance_uid()
 
-    # UID Header Info
-    # RT Structure Set Storage Class
-    rt_dcm.SOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
-    # TODO: Need to see if the UIDs are the same if generated here or after data filling
-    rt_dcm.SOPInstanceUID = pydicom.uid.generate_uid()
-    rt_dcm.Modality = 'RTSTRUCT'
-    rt_dcm.Manufacturer = 'Beaumont Health'
-    rt_dcm.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
-    rt_dcm.StructureSetLabel = 'Auto-Segmented Contours'
-    rt_dcm.StructureSetName = 'Auto-Segmented Contours'
-    rt_dcm.SoftwareVersions = ['0.1.0']
-
-    # Referenced study
-    ref_study_ds = pydicom.dataset.Dataset()
-    # Study Component Management SOP Class
-    ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
-    ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
-    rt_dcm.ReferencedStudySequence = pydicom.sequence.Sequence([ref_study_ds])
-
-    # Demographics
+    # P.3.C.7.1.1 Patient Module
     if hasattr(ct_dcm, 'PatientsName'):
         rt_dcm.PatientsName = ct_dcm.PatientsName
     else:
         rt_dcm.PatientsName = 'UNKNOWN^UNKNOWN^^'
-
+  
     if hasattr(ct_dcm, 'PatientID'):
-        rt_dcm.PatientID = ct_dcm.PatientID 
+        rt_dcm.PatientID = ct_dcm.PatientID
     else:
         rt_dcm.PatientID = '0000000'
-
+    
     if hasattr(ct_dcm, 'PatientsBirthDate'):
         rt_dcm.PatientsBirthDate = ct_dcm.PatientsBirthDate
     else:
         rt_dcm.PatientsBirthDate = ''
-
+   
     if hasattr(ct_dcm, 'PatientsSex'):
         rt_dcm.PatientsSex = ct_dcm.PatientsSex
     else:
         rt_dcm.PatientsSex = ''
 
-    # This study
-    rt_dcm.StudyInstanceUID = ct_dcm.StudyInstanceUID
-    rt_dcm.SeriesInstanceUID = pydicom.uid.generate_uid()
-
-    if 'StudyID' in ct_dcm:
-        rt_dcm.StudyID = ct_dcm.StudyID
-    if 'SeriesNumber' in ct_dcm:
-        rt_dcm.SeriesNumber = ct_dcm.SeriesNumber
-    if 'StudyDate' in ct_dcm:
+    # P.3.C.7.2.1 General Study Module 
+    rt_dcm.StudyInstanceUID = ct_dcm.StuydInstanceUID
+    
+    if hasattr(ct_dcm, 'StudyDate'):
         rt_dcm.StudyDate = ct_dcm.StudyDate
-    if 'StudyTime' in ct_dcm:
+    else:
+        rt_dcm.StudyDate = date
+    
+    if hasattr(ct_dcm, 'StudyTime'):
         rt_dcm.StudyTime = ct_dcm.StudyTime
+    else:
+        rt_dcm.StudyTime = time
+    
+    if hasattr(ct_dcm, 'StudyID'):
+        rt_dcm.StudyID = ct_dcm.StudyID
+    
+    if hasattr(ct_dcm, 'StudyDescription'):
+        rt_dcm.StudyDescription = ct_dcm.StudyDescription
 
-    # Referenced frame of reference
+    ref_study_ds = pydicom.dataset.Dataset()
+    ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
+    ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
+    rt_dcm.ReferencedStudySequence = pydicom.sequence.Sequence([ref_study_ds])
+
+    # P.3.C.7.5.1 General Equipment Module
+    rt_dcm.Manufacturer = 'Beaumont Artifical Intelligence Lab'
+    rt_dcm.InstitutionName = 'Beaumont Health'
+    rt_dcm.ManufacturersModelName = 'DICOManager'
+    rt_dcm.SoftwareVersions = ['0.1.0']
+    
+    # P.3.C.8.8.1 RT Series Module
+    rt_dcm.Modality = 'RTSTRUCT'
+    rt_dcm.SeriesInstanceUID = instance_uid
+    
+    if hasattr(ct_dcm, 'SeriesNumber'):
+        rt_dcm.SeriesNumber = ct_dcm.SeriesNumber
+
+    rt_dcm.SeriesDate = date
+    rt_dcm.SeriesTime = time
+
+    if hasattr(ct_dcm, 'SeriesDescription'):
+        rt_dcm.SeriesDescription = ct_dcm.SeriesDescription
+
+    # P.3.C.8.8.5 Structure Set Module
+    rt_dcm.StructureSetLabel = 'Auto-Segmented Contours'
+    rt_dcm.StructureSetName = 'Auto-Segmented Contours'
+    rt_dcm.StructureSetDescription = 'Auto-Segmented Contours'
+    rt_dcm.StructureSetDate = date
+    rt_dcm.StructureSetTime = time
+    
+    # Referenced frame of reference (3006,0009)
     ref_frame_of_ref_ds = pydicom.dataset.Dataset()
-    rt_dcm.ReferencedFrameOfReferenceSequence = pydicom.sequence.Sequence([ref_frame_of_ref_ds])
     ref_frame_of_ref_ds.FrameOfReferenceUID = ct_dcm.FrameOfReferenceUID
-
-    # Referenced study
-    # TODO: Determine difference between this and the above call
+   
+    # RT Referenced Series Sequence (3006,0012)
     rt_ref_study_ds = pydicom.dataset.Dataset()
-    ref_frame_of_ref_ds.RTReferencedStudySequence = pydicom.sequence.Sequence([rt_ref_study_ds])
-    # Study Component Management SOP Class
     rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
     rt_ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
 
-    # Referenced sereis
+    # RT Referenced Series Sequence (3006,0014)
     rt_ref_series_ds = pydicom.dataset.Dataset()
-    rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
-    uid_dict, ct_dict = _generate_dicts(ct_series) 
-    ct_uids = [x.ct_store for x in uid_dict.values()]
-    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(ct_uids)
+    # Where uid_dict.ct_store contains Contour Image Sequence (3006,0016)
+    # (3006,0016) contains Ref. SOP Clas UID (0008,1150)
+    # (3006,0016) contian Ref. SOP Instance UID (0008,1155)
+    uid_dict, _ = _generate_dicts(ct_series)
+    contour_img_seq = sorted([x.ref_sop for x in uid_dict.values()])
+    rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(contour_img_seq)
 
-    rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
-    rt_dcm.ROIContourSequence = pydicom.sequence.Sequence()
-    rt_dcm.RTROIObservationsSequence = pydicom.sequence.Sequence()
+    # (3006,0014) attribute of (3006,0012)
+    ref_frame_of_ref_ds.RTReferencedStudySequence = pydicom.sequence.Sequence([rt_ref_study_ds])
     
-    file_meta = pydicom.dataset.Dataset()
-    file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.2'
-    file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
-    file_meta.ImplementationClassUID = pydicom.uid.generate_uid()
+    # (3006,0012) attribute of (3006,0009)
+    rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
+    
+    # (3006,0009) attribute of (3006,0010)
+    rt_dcm.ReferencedFrameOfReferenceSequence = pydicom.sequence.Sequence([ref_frame_of_ref_ds])
 
-    # Need to investigate what this does. 
-    output_ds = pydicom.dataset.FileDataset(None, rt_dcm, file_meta=file_meta, preamble="\0" * 128)
-    return output_ds 
+    # Structure Set Module (3006, 0020)
+    rt_dcm.StructureSetROISequence = pydicom.sequence.Sequence()
+
+    # P.3.C.8.8.6 ROI Contour Module
+    rt_dcm.ROIContourSequence = pydicom.sequence.Sequence()
+    
+    # P.3.C.8.8.8 RT ROI Observation Module
+    rt_dcm.RTROIObservationsSequence = pydicom.sequence.Sequence()
+
+    # P.3.C.12.1 SOP Common Module Attributes
+    rt_dcm.SOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
+    rt_dcm.SOPInstanceUID = instance_uid
+    rt_dcm.SpecificCharacterSet = 'ISO_IR 100'
+    rt_dcm.InstanceCreationDate = date
+    rt_dcm.InstanceCreationTime = time
+
+    # P.10.C.7.1 DICOM File Meta Information
+    file_meta = pydicom.dataset.FileMetaDataset()
+    file_meta.FileMetaInformationGroupLength = 222
+    file_meta.FileMetaInformationVersion = b'\x00\x01'
+    file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
+    file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3') # Check UID
+    file_meta.MediaStorageSOPInstanceUID = instance_uid
+    file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2') # Check UID
+
+    # Make a pydicom.dataset.Dataset() into a pydicom.dataset.FileDataset()
+    full_dcm = pydicom.dataset.FileDataset(None, rt_dcm, file_meta=file_meta, preamble="\0" * 128)
+    return full_dcm
 
 # A function which takes the RT Struct and wire mask and appends to the rt file
 # This should have a uid_list which is a list of the uid values per contour list  
@@ -648,18 +687,22 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     source_rt = _update_rt_dcm(source_rt)
     uid_dict, ct_dict = _generate_dicts(ct_series)
 
-    # Enumerate through contours
-    for index, contour in enumerate(contour_array):
-        if roi_name_list:
-            roi_name = roi_name_list[index]
-        else:
-            roi_name = 'GeneratedContour' + str(index + 1)
-        # Enumerate through each z-axis slice
+    if not roi_name_list:
+        n_contours = contour_array.shape[0]
+        roi_name_list = ['GeneratedContour' + str(x) for x in range(n_contours)]
+
+    # Iterate through contours
+    for c_index, contour in range(contour_array.shape[0]):
+        contour = contour_array[c_index]
+        roi_name = roi_name_list[c_index]
+
+        # Iterate through each z-axis slice
         for z_index in range(contour.shape[-1]):
             polygons = skimage.measure.label(contour[z_index], connectivity=2)
             for polygon in polygons:
-                coords = _array_to_coords_2D(polygon, ct_dict[z_index])
+                coords = _array_to_coords_2D(polygon, ct_hdr=ct_dict[z_index])
                 source_rt = _append_to_rt(source_rt, coords, uid_dict, roi_name)
+
     return source_rt 
 
 # A function to create new from an RT
@@ -735,13 +778,14 @@ def save_rt(source_rt, filename):
     """
     Function
     ----------
-    Given an RTSTRUCT pydicom object, save as filename
+    Given an RTSTRUCT pydicom object, save as filename. Adds necessary
+        metadata if pydicom.dataset.Dataset is provided.
 
     Parameters
     ----------
-    source_rt : pydicom.dataset.FileDataset
+    source_rt : pydicom.dataset.[FileDataset, Dataset]
         An RTSTRUCT pydicom dataset object to be saved
-    filename : string
+    filename : string OR posixpath
         A file name string or filepath to save location
 
     Raises
@@ -754,16 +798,16 @@ def save_rt(source_rt, filename):
     This has been seperated from the creation functions, to prevent the
         inadvertent overwriting of the original RTSTRUCT files
     """
-    if type(source_rt) == pydicom.dataset.FileDataset:
+    if type(source_rt) is pydicom.dataset.FileDataset:
         source_rt.save_as(filename)
-    elif type(source_rt) == pydicom.dataset.Dataset:
+    elif type(source_rt) is pydicom.dataset.Dataset:
         file_meta = pydicom.dataset.FileMetaDataset()
         file_meta.FileMetaInformationGroupLength = 222
         file_meta.FileMetaInformationVersion = b'\x00\x01'
         file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-        file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
-        file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
-        file_meta.ImplementationClassUID = '1.2.276.0.7230010.3.0.3.6.2'
+        file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
+        file_meta.MediaStorageSOPInstanceUID = source_rt.SOPInstanceUID
+        file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
 
         inputs = {'filename': filename,
                   'dataset': source_rt,

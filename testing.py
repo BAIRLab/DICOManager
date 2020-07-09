@@ -72,17 +72,19 @@ rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/101037
 ct_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/CT/*.dcm')
 rt = pydicom.dcmread(rt_series[0])
 
+print(rt.SeriesInstanceUserID)
+
 new_rt = copy.deepcopy(rt)
 new_rt = decon._empty_rt_dcm(rt)
 new_rt = decon._update_rt_dcm(rt)
-print(type(new_rt))
+
 file_meta = pydicom.dataset.FileMetaDataset()
 file_meta.FileMetaInformationGroupLength = 222
 file_meta.FileMetaInformationVersion = b'\x00\x01'
 file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
+file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
 file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
-file_meta.ImplementationClassUID = '1.2.276.0.7230010.3.0.3.6.2'
+file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
 
 print(new_rt)
 # Need to investigate what this does.
