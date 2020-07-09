@@ -1,3 +1,5 @@
+from pydicom.dataset import Dataset, FileDataset
+from pydicom.uid import ImplicitVRLittleEndian
 import numpy as np
 import os
 import pydicom
@@ -64,10 +66,31 @@ def alpha_shape(points, alpha, only_outer=True):
             add_edge(edges, ic, ia)
     return edges
 '''
+import copy
+
 rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/RTSTRUCT/*.dcm')
 ct_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/CT/*.dcm')
 rt = pydicom.dcmread(rt_series[0])
 
+new_rt = copy.deepcopy(rt)
+new_rt = decon._empty_rt_dcm(rt)
+new_rt = decon._update_rt_dcm(rt)
+print(type(new_rt))
+file_meta = pydicom.dataset.FileMetaDataset()
+file_meta.FileMetaInformationGroupLength = 222
+file_meta.FileMetaInformationVersion = b'\x00\x01'
+file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
+file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
+file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+file_meta.ImplementationClassUID = '1.2.276.0.7230010.3.0.3.6.2'
+
+print(new_rt)
+# Need to investigate what this does.
+filename = os.getcwd() + '/test.dcm'
+output_ds = pydicom.dataset.FileDataset(filename, new_rt, file_meta=file_meta, preamble=b'\x00' * 128)
+
+output_ds.save_as(filename)
+ds = pydicom.dcmread(filename)
 '''
 print(rt.SeriesInstanceUID)
 print(rt.SeriesDate)
@@ -101,7 +124,6 @@ for i, m in enumerate(mask):
         print(m[2])
     else:
         continue
-'''
 import uuid
 import hashlib
 import os
@@ -128,4 +150,5 @@ def generate_uid():
 print(rt.SOPInstanceUID)
 rt.SOPInstanceUID = generate_uid()
 print(rt.SOPInstanceUID)
-rt.save_as('test.dcm')
+#rt.save_as('test.dcm')
+'''

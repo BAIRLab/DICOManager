@@ -1,6 +1,7 @@
 #! /usr/bin/python
 
 import concurrent.futures
+import copy
 from datetime import datetime
 import numpy as np
 import pydicom
@@ -9,6 +10,10 @@ import skimage
 from dataclasses import dataclass
 from datetime import datetime
 from scipy.ndimage.morphology import binary_erosion
+import uuid
+import hashlib
+import os
+import random
 
 
 def _prepare_coordinate_mapping(ct_hdr):
@@ -505,7 +510,89 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     return source_rt
 
 
-def _update_rt_dcm(source_rt, empty=False):
+def _generate_instance_uid():
+    """
+    Function
+    ----------
+    Creates a randomly generated, MIM formatted instance UID string
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    ----------
+    instance_uid : string
+        An instance UID string which fits the format for MIM generated RTSTRUCTS
+
+    Notes
+    ----------
+    The prefix of '2.16.840.1.' is MIM standard, the remainder is a
+        randomly generated hash value
+
+    References
+    ----------
+    Based on pydicom.uid.generate_uid() and documentation from MIM Software Inc.
+    https://pydicom.github.io/pydicom/dev/reference/generated/pydicom.uid.generate_uid.html
+    """
+    # Modified from pydicom.uid.generate_uid
+    entropy_srcs = [
+        str(uuid.uuid1()),  # 128-bit from MAC/time/randomness
+        str(os.getpid()),  # Current process ID
+        hex(random.getrandbits(64))  # 64 bits randomness
+    ]
+
+    # Create UTF-8 hash value
+    hash_val = hashlib.sha512(''.join(entropy_srcs).encode('utf-8'))
+
+    # Convert this to an int with the maximum available digits
+    hv = str(int(hash_val.hexdigest(), 16))
+    parts = hv[:6], hv[6], hv[7:15], hv[15:26], hv[26:35], hv[35:38], hv[38:41]
+    return '2.16.840.1.' + '.'.join(parts)
+
+
+def _update_rt_dcm(source_rt):
+    """
+    Function
+    ----------
+    Given an RTSTRUCT pydicom object, times and UIDs are updated
+
+    Parameters
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        An RTSTRUCT pydicom dataset object
+
+    Returns
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        The provided RTSTRUCT pydicom dataset object UIDs are updated 
+    """
+    # Time specific DICOM header info
+    date = datetime.now().date().strftime('%Y%m%d')
+    time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
+    source_rt.InstanceCreationDate = date
+    source_rt.InstanceCreationTime = time
+    source_rt.SeriesDate = date
+    source_rt.SeriesTime = time
+    source_rt.StructureSetDate = date
+    source_rt.StructureSetTime = time
+
+    # UIDs creating new function to meet MIM standard
+    instance_uid = _generate_instance_uid()
+    source_rt.file_meta.MediaStorageSOPInstanceUID = instance_uid 
+    source_rt.SOPInstanceUID = instance_uid 
+    source_rt.SeriesInstanceUID = instance_uid 
+
+    # Meta data updated
+    source_rt.Manufacturer = 'Beaumont Health'
+    source_rt.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
+    source_rt.StructureSetLabel = 'Auto-Segmented Contours'
+    source_rt.StructureSetName = 'Auto-Segmented Contours'
+    source_rt.SoftwareVersions = ['0.1.0']
+
+    return source_rt
+
+def _empty_rt_dcm(source_rt):
     """
     Function
     ----------
@@ -521,39 +608,13 @@ def _update_rt_dcm(source_rt, empty=False):
     source_rt : pydicom.dataset.FileDataset
         The provided RTSTRUCT pydicom dataset object without contours
     """
-    # Time specific DICOM header info
-    date = datetime.now().date().strftime('%Y%m%d')
-    time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-    source_rt.InstanceCreationDate = date
-    source_rt.InstanceCreationTime = time
-    source_rt.SeriesDate = date
-    source_rt.SeriesTime = time
-    source_rt.StructureSetDate = date
-    source_rt.StructureSetTime = time
-
-    # UIDs
-    instance_uid = pydicom.uid.generate_uid()
-    source_rt.MediaStorageSOPInstanceUID = instance_uid 
-    source_rt.SOPInstanceUID = instance_uid 
-    source_rt.SeriesInstanceUID = instance_uid 
-
-    # Meta data updated
-    source_rt.Manufacturer = 'Beaumont Health'
-    source_rt.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
-    source_rt.StructureSetLabel = 'Auto-Segmented Contours'
-    source_rt.StructureSetName = 'Auto-Segmented Contours'
-    source_rt.SoftwareVersions = ['0.1.0']
-
-    if empty:
-        # Removal of all contour data, maintain referenced image data
-        source_rt.StructureSetROISequence.clear()
-        source_rt.ROIContourSequence.clear()
-        source_rt.RTROIObservationsSequence.clear()
-
+    source_rt.StructureSetROISequence.clear()
+    source_rt.ROIContourSequence.clear()
+    source_rt.RTROIObservationsSequence.clear()
     return source_rt
 
 # A function to add to an RT
-def to_rt(source_rt, ct_series, contour_array, roi_name_list=None, empty=False):
+def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     """
     Function
     ----------
@@ -582,15 +643,9 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None, empty=False):
     Notes
     ----------
     This function is without input error checking. Will be added later
-    """
-    # Need to have the contour slices in relation to the individual image UIDs
-    # We can do that with the help of the z-axis location data. Will likely 
-    # want to have the data stored in a nice-to-use struct
-    # Could also find the nearest image slice to a given contour location
-    # I think I will try this until I know that the robustness of this solution
+    """ 
 
-    # Need to check if this is all the time specific values
-    source_rt = _update_rt_dcm(source_rt, empty=empty)
+    source_rt = _update_rt_dcm(source_rt)
     uid_dict, ct_dict = _generate_dicts(ct_series)
 
     # Enumerate through contours
@@ -638,8 +693,9 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     ----------
     This function is without input error checking. Will be added later
     """
-    new_rt = pydicom.dataset.Dataset(source_rt.copy())
-    return to_rt(new_rt, ct_series, contour_array, roi_name_list, empty=True)
+    new_rt = copy.deepcopy(source_rt)
+    new_rt = _empty_rt_dcm(new_rt)
+    return to_rt(new_rt, ct_series, contour_array, roi_name_list)
 
 # Could make this into an actual wrapper, instead of what it is now...
 def from_ct(ct_series, contour_array, roi_name_list=None):
@@ -673,3 +729,48 @@ def from_ct(ct_series, contour_array, roi_name_list=None):
     """
     new_rt = _initialize_rt_dcm(ct_series)
     return to_rt(new_rt, ct_series, contour_array, roi_name_list)
+
+
+def save_rt(source_rt, filename):
+    """
+    Function
+    ----------
+    Given an RTSTRUCT pydicom object, save as filename
+
+    Parameters
+    ----------
+    source_rt : pydicom.dataset.FileDataset
+        An RTSTRUCT pydicom dataset object to be saved
+    filename : string
+        A file name string or filepath to save location
+
+    Raises
+    ----------
+    TypeError
+        Raised if input type is not pydicom.dataset.[FileDataset, Dataset]
+
+    Notes
+    ----------
+    This has been seperated from the creation functions, to prevent the
+        inadvertent overwriting of the original RTSTRUCT files
+    """
+    if type(source_rt) == pydicom.dataset.FileDataset:
+        source_rt.save_as(filename)
+    elif type(source_rt) == pydicom.dataset.Dataset:
+        file_meta = pydicom.dataset.FileMetaDataset()
+        file_meta.FileMetaInformationGroupLength = 222
+        file_meta.FileMetaInformationVersion = b'\x00\x01'
+        file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
+        file_meta.MediaStorageSOPClassUID = '1.2.840.10008.5.1.4.1.1.481.3'
+        file_meta.MediaStorageSOPInstanceUID = pydicom.uid.generate_uid()
+        file_meta.ImplementationClassUID = '1.2.276.0.7230010.3.0.3.6.2'
+
+        inputs = {'filename': filename,
+                  'dataset': source_rt,
+                  'file_meta': file_meta,
+                  'preamble': b'\x00'*128}
+
+        output_ds = pydicom.dataset.FileDataset(**inputs)
+        output_ds.save_as(filename)
+    else:
+        raise TypeError('source_rt must be a pydicom FileDataset or Dataset object')
