@@ -547,16 +547,17 @@ def struct(patient_path, wanted_contours, raises=False):
     contours = []  # Designates the contours that have been included
     for index, contour in enumerate(struct_dcm.StructureSetROISequence):
         # Functionality for dictionaries
+        print(contour.ROIName)
         if type(wanted_contours) is dict:
             for key in wanted_contours:
                 if contour.ROIName.lower() in wanted_contours[key]:
                     contour.ROIName = key
-                    break
+                    continue 
         if contour.ROIName.lower() not in wanted_contours:
-            break
+            continue 
 
         contours.append(contour.ROIName.lower())
-
+        
         fill_array = np.zeros(shape=dimensions)
         if hasattr(struct_dcm.ROIContourSequence[index], 'ContourSequence'):
             contour_list = struct_dcm.ROIContourSequence[index].ContourSequence
