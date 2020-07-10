@@ -87,6 +87,10 @@ def _wire_mask(arr):
     The most accurate way would be with ITK using: 
         itk.GetImageFromArray
         itk.ContourExtractor2DImageFilter
+    Another option is to use VTK:
+        https://pyscience.wordpress.com/2014/09/11/surface-extraction-creating-a-mesh-from-pixel-data-using-python-and-vtk/
+    Either way, the reconstruction polygon fill is first priority, and then
+        this deconstruction minium polygon surface computation.
     """
     # TODO: #10 While this returns the surface, the vertex ordering is incorrect. We need to use ITK's ContourExtractor2DImageFilter function 
     assert arr.ndim == 2, 'The input boolean mask is not 2D'
@@ -97,6 +101,8 @@ def _wire_mask(arr):
     return binary_erosion(arr) ^ arr
 
 
+# rename to _sort_points_ccw
+# in the future could become utils.sort_points(ccw=True)
 def _ccw_sort(points):
     """
     Function
@@ -120,10 +126,16 @@ def _ccw_sort(points):
         v2 = np.array([0, -CoM[1], CoM[2]])
         v1_u = v1 / np.linalg.norm(v1)
         v2_u = v2 / np.linalg.norm(v2)
-
+        # ccw
         if v1_og[0] > CoM[0]:
             return np.arccos(np.dot(v1_u, v2_u))
         return 100 - np.arccos(np.dot(v1_u, v2_u))
+        '''
+        # cw sorting would be something like this:
+        if v1_og[0] < CoM[0]:
+            return -np.arccos(np.dot(v1_u, v2_u))
+        return 100 + np.arccos(np.dot(v1_u, v2_u))
+        '''
 
     return np.array(sorted(points, key=_angle))
 
@@ -176,7 +188,6 @@ def _array_to_coords_2D(arr, ct_hdr, flatten=True):
     return points_sorted.flatten()
 
 
-# This is coming from reconstruction
 # TODO: #8 Move common utilities into a shared library for re and deconstruction
 def _img_dims(dicom_list):
     """
@@ -283,6 +294,7 @@ class UidItem:
         self.ct_hdr = None # Clear out the header because its not needed
 
 
+# I should also give this a more useful name...
 # Could make this entire dictionary into a dataclass ... will need to evaluate it
 def _generate_dicts(ct_series):
     """
@@ -337,16 +349,15 @@ def _initialize_rt_dcm(ct_series):
     Notes
     ----------
     Modules referenced throughout code based on DICOM standard layout:
-        http://dicom.nema.org/medical/dicom/current/output/chtml/part03/sect_C.7.html
+        http://dicom.nema.org/medical/dicom/current/output/html/part03.html  
     In-line references follow the format of Part (P) and Chapter (C) as P.#.C.#
     Common names references are provided with the byte location (XXXX, XXXX),
         and then therein referred to with the byte locations
     """
-    # TODO: Order the initializtion of header in the order of header fields
     # Read the ct to build the header from
     ct_dcm = pydicom.dcmread(ct_series[0], stop_before_pixels=True)
     
-    # Start crafting the RTSTRUCT
+    # Start crafting a fresh RTSTRUCT
     rt_dcm = pydicom.dataset.Dataset()
 
     # Info to populate header below
@@ -510,31 +521,8 @@ def _append_to_rt(source_rt, contour, uid_dict, ct_dict, roi_name):
     References
     ----------
     Citations are to the DICOM NEMA standard:
-        http://dicom.nema.org/medical/dicom/current/output/chtml/part03/
+        http://dicom.nema.org/medical/dicom/current/output/html/part03.html
     """
-    '''
-    At the top level, this needs to accept an entire contour
-    Then, ROI Contour Sequence is representative of that contour
-    Each item in the Contour Sequence is a unqiue polygon
-    The image references in the Contour Sequence are to the SOP Class / Inst
-        for the given z_location, meaning we need to account for double ups
-        on the cases where a slice has more than one unique polygon
-    As such we should accpet the entire array for the contour, and then
-        do they connectivity wrapper and splitting after we get the uid
-        that way we don't need to double down on the UID and we can then
-        use the array to coords function to just get the points
-    '''
-
-
-    '''
-        # Iterate through each z-axis slice
-        for z_index in range(contour.shape[-1]):
-            polygons = skimage.measure.label(contour[z_index], connectivity=2)
-            for polygon in polygons:
-                coords = _array_to_coords_2D(polygon, ct_hdr=ct_dict[z_index])
-                source_rt = _append_to_rt(source_rt, coords, uid_dict, roi_name)
-    '''
-
     roi_number = len(source_rt.StructureSetROISequence) + 1
     
     # P.3.C.8.8.5 Structure Set Module
@@ -572,7 +560,7 @@ def _append_to_rt(source_rt, contour, uid_dict, ct_dict, roi_name):
 
     # P.3.C.8.8.8 RT ROI Observation Module
     rt_roi_obs = pydicom.dataset.Dataset()
-    rt_roi_obs.ObservationNumber = roi_number
+    rt_roi_obs.ObservationNumber = roi_number # This might be different than roi_number...
     rt_roi_obs.ReferencedROINumber = roi_number
     rt_roi_obs.ROIObservationLabel = roi_name
     rt_roi_obs.RTROIInterpretedType = 'ORGAN'
@@ -639,29 +627,34 @@ def _update_rt_dcm(source_rt):
     source_rt : pydicom.dataset.FileDataset
         The provided RTSTRUCT pydicom dataset object UIDs are updated 
     """
-    # TODO: Document this to match the nema naming standards
-    # Time specific DICOM header info
     date = datetime.now().date().strftime('%Y%m%d')
     time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-    source_rt.InstanceCreationDate = date
-    source_rt.InstanceCreationTime = time
+    instance_uid = _generate_instance_uid()
+
+    # P.3.C.7.5.1 General Equipment Module
+    source_rt.Manufacturer = 'Beaumont Health'
+    source_rt.InstitutionName = 'Beaumont Health'
+    source_rt.ManufacturersModelName = 'DICOManager'
+    source_rt.SoftwareVersions = ['0.1.0']
+    
+    # P.3.C.8.8.1 RT Series Module
+    source_rt.SeriesInstanceUID = instance_uid 
     source_rt.SeriesDate = date
     source_rt.SeriesTime = time
+
+    # P.3.C.8.8.5 Structure Set Module
+    source_rt.StructureSetLabel = 'Auto-Segmented Contours'
+    source_rt.StructureSetName = 'Auto-Segmented Contours'
     source_rt.StructureSetDate = date
     source_rt.StructureSetTime = time
 
-    # UIDs creating new function to meet MIM standard
-    instance_uid = _generate_instance_uid()
-    source_rt.file_meta.MediaStorageSOPInstanceUID = instance_uid 
+    # P.3.C.12.1 SOP Common Module Attributes
     source_rt.SOPInstanceUID = instance_uid 
-    source_rt.SeriesInstanceUID = instance_uid 
-
-    # Meta data updated
-    source_rt.Manufacturer = 'Beaumont Health'
-    source_rt.ManufacturersModelName = 'Beaunet Artificial Intelligence Lab'
-    source_rt.StructureSetLabel = 'Auto-Segmented Contours'
-    source_rt.StructureSetName = 'Auto-Segmented Contours'
-    source_rt.SoftwareVersions = ['0.1.0']
+    source_rt.InstanceCreationDate = date
+    source_rt.InstanceCreationTime = time
+    
+    # P.10.C.7.1 DICOM File Meta Information
+    source_rt.file_meta.MediaStorageSOPInstanceUID = instance_uid 
 
     return source_rt
 
@@ -717,7 +710,6 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     ----------
     This function is without input error checking. Will be added later
     """ 
-
     source_rt = _update_rt_dcm(source_rt)
     uid_dict, ct_dict = _generate_dicts(ct_series)
 
@@ -725,8 +717,8 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
         n_contours = contour_array.shape[0]
         roi_name_list = ['GeneratedContour' + str(x) for x in range(n_contours)]
 
-    # Iterate through contours
-    for c_index, contour in range(contour_array.shape[0]):
+    # Iterate through contours and append to the rt file
+    for c_index in range(contour_array.shape[0]):
         contour = contour_array[c_index]
         roi_name = roi_name_list[c_index]
         source_rt = _append_to_rt(source_rt, contour, uid_dict, ct_dict, roi_name)
@@ -829,14 +821,16 @@ def save_rt(source_rt, filename):
     if type(source_rt) is pydicom.dataset.FileDataset:
         source_rt.save_as(filename)
     elif type(source_rt) is pydicom.dataset.Dataset:
+        # P.10.C.7.1 DICOM File Meta Information
         file_meta = pydicom.dataset.FileMetaDataset()
-        file_meta.FileMetaInformationGroupLength = 222
+        file_meta.FileMetaInformationGroupLength = 222 # Check
         file_meta.FileMetaInformationVersion = b'\x00\x01'
-        file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
         file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
         file_meta.MediaStorageSOPInstanceUID = source_rt.SOPInstanceUID
+        file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
         file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
 
+        # Input dict to convert pydicom Datastet to FileDataset
         inputs = {'filename': filename,
                   'dataset': source_rt,
                   'file_meta': file_meta,
