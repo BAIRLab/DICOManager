@@ -101,7 +101,7 @@ def _ccw_sort(points):
     """
     Function
     ----------
-    Computes the counterclockwise angle between CoM to point and x-axis
+    Computes the counterclockwise angle between CoM to point and y-axis
 
     Parameters
     ----------
@@ -262,28 +262,24 @@ class UidItem:
     ct_loc0: float
     uid: str = None
     z_loc: int = None
-    ref_sop: pydicom.dataset.Dataset = None
-
+    ref_uid: pydicom.dataset.Dataset = None
 
     def __getitem__(self, name):
         return self.__dict__[name]
 
-
     def __setitem__(self, name, value):
         self.__dict__[name] = value
-
     
     def _get_z_loc(self):
         diff = self.ct_loc0 - self.ct_hdr.SliceLocation
         return round(abs(diff / self.ct_thick))
 
-
     def __post_init__(self):
         self.z_loc = self._get_z_loc()
         self.uid = self.ct_hdr.SOPInstanceUID
-        self.ref_sop = pydicom.dataset.Dataset()
-        self.ref_sop.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
-        self.ref_sop.ReferencedSOPInstanceUID = self.ct_hdr.SOPInstanceUID
+        self.ref_uid = pydicom.dataset.Dataset()
+        self.ref_uid.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.2')
+        self.ref_uid.ReferencedSOPInstanceUID = self.ct_hdr.SOPInstanceUID
         self.ct_hdr = None # Clear out the header because its not needed
 
 
@@ -320,9 +316,8 @@ def _generate_dicts(ct_series):
         uid_dict.update({item.z_loc: item})
         ct_dict.update({item.z_loc: ct_hdr})
     return uid_dict, ct_dict
-    #return dict(sorted(uid_dict.items())), dict(sorted(ct_dict.items()))
 
-# I don't know if this will work...
+
 def _initialize_rt_dcm(ct_series):
     """
     Function
@@ -443,17 +438,18 @@ def _initialize_rt_dcm(ct_series):
     rt_ref_series_ds = pydicom.dataset.Dataset()
     rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
     # Where uid_dict.ct_store contains Contour Image Sequence (3006,0016)
-    # (3006,0016) contains Ref. SOP Clas UID (0008,1150)
+    # (3006,0016) contains Ref. SOP Class UID (0008,1150)
     # (3006,0016) contian Ref. SOP Instance UID (0008,1155)
+    # TODO: OO Approach would save from calling this multiple times
     uid_dict, _ = _generate_dicts(ct_series)
-    contour_img_seq = sorted([x.ref_sop for x in uid_dict.values()])
+    contour_img_seq = sorted([x.ref_uid for x in uid_dict.values()])
     rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(contour_img_seq)
 
     # (3006,0014) attribute of (3006,0012)
-    ref_frame_of_ref_ds.RTReferencedStudySequence = pydicom.sequence.Sequence([rt_ref_study_ds])
+    rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
     
     # (3006,0012) attribute of (3006,0009)
-    rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
+    ref_frame_of_ref_ds.RTReferencedStudySequence = pydicom.sequence.Sequence([rt_ref_study_ds])
     
     # (3006,0009) attribute of (3006,0010)
     rt_dcm.ReferencedFrameOfReferenceSequence = pydicom.sequence.Sequence([ref_frame_of_ref_ds])
@@ -489,7 +485,7 @@ def _initialize_rt_dcm(ct_series):
 
 # A function which takes the RT Struct and wire mask and appends to the rt file
 # This should have a uid_list which is a list of the uid values per contour list  
-def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
+def _append_to_rt(source_rt, contour, uid_dict, ct_dict, roi_name):
     """
     Function
     ----------
@@ -499,8 +495,8 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     ----------
     source_rt : pydicom.dataset.FileDataset
         An RTSTRUCT pydicom dataset object
-    coords_list : numpy.ndarray
-        A 1xN array of flattened floating point patient coordinates
+    contour : numpy.ndarray
+        A 3D boolean numpy array representing an single contour
     uid_list : list
         A list of UIDItem objects to store in source_rt.ContourImageSequence
     roi_name : string
@@ -510,35 +506,71 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     ----------
     source_rt : pydicom.dataset.FileDataset
         The provided pydicom object is returned with appended contour
+    
+    References
+    ----------
+    Citations are to the DICOM NEMA standard:
+        http://dicom.nema.org/medical/dicom/current/output/chtml/part03/
     """
+    '''
+    At the top level, this needs to accept an entire contour
+    Then, ROI Contour Sequence is representative of that contour
+    Each item in the Contour Sequence is a unqiue polygon
+    The image references in the Contour Sequence are to the SOP Class / Inst
+        for the given z_location, meaning we need to account for double ups
+        on the cases where a slice has more than one unique polygon
+    As such we should accpet the entire array for the contour, and then
+        do they connectivity wrapper and splitting after we get the uid
+        that way we don't need to double down on the UID and we can then
+        use the array to coords function to just get the points
+    '''
+
+
+    '''
+        # Iterate through each z-axis slice
+        for z_index in range(contour.shape[-1]):
+            polygons = skimage.measure.label(contour[z_index], connectivity=2)
+            for polygon in polygons:
+                coords = _array_to_coords_2D(polygon, ct_hdr=ct_dict[z_index])
+                source_rt = _append_to_rt(source_rt, coords, uid_dict, roi_name)
+    '''
+
     roi_number = len(source_rt.StructureSetROISequence) + 1
-    # Add ROI to Structure Set Sequence
+    
+    # P.3.C.8.8.5 Structure Set Module
     str_set_roi = pydicom.dataset.Dataset()
     str_set_roi.ROINumber = roi_number
-    str_set_roi.ROIName = roi_name
-    # I think this is the sequence number of the roi or image number, not just zero
     str_set_roi.ReferencedFrameOfReferenceUID = source_rt.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
+    str_set_roi.ROIName = roi_name
     str_set_roi.ROIGenerationAlgorithm = 'AUTOMATIC'
     source_rt.StructureSetROISequence.append(str_set_roi)
 
-    # Add ROI to ROI Contour Sequence
-    roi_contour_ds = pydicom.dataset.Dataset()
-    roi_contour_ds.ROIDisplayColor = [255, 0, 0]  # All red for simplicity
-    roi_contour_ds.ReferencedROINumber = roi_number
-    roi_contour_ds.ContourSequence = pydicom.sequence.Sequence([])
-    source_rt.ROIContourSequence.append(roi_contour_ds)
-    
-    for index, coords in enumerate(coords_list):
-        contour_ds = pydicom.dataset.Dataset()
-        # TODO: This is where we need the UIDs from the slices.
-        # Could compute the boolean sum of slices and index a complete uid list 
-        contour_ds.ContourImageSequence = pydicom.sequence.Sequence(uid_list[index])
-        contour_ds.ContourGeometricType = 'CLOSED_PLANAR'
-        contour_ds.NumberOfContourPoints = len(coords) // 3
-        contour_ds.ContourData = [f'{p:0.2f}' for p in coords]
-        roi_contour_ds.ContourSequence.append(contour_ds)
+    # P.3.C.8.8.6 ROI Contour Module
+    roi_contour_seq = pydicom.dataset.Dataset()
+    roi_contour_seq.ReferencedROINumber = roi_number
+    roi_contour_seq.ROIDisplayColor = [255, 0, 0]  # All red for simplicity
+    roi_contour_seq.ContourSequence = pydicom.sequence.Sequence([])
 
-    # Add ROI to RT ROI Observations Sequence
+    # A contour sequence item is a unique 2D z-axis polygon
+    contour_seq = pydicom.dataset.Dataset()
+    for z_index in range(contour.shape[-1]):
+        # May need to account for flippin here ....
+        ref_uid = uid_dict[z_index].ref_sop
+        z_slice = contour[z_index]
+        polygons, n_poly = skimage.measure.label(contour, connectivity=2, return_num=True)
+        for p_index in range(1, n_poly): # First polygon is background
+            polygon = polygons[polygons == p_index]
+            coords = _array_to_coords_2D(polygon, ct_hdr=ct_dict[z_index])
+            contour_seq.ContourImageSequence = pydicom.sequence.Sequence([ref_uid])
+            contour_seq.ContourGeometricType = 'CLOSED_PLANAR'
+            contour_seq.NumberOfContourPoints = len(coords) // 3
+            contour_seq.ContourData = [f'{p:0.2f}' for  p in coords]
+            roi_contour_seq.ContourSequence.append(contour_seq)
+
+    # Append entire sequence for the given contour
+    source_rt.ROIContourSequence.append(roi_contour_seq)
+
+    # P.3.C.8.8.8 RT ROI Observation Module
     rt_roi_obs = pydicom.dataset.Dataset()
     rt_roi_obs.ObservationNumber = roi_number
     rt_roi_obs.ReferencedROINumber = roi_number
@@ -549,6 +581,7 @@ def _append_to_rt(source_rt, coords_list, uid_list, roi_name):
     return source_rt
 
 
+# TODO: Check with MIM on how they generate their Instance UID
 def _generate_instance_uid():
     """
     Function
@@ -606,6 +639,7 @@ def _update_rt_dcm(source_rt):
     source_rt : pydicom.dataset.FileDataset
         The provided RTSTRUCT pydicom dataset object UIDs are updated 
     """
+    # TODO: Document this to match the nema naming standards
     # Time specific DICOM header info
     date = datetime.now().date().strftime('%Y%m%d')
     time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
@@ -695,17 +729,11 @@ def to_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     for c_index, contour in range(contour_array.shape[0]):
         contour = contour_array[c_index]
         roi_name = roi_name_list[c_index]
-
-        # Iterate through each z-axis slice
-        for z_index in range(contour.shape[-1]):
-            polygons = skimage.measure.label(contour[z_index], connectivity=2)
-            for polygon in polygons:
-                coords = _array_to_coords_2D(polygon, ct_hdr=ct_dict[z_index])
-                source_rt = _append_to_rt(source_rt, coords, uid_dict, roi_name)
+        source_rt = _append_to_rt(source_rt, contour, uid_dict, ct_dict, roi_name)
 
     return source_rt 
 
-# A function to create new from an RT
+
 def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     """
     Function
@@ -740,7 +768,7 @@ def from_rt(source_rt, ct_series, contour_array, roi_name_list=None):
     new_rt = _empty_rt_dcm(new_rt)
     return to_rt(new_rt, ct_series, contour_array, roi_name_list)
 
-# Could make this into an actual wrapper, instead of what it is now...
+
 def from_ct(ct_series, contour_array, roi_name_list=None):
     """
     Function

@@ -67,11 +67,22 @@ def alpha_shape(points, alpha, only_outer=True):
     return edges
 '''
 import copy
+from skimage import measure
 
 rt_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/RTSTRUCT/*.dcm')
 ct_series = glob.glob('/home/eporter/eporter_data/optic_structures/dicoms/1010370/CT/*.dcm')
 rt = pydicom.dcmread(rt_series[0])
+built = recon.struct(rt_series[0], wanted_contours=['r optic nerve', 'l optic nerve', 'chiasm', 'skull'])
+double = np.zeros((3, 512, 512, 164))
+double[0] = built[0] + built[1]
+double[1:] = built[2:]
 
+for z in range(164):
+    polygons, n_polys = measure.label(double[0, :, :, z], connectivity=2, return_num=True)
+    print(n_polys)
+    print(np.unique(polygons, return_counts=True))
+    print(np.sum(polygons[polygons == 1]))
+'''
 print(rt.SeriesInstanceUserID)
 
 new_rt = copy.deepcopy(rt)
@@ -93,7 +104,7 @@ output_ds = pydicom.dataset.FileDataset(filename, new_rt, file_meta=file_meta, p
 
 output_ds.save_as(filename)
 ds = pydicom.dcmread(filename)
-'''
+
 print(rt.SeriesInstanceUID)
 print(rt.SeriesDate)
 print(rt.SeriesTime)
