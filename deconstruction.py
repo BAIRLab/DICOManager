@@ -29,6 +29,14 @@ class RTStruct:
         Returns a pydicom.dataset.FileDataset object
     append_masks: (masks: np.ndarray, roi_names=None: [str]) -> None 
         Appends the contours and ROI names to new_rt
+    
+    Notes
+    ----------
+    Helper functions for this class are avaliable:
+        deconstruction.to_rt(...): append a mask to a provided RTSTRUCT
+        deconstruction.from_rt(...): create a new file from an RTSTRUCT
+        deconstruction.from_ct(...): create a new file from a CT image
+        deconstruction.save_rt(...): save the generated pydicom.FileDataset
     """
     def __init__(self, ct_series, rt_dcm=None):
         self.ct_series = ct_series
@@ -118,6 +126,7 @@ class RTStruct:
             rt_dcm.StudyDescription = ct_dcm.StudyDescription
 
         '''
+        # This field is not populated in the MIM generated RTSTRUCTs
         ref_study_ds = pydicom.dataset.Dataset()
         ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
         ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
@@ -156,6 +165,7 @@ class RTStruct:
 
         # RT Referenced Series Sequence (3006,0012)
         rt_ref_study_ds = pydicom.dataset.Dataset()
+        # TODO: The uncommented UID is Retired, MIM uses that one
         #rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
         rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID(
             '1.2.840.10008.3.1.2.3.1')
@@ -164,13 +174,7 @@ class RTStruct:
         # RT Referenced Series Sequence (3006,0014)
         rt_ref_series_ds = pydicom.dataset.Dataset()
         rt_ref_series_ds.SeriesInstanceUID = ct_dcm.SeriesInstanceUID
-        # Where _ref_sop_dict.ref_uid contains Contour Image Sequence (3006,0016)
-        # (3006,0016) contains Ref. SOP Class UID (0008,1150)
-        # (3006,0016) contian Ref. SOP Instance UID (0008,1155)
-        uids = [x.ref_uid for x in self._ref_sop_uids.values()]
-        z_indices = list(self._ref_sop_uids)
-        contour_img_seq = [x for _, x in sorted(zip(z_indices, uids))][::-1]
-        rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(contour_img_seq)
+        rt_ref_series_ds.ContourImageSequence = pydicom.sequence.Sequence(self._contour_img_seq())
 
         # (3006,0014) attribute of (3006,0012)
         rt_ref_study_ds.RTReferencedSeriesSequence = pydicom.sequence.Sequence([rt_ref_series_ds])
@@ -371,7 +375,7 @@ class RTStruct:
             # First polygon returned by skimage.measure.label is background
             for poly_index in range(1, n_polygons + 1):
                 polygon = polygons == poly_index
-                contour_seq = self._make_contour_seq(polygon, z_index) 
+                contour_seq = self._contour_seq(polygon, z_index) 
                 roi_contour_seq.ContourSequence.append(contour_seq)
         
         # Append entire sequence for the given contour
@@ -387,7 +391,7 @@ class RTStruct:
         rt_roi_obs.InterpreterType = ''
         self.new_rt.RTROIObservationsSequence.append(rt_roi_obs)
 
-    def _make_contour_seq(self, polygon, z_index):
+    def _contour_seq(self, polygon, z_index):
         """
         Function
         ----------
@@ -416,6 +420,32 @@ class RTStruct:
         contour_seq.NumberOfContourPoints = len(coords) // 3
         contour_seq.ContourData = [f'{pt:0.2f}' for  pt in coords]
         return contour_seq
+
+    def _contour_img_seq(self):
+        """
+        Function
+        ----------
+        A function which organizes and sorts the image set Referenced SOP UIDs 
+        
+        Parameters 
+        ----------
+        None
+        
+        Returns
+        ----------
+        contour_img_seq : list
+            A list of Referenced SOP Class and Instace UIDs for the image set
+
+        Notes
+        ----------
+        Where _ref_sop_uids.ref_uid contains Contour Image Sequence (3006,0016)
+            (3006,0016) contains Ref. SOP Class UID (0008,1150)
+            (3006,0016) contian Ref. SOP Instance UID (0008,1155)
+        """
+        uids = [x.ref_uid for x in self._ref_sop_uids.values()]
+        z_indices = list(self._ref_sop_uids)
+        contour_img_seq = [x for _, x in sorted(zip(z_indices, uids))][::-1] # May not need this flipping
+        return contour_img_seq
 
     def _unpack_ct_hdrs(self):
         """
@@ -610,7 +640,7 @@ def from_ct(ct_series, masks, roi_names=None):
     return new_rt.to_pydicom()
 
 
-def save_rt(source_rt, filename):
+def save_rt(source_rt, filename=None):
     """
     Function
     ----------
@@ -621,8 +651,9 @@ def save_rt(source_rt, filename):
     ----------
     source_rt : pydicom.dataset.[FileDataset, Dataset]
         An RTSTRUCT pydicom dataset object to be saved
-    filename : string OR posixpath
+    filename : string OR posixpath (Default=None)
         A file name string or filepath to save location
+        If not provided, the SOP Instance UID will be used
 
     Raises
     ----------
@@ -634,6 +665,12 @@ def save_rt(source_rt, filename):
     This has been seperated from the creation functions, to prevent the
         inadvertent overwriting of the original RTSTRUCT files
     """
+    if not filename:
+        try:
+            filename = source_rt.SOPInstanceUID + '.dcm'
+        except:
+            raise TypeError('source_rt must be a pydicom.dataset object')
+
     if type(source_rt) is pydicom.dataset.FileDataset:
         source_rt.save_as(filename)
     elif type(source_rt) is pydicom.dataset.Dataset:
@@ -658,5 +695,4 @@ def save_rt(source_rt, filename):
         output_ds = pydicom.dataset.FileDataset(**inputs)
         output_ds.save_as(filename)
     else:
-        raise TypeError(
-            'source_rt must be a pydicom FileDataset or Dataset object')
+        raise TypeError('source_rt must be a pydicom.dataset object')
