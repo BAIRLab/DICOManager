@@ -2,6 +2,7 @@
 import copy
 import pydicom
 import utils
+import matplotlib.cm as cm
 import skimage.measure as skmeasure
 from datetime import datetime
 from dataclasses import dataclass
@@ -35,7 +36,7 @@ class RTStruct:
     Helper functions for this class are avaliable:
         deconstruction.to_rt(...): append a mask to a provided RTSTRUCT
         deconstruction.from_rt(...): create a new file from an RTSTRUCT
-        deconstruction.from_ct(...): create a new file from a CT image
+        deconstruction.from_ct(...): create a new file from an CT image
         deconstruction.save_rt(...): save the generated pydicom.FileDataset
     """
     def __init__(self, ct_series, rt_dcm=None):
@@ -75,7 +76,6 @@ class RTStruct:
         # Start crafting a fresh RTSTRUCT
         rt_dcm = pydicom.dataset.Dataset()
 
-        # Info to populate header below
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
         instance_uid = utils.generate_instance_uid()
@@ -124,14 +124,6 @@ class RTStruct:
 
         if hasattr(ct_dcm, 'StudyDescription'):
             rt_dcm.StudyDescription = ct_dcm.StudyDescription
-
-        '''
-        # This field is not populated in the MIM generated RTSTRUCTs
-        ref_study_ds = pydicom.dataset.Dataset()
-        ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
-        ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
-        rt_dcm.ReferencedStudySequence = pydicom.sequence.Sequence([ref_study_ds])
-        '''
 
         # P.3.C.7.5.1 General Equipment Module
         rt_dcm.Manufacturer = 'Beaumont Artifical Intelligence Lab'
@@ -197,7 +189,6 @@ class RTStruct:
         # P.3.C.12.1 SOP Common Module Attributes
         rt_dcm.SOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
         rt_dcm.SOPInstanceUID = instance_uid
-        #rt_dcm.SpecificCharacterSet = 'ISO_IR 100'
         rt_dcm.InstanceCreationDate = date
         rt_dcm.InstanceCreationTime = time
 
@@ -308,8 +299,13 @@ class RTStruct:
         
         if not roi_names:
             roi_names = ['NewName' + str(x) for x in range(masks.shape[0])]
-        for mask_index in range(masks.shape[0]):
-            self._append_one_mask(masks[mask_index], roi_names[mask_index])
+
+        n_masks = masks.shape[0]
+        raw_colors = cm.rainbow(np.linspace(0, 1, n_masks))
+        rgb_colors = np.array(np.round(255 * raw_colors[:, :3]), dtype='uint8')
+
+        for i in range(n_masks):
+            self._append_one_mask(masks[i], roi_names[i], rgb_colors[i])
 
     def to_pydicom(self):
         """
@@ -326,7 +322,7 @@ class RTStruct:
         
         return self.new_rt
     
-    def _append_one_mask(self, mask, roi_name):
+    def _append_one_mask(self, mask, roi_name, rgb_color):
         """
         Function
         ----------
@@ -340,6 +336,8 @@ class RTStruct:
             A 3D boolean numpy array representing an single segmentation
         roi_name : str
             The name of the ROI to be saved in the RTSTRUCT
+        rgb_color : [uint8, uint8, uint8]
+            A uint8 RGB color code to encode the contour value
 
         Modifies
         ----------
@@ -364,7 +362,7 @@ class RTStruct:
 
         # P.3.C.8.8.6 ROI Contour Module
         roi_contour_seq = pydicom.dataset.Dataset()
-        roi_contour_seq.ROIDisplayColor = [255, 0, 0]  # All red for simplicity
+        roi_contour_seq.ROIDisplayColor = rgb_color
         roi_contour_seq.ReferencedROINumber = roi_number
         roi_contour_seq.ContourSequence = pydicom.sequence.Sequence([])
 
@@ -377,7 +375,6 @@ class RTStruct:
                 polygon = polygons == poly_index
                 contour_seq = self._contour_seq(polygon, z_index) 
                 roi_contour_seq.ContourSequence.append(contour_seq)
-        
         # Append entire sequence for the given contour
         self.new_rt.ROIContourSequence.append(roi_contour_seq)
 
