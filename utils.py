@@ -5,6 +5,7 @@ import pydicom
 import random
 import uuid
 from scipy.ndimage.morphology import binary_erosion
+from scipy import spatial
 
 
 def prepare_coordinate_mapping(ct_hdr):
@@ -94,7 +95,39 @@ def wire_mask(arr):
     return binary_erosion(arr) ^ arr
 
 
-def sort_points(points, counterclockwise=True):
+def sort_points(points, method='kd'):
+    """
+    Function
+    ----------
+    Given a set of points, the points are sorted by the
+        specified method and returned
+    
+    Parameters
+    ----------
+    points : numpy.ndarray
+        A Nx3 numpy array of (x, y, z) coordinates
+    method : str (Default = 'kd')
+        The method to use for sorting. Options are:
+            'kd' : Sort by KDTrees, convex robust
+            'cw' : Sort clockwise, not convex robust
+            'ccw' : Sort counterclockwise, not convex robust
+    
+    Returns
+    ----------
+    numpy.ndarray
+        The points in the provided array, sorted as specified
+    """
+    if method == 'kd':
+        return kd_sort_nearest(points)
+    elif method == 'cw':
+        return sort_points_ccw(points, counterclockwise=False)
+    elif method == 'ccw':
+        return sort_points_ccw(points)
+    else:
+        raise TypeError('The method must be one of kd, cw, ccw')
+
+
+def sort_points_ccw(points, counterclockwise=True):
     """
     Function
     ----------
@@ -102,13 +135,18 @@ def sort_points(points, counterclockwise=True):
 
     Parameters
     ----------
-    points: numpy.ndarray
-        A Nx2 numpy array of (x, y) coordinates
+    points : numpy.ndarray
+        A Nx3 numpy array of (x, y, z) coordinates
     
     Returns
     ----------
     numpy.ndarray
         The points array sorted in a counterclockwise direction
+    
+    Notes
+    ----------
+    Sorting (counter)clockwise only works for concave structures, for
+        convex structures, use kd_sort_nearest
     """
     CoM = np.mean(points, axis=0)
 
@@ -127,6 +165,90 @@ def sort_points(points, counterclockwise=True):
         return 100 + np.arccos(np.dot(v1_u, v2_u))
 
     return np.array(sorted(points, key=_angle))
+
+
+def kd_sort_nearest(points):
+    """
+    Function
+    ----------
+    Given the nonzero surface points of the mask, as sorted
+        array of points is returned
+
+    Parameters 
+    ----------
+    points : numpy.ndarray
+        A Nx3 numpy array of (x, y, z) coordinates
+
+    Returns
+    ----------
+    sorted_points : numpy.ndarray
+        A sorted array of dimensions equal to points
+
+    Notes
+    ----------
+    This method uses KDTrees which is approximately 5x slower than 
+        clockwise sorting, but robust to convexities
+    """
+    tracker = [] 
+    sorted_points = []
+    
+    first_index = get_first_index(points)
+    current = points[first_index]
+   
+    sorted_points.append(current)
+    tracker.append(first_index)
+
+    tree = spatial.cKDTree(points, balanced_tree=True)
+    n_search = 2
+    while len(tracker) != points.shape[0]:
+        _, nearest = tree.query(current, k=n_search)
+        
+        # Expand search width if needed
+        if set(nearest).issubset(set(tracker)):
+            n_search += 2
+            continue
+
+        for i in nearest:
+            if i not in tracker:
+                current = points[i]
+                sorted_points.append(current)
+                tracker.append(i)
+                break
+    return np.array(sorted_points)
+
+
+def get_first_index(points):
+    """
+    Function
+    ----------
+    Returns the first index to start the kd sorting
+
+    Parameters 
+    ----------
+    points : numpy.ndarray
+        A Nx3 numpy array of (x, y, z) coordinates
+
+    Returns
+    ----------
+    index : int
+        The index of the lowest point along the central line
+
+    Notes
+    ----------
+    Semi-redundant with rotational sorting, but this runs
+        quicker than fisrt clockwise sorting all points
+    """
+    if points.dtype != 'float64':
+        points = np.array(points, dtype=np.float)
+
+    CoM = np.mean(points, axis=0)
+    v1 = points - CoM
+    v2 = np.array([0, -CoM[1], CoM[2]])
+    v1_u = v1 / np.linalg.norm(v1)
+    v2_u = v2 / np.linalg.norm(v2)
+    
+    angles = np.arccos(np.dot(v1_u, v2_u))
+    return np.argmin(angles)
 
 
 # DICOM stores each polygon as a unique item in the ContourImageSequence
