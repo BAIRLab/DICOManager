@@ -1,12 +1,12 @@
 #!/usr/bin/python3
 from scipy.interpolate import RegularGridInterpolator
 from pathlib import Path
-import skimage.draw as skdraw
 import numpy as np
 import pydicom
 import glob
 import collections
 import os
+import cv2
 from matplotlib import pyplot as plt
 
 __author__ = ["Evan Porter", "David Solis", "Ron Levitin"]
@@ -62,7 +62,6 @@ def _slice_thickness(dcm0, dcm1):
     Function
     ----------
     Computes the slice thickness for a DICOM set
-    -- *NOTE* Calculates based on slice location and instance number. Does not trust SliceThickness DICOM Header
 
     Parameters
     ----------
@@ -73,8 +72,12 @@ def _slice_thickness(dcm0, dcm1):
     ----------
     slice_thickness : float
         A float representing the robustly calculated slice thickness
+    
+    Notes
+    ----------
+        Calculates based on slice location and instance number.
+        Does not trust SliceThickness DICOM Header
     """
-
     if type(dcm0) != pydicom.dataset.FileDataset:
         dcm0 = pydicom.dcmread(dcm0)
     if type(dcm1) != pydicom.dataset.FileDataset:
@@ -183,7 +186,6 @@ def _d_max_coords(patient_path, dose_volume, printing=True):
         coordinate system than the CT coordinates. But, the slice difference
         should be < 1/2 * voxel size of the CT coordinates
     """
-
     if patient_path[0] == '~':
         patient_path = os.path.expanduser('~') + patient_path[1:]
 
@@ -485,7 +487,7 @@ def struct(patient_path, wanted_contours, raises=False):
         A reconstructed RTSTRUCT array in the shape of [struct, x, y, z], where
             x, y, z are the same dimensions as the registered CT volume
     """
-
+    # TODO: Add way to get all contours in the RTSTRUCT
     # Check path type
     # -- if dicom file, check directory for related dicoms
     # -- if directory, check for "[CT, MRI, CBCT, PET, RTSTRUCT, RTDOSE]" folder and read those in.
@@ -547,7 +549,6 @@ def struct(patient_path, wanted_contours, raises=False):
     contours = []  # Designates the contours that have been included
     for index, contour in enumerate(struct_dcm.StructureSetROISequence):
         # Functionality for dictionaries
-        print(contour.ROIName)
         if type(wanted_contours) is dict:
             for key in wanted_contours:
                 if contour.ROIName.lower() in wanted_contours[key]:
@@ -572,11 +573,15 @@ def struct(patient_path, wanted_contours, raises=False):
                     raise ValueError(err_msg) if raises else print(err_msg)
 
                 points = _points_to_coords(contour_data, img_origin, ix, iy, iz)
-                # TODO: #11 I'm not 100% certain that skdraw.polygon is inclusive with the surface points. MIM likely uses an ITK call, which we should use too.
-                y_poly, x_poly = skdraw.polygon(*points[:, :2].T)
+                coords = np.array([points[:, :2]], dtype=np.int32)
 
-                fill_array[x_poly, y_poly, points[0,2]] = 1
+                # scimage.draw.Polygon is incorrect, use cv2.fillPoly instead
+                poly_2D = np.zeros(dimensions[:2])
+                cv2.fillPoly(poly_2D, coords, 1) 
+                fill_array[:, :, points[0, 2]] += poly_2D
 
+        # Protect against any overlaps in the contour
+        fill_array[fill_array > 2] = 1
         masks.append(fill_array)
     # Reorders the list to match the wanted contours
     key_list = _key_list_creator(wanted_contours)
@@ -613,7 +618,6 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     ct_array : np.array
         A reconstructed CT array in the shape of [x, y, z]
     """
-
     if patient_path[0] == '~':
         patient_path = os.path.expanduser('~') + patient_path[1:]
 
@@ -675,7 +679,6 @@ def pet(patient_path, path_mod=None, raises=False):
     pet_array : np.array
         A reconstructed PET image in the same dimensions as the registered CT
     """
-
     if patient_path[0] == '~':
         patient_path = os.path.expanduser('~') + patient_path[1:]
 
@@ -748,7 +751,6 @@ def dose(patient_path, raises=False):
     ct_array : np.array
         A reconstructed CT array in the shape of [x, y, z]
     """
-
     if patient_path[0] == '~':
         patient_path = os.path.expanduser('~') + patient_path[1:]
 
