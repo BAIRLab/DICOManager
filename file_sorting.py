@@ -1,13 +1,13 @@
 #!/usr/bin/python
 
-import pandas as pd
-import pydicom
+import csv
+import glob
+import optparse
 import os
 import shutil
-import glob
 import struct
-import csv
-import optparse
+import pydicom
+import pandas as pd
 from tqdm import tqdm
 
 
@@ -33,7 +33,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
         A subfolder to be placed within the file_path
     """
     path_list = [dest_dir, patientID]
-    
+
     if subfolder:
         path_list.append(subfolder)
 
@@ -44,7 +44,7 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
 
     _, filename = os.path.split(dicom_file)
     destination = os.path.join(new_path, filename)
-    
+
     if options.move_file:
         shutil.move(dicom_file, destination)
     else:
@@ -71,11 +71,13 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
                     "patientID": ds.PatientID,
                     "dicom_file": dicom_file,
                     }
-
     try:
         if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list):
-            if "CBCT" in ds.StudyDescription:
-                subfolder = "CBCT"
+            if hasattr(ds, "StudyDescription"):
+                if "CBCT" in ds.StudyDescription:
+                    subfolder = "CBCT"
+                else:
+                    subfolder = ds.Modality
             else:
                 subfolder = ds.Modality
             write_params.update({"subfolder": subfolder})
