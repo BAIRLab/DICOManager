@@ -487,6 +487,15 @@ def struct(patient_path, wanted_contours, raises=False):
     rtstruct_array : np.array
         A reconstructed RTSTRUCT array in the shape of [struct, x, y, z], where
             x, y, z are the same dimensions as the registered CT volume
+    
+    Notes
+    ----------
+    MIM saves the contour data at a sampling rate twice that of the image coordinate
+        system. This function resamples the contour to the image coordinate system.
+        If high percision is required, the following changes should be made:
+            dimensions = (2 * ..., 2 * ..., vol_n_z)
+            ix, iy, iz = (*volume_dcm.PixelSpacing / 2, ...)
+        Which should generate a mask of dimensions 1024x1024xN for a 512x512xN image
     """
     # TODO: Add way to get all contours in the RTSTRUCT
     # Check path type
@@ -535,7 +544,7 @@ def struct(patient_path, wanted_contours, raises=False):
     # inner function to convert the points to coords
     def _points_to_coords(contour_data, img_origin, ix, iy, iz):
         points = np.array(
-            np.round(abs(contour_data - img_origin) / [ix, iy, abs(iz)]), dtype=int)
+            np.round(abs(contour_data - img_origin) / [ix, iy, abs(iz)]), dtype=np.int32)
         return points
 
     # This function requires a list of the contours being looked for. Can be dict or list
@@ -560,6 +569,7 @@ def struct(patient_path, wanted_contours, raises=False):
         contours.append(contour.ROIName.lower())
 
         fill_array = np.zeros(shape=dimensions)
+        # Make these nested operations into a util function which takes ds, fill_array returns fill_array
         if hasattr(struct_dcm.ROIContourSequence[index], 'ContourSequence'):
             contour_list = struct_dcm.ROIContourSequence[index].ContourSequence
             all_points = np.empty((0, 3))
