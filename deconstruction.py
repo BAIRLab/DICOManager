@@ -28,7 +28,7 @@ class RTStruct:
         Updates new_rt header to represent a unique RTSTRUCT file
     to_pydicom : (None) -> pydicom.dataset.FileDataset
         Returns a pydicom.dataset.FileDataset object
-    append_masks: (masks: np.ndarray, roi_names=None: [str]) -> None 
+    append_masks: (masks:np.ndarray, roi_names=None:[str]) -> None 
         Appends the contours and ROI names to new_rt
     
     Notes
@@ -362,7 +362,7 @@ class RTStruct:
 
         # P.3.C.8.8.6 ROI Contour Module
         roi_contour_seq = pydicom.dataset.Dataset()
-        roi_contour_seq.ROIDisplayColor = rgb_color
+        roi_contour_seq.ROIDisplayColor = list(rgb_color)
         roi_contour_seq.ReferencedROINumber = roi_number
         roi_contour_seq.ContourSequence = pydicom.sequence.Sequence([])
 
@@ -415,7 +415,7 @@ class RTStruct:
         contour_seq.ContourImageSequence = pydicom.sequence.Sequence([ref_uid])
         contour_seq.ContourGeometricType = 'CLOSED_PLANAR'
         contour_seq.NumberOfContourPoints = len(coords) // 3
-        contour_seq.ContourData = [f'{pt:0.2f}' for  pt in coords]
+        contour_seq.ContourData = [f'{pt:0.3f}' for  pt in coords]
         return contour_seq
 
     def _contour_img_seq(self):
@@ -544,7 +544,7 @@ def to_rt(ct_series, source_rt, masks, roi_names=None):
     ----------
     This function is without input error checking. Will be added later
     """
-    if not roi_names:
+    if roi_names:
         warning = 'No names, or a name for each mask must be given'
         assert masks.shape[0] == len(roi_names), warning 
     if type(source_rt) is str:
@@ -585,7 +585,7 @@ def from_rt(ct_series, source_rt, masks, roi_names=None):
     ----------
     This function is without input error checking. Will be added later
     """
-    if not roi_names:
+    if roi_names:
         warning = 'No names, or a name for each mask must be given'
         assert masks.shape[0] == len(roi_names), warning 
     if type(source_rt) is str:
@@ -627,7 +627,7 @@ def from_ct(ct_series, masks, roi_names=None):
         systems is unknown. This will be updated with compatiable /
         incompatiable going forward
     """
-    if not roi_names:
+    if roi_names:
         warning = 'No names, or a name for each mask must be given'
         assert masks.shape[0] == len(roi_names), warning 
     
