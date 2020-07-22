@@ -4,8 +4,11 @@ import os
 import pydicom
 import random
 import uuid
+import scipy
 from scipy.ndimage.morphology import binary_erosion
+from scipy.ndimage.morphology import binary_dilation
 from scipy import spatial
+from skimage import measure as skm
 
 
 def prepare_coordinate_mapping(ct_hdr):
@@ -52,7 +55,7 @@ def prepare_coordinate_mapping(ct_hdr):
     return np.rollaxis(np.stack(np.dot(M[:-1], C)), 0, 3)
 
 
-def wire_mask(arr):
+def wire_mask(arr, invert=False):
     """
     Function
     ----------
@@ -62,6 +65,11 @@ def wire_mask(arr):
     ----------
     arr : numpy.ndarray
         A 2D array corresponding to the segmentation mask
+    invert : boolean (Default = False)
+        Designates if the polygon is a subtractive structure from
+            a larger polygon, warranting XOR dilation instead
+        True when the structure is a hole / subtractive
+        False when the array is a filled polygon
 
     Returns
     ----------
@@ -91,7 +99,8 @@ def wire_mask(arr):
 
     if arr.dtype != 'bool':
         arr = np.array(arr, dtype='bool')
-
+    if invert:
+        return binary_dilation(arr) ^ arr
     return binary_erosion(arr) ^ arr
 
 
@@ -109,8 +118,8 @@ def sort_points(points, method='kd'):
     method : str (Default = 'kd')
         The method to use for sorting. Options are:
             'kd' : Sort by KDTrees, convex robust
-            'cw' : Sort clockwise, not convex robust
             'ccw' : Sort counterclockwise, not convex robust
+            'cw' : Sort clockwise, not convex robust
     
     Returns
     ----------
@@ -119,10 +128,10 @@ def sort_points(points, method='kd'):
     """
     if method == 'kd':
         return kd_sort_nearest(points)
-    elif method == 'cw':
-        return sort_points_ccw(points, counterclockwise=False)
     elif method == 'ccw':
         return sort_points_ccw(points)
+    elif method == 'cw':
+        return sort_points_ccw(points, counterclockwise=False)
     else:
         raise TypeError('The method must be one of kd, cw, ccw')
 
@@ -251,54 +260,204 @@ def get_first_index(points):
     return np.argmin(angles)
 
 
-# DICOM stores each polygon as a unique item in the ContourImageSequence
-def poly_to_coords_2D(poly, ct_hdr, flatten=True):
+def find_nearest(inner, outer):
     """
     Function
     ----------
-    Given 2D boolean array, eturns an array of surface coordinates in
-        the patient coordinate system
+    Given two arrays of polygon points, the nearest points between the 
+        arrays is returned
 
     Parameters
     ----------
-    ct_hdr : pydicom.dataset.FileDataset
-        A CT dicom object to compute the image coordinate locations upon
-        where 'hdr' means that the PixelData field is not required
+    inner : numpy.ndarray OR [numpy.ndarray]
+        A single numpy array with dimensions Nx3 representing the points
+        for a single inner polygon or hole
+    outer : numpy.ndarray
+        A single numpy array with dimensions Nx3 representing the points
+        for the outer polygon
+
+    Returns
+    ----------
+    ([point, point], index)
+        Where point is an image coordinate point, index is the index of the
+        nearest element to the outer polygon
+
+    Notes
+    ----------
+    This currently creates issues and needs to be fixed to work with multiple
+        holes within a single polygon
+    """
+    outer_tree = spatial.cKDTree(outer, balanced_tree=True)
+    min_dist = np.inf
+    outer_index = None
+    point_pair = None  # inner, outer
+    for i_pt in inner:
+        dist, o_idx = outer_tree.query(i_pt)
+        if dist < min_dist:
+            min_dist = dist
+            outer_index = o_idx
+            nearest = [i_pt, outer[o_idx]]
+    return (nearest, outer_index)
+
+
+def merge_sorted_points(inner, outer):
+    """
+    Function
+    ----------
+    Given two arrays of points, a single merged list is returned
+
+    Parameters
+    ----------
+    inner : numpy.ndarray OR [numpy.ndarray]
+        A single numpy array or a list of numpy arrays with dimensions
+        Nx3 representing the points for each inner hole or polygon
+    outer : numpy.ndarray
+        A single numpy array with dimensions Nx3 representing the points
+        for the outer polygon
+
+    Returns
+    ----------
+    numpy.ndarray
+        The merged list of inner and outer polygons
+
+    Notes
+    ----------
+    Because we append to merged for each inner, when larger we have recursed 
+        through all the points, unless the holes constitute a single pixel,
+        in which they are likely undesired anyways
+    
+    Future Work
+    ----------
+    Could reduce ops by n points in outer if passed in outer_tree from
+        when tree was sorted.
+    """
+    if type(inner) is list:
+        for n_inner in inner:
+            nearest, index = find_nearest(n_inner, outer)
+            n_inner = np.append(n_inner, nearest, axis=0)
+            outer = np.insert(outer, index, n_inner, axis=0)
+    else:
+        nearest, index = find_nearest(inner, outer)
+        inner = np.append(inner, nearest, axis=0)
+        outer = np.insert(outer, index, inner, axis=0)
+    return outer
+
+
+def split_by_holes(poly):
+    """
+    Function
+    ----------
+    Given a numpy array boolean mask, the holes and polygon are split
+
+    Parameters
+    ----------
     poly : numpy.ndarray
         A 2D boolean mask array corresponding to the segmentation mask
-    flatten : bool (Default = True)
-        Specifies if the returned coordinates are flattened into DICOM
-        RT standard, as single dimensional array
+
+    Returns
+    ----------
+    (numpy.ndarray, numpy.ndarray) if polygon has holes
+    (None, numpy.ndarray) if polygon does not have holes
+    """
+    filled = scipy.ndimage.binary_fill_holes(poly)
+    inner = filled ^ poly
+    if np.sum(inner):
+        return (inner, filled)
+    return None, poly
+
+
+def all_points_merged(poly, merged):
+    """
+    Function
+    ----------
+    Determines if all points have been sorted and merged
+
+    Parameters
+    ----------
+    poly : numpy.ndarray
+        A 2D boolean mask array corresponding to the segmentation mask
+    merged : numpy.ndarray
+        An array of coordinates, in dimensions Nx3
+
+    Returns
+    ----------
+    bool
+        True if the number of coordinates in merged >= poly
+        False if the number of coordinates in merged < poly
+
+    Notes
+    ----------
+    Because we append to merged for each inner, when larger we have recursed 
+        through all the points, unless the holes constitute a single pixel,
+        in which they are likely undesired anyways
+    """
+    mask = wire_mask(poly)
+    total_pts = np.rollaxis(np.transpose(mask.nonzero()), 0, 2)
+    return total_pts.shape[0] <= merged.shape[0]
+
+
+# DICOM stores each polygon as a unique item in the ContourImageSequence
+def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
+    """
+    Function
+    ----------
+    Given a 2D boolean array, returns an array of surface coordinates
+        in the patient coordinate system. This is functional with filled
+        polygons, polygons with hole(s) and nested holes and polygons
+
+    Parameters
+    ----------
+    poly : numpy.ndarray
+        A 2D boolean mask array corresponding to the segmentation mask
+    ctcoord : numpy.ndarray
+        A numpy array of the ct image coordinate system returned from
+        utils.prepare_coordinate_mapping()
+    flatten : bool (Default = True) 
+        Specifies if the returned coordinates are flattend into DICOM
+        RT standard, as a single dimensional array
+    invert : bool (Default = False)
+        Specifies if the wire_mask function is inverted which is necessary
+        for holes or polygons within holes
 
     Returns
     ----------
     numpy.ndarray
         An array of binary mask surface coordinates in the patient
-        coordinate space. Flattened, if specified, into DICOM RT format
-    
-    Raises
+        coordinate space, flattened into DICOM RT format
+
+    Notes
     ----------
-    AssertionError
-        Raised if arr.ndim is not 2
-        Raised if ct_dcm is not a pydicom dataset 
+    Invert is called as the negation of the prevoius value. This is
+        done in the case where a nested hole contains a polygon and
+        the edge detection must alternate between erison and dilation
     """
-    assert poly.ndim == 2, 'The input boolean mask is not 2D'
-    assert type(
-        ct_hdr) is pydicom.dataset.FileDataset, 'ct_dcm is not a pydicom dataset'
+    # Check if the polygon has hole and inner is None if no holes
+    inner, outer = split_by_holes(poly)
+    if inner is not None:
+        inner_pts = poly_to_coords_2D(
+            inner, ctcoord, flatten=False, invert=not invert)
+        outer_pts = poly_to_coords_2D(
+            outer, ctcoord, flatten=False, invert=invert)
+        merged = merge_sorted_points(inner_pts, outer_pts)
+        if all_points_merged(poly, merged) and not invert:
+            return merged.flatten()
+        return merged
 
-    # If there is no contour on the slice, return no points
-    if not np.sum(poly):
-        return None
+    # Check if there are mupltiple polygons
+    polygons, n_polygons = skm.label(poly, connectivity=2, return_num=True)
+    if n_polygons > 1:
+        i_polys = [polygons == n for n in range(
+            1, n_polygons + 1)]  # 0=background
+        return [poly_to_coords_2D(x, ctcoord, flatten=False, invert=True) for x in i_polys]
 
-    mask = wire_mask(poly)
-    coords = prepare_coordinate_mapping(ct_hdr)
+    # Convert poly to coords and sort
+    mask = wire_mask(poly, invert=invert)
     points = np.rollaxis(
-        coords[tuple(mask.nonzero()) + np.index_exp[:]].T, 0, 2)
+        ctcoord[tuple(mask.nonzero())+np.index_exp[:]].T, 0, 2)
     points_sorted = sort_points(points)
-
-    if not flatten:
-        return points_sorted
-    return points_sorted.flatten()
+    if flatten:
+        return points_sorted.flatten()
+    return points_sorted
 
 
 # TODO: #8 Move common utilities into a shared library for re and deconstruction
@@ -397,7 +556,6 @@ def generate_instance_uid():
     Based on pydicom.uid.generate_uid() and documentation from MIM Software Inc.
     https://pydicom.github.io/pydicom/dev/reference/generated/pydicom.uid.generate_uid.html
     """
-    # Modified from pydicom.uid.generate_uid
     entropy_srcs = [
         str(uuid.uuid1()),  # 128-bit from MAC/time/randomness
         str(os.getpid()),  # Current process ID

@@ -3,7 +3,7 @@ import copy
 import pydicom
 import utils
 import matplotlib.cm as cm
-import skimage.measure as skmeasure
+import skimage.measure as skm
 from datetime import datetime
 from dataclasses import dataclass
 import numpy as np
@@ -369,7 +369,7 @@ class RTStruct:
         # For RTSTRURCTs, a contour sequence item is a unconnected 2D z-axis polygon
         for z_index in range(mask.shape[-1]):
             z_slice = mask[:, :, z_index]
-            polygons, n_polygons = skmeasure.label(z_slice, connectivity=2, return_num=True)
+            polygons, n_polygons = skm.label(z_slice, connectivity=2, return_num=True)
             # First polygon returned by skimage.measure.label is background
             for poly_index in range(1, n_polygons + 1):
                 polygon = polygons == poly_index
@@ -409,7 +409,9 @@ class RTStruct:
         """
         # Get referenced SOP UIDs and Polygon surface points
         ref_uid = self._ref_sop_uids[z_index].ref_uid
-        coords = utils.poly_to_coords_2D(polygon, ct_hdr=self._ct_series_hdrs[z_index])
+        ctcoord = utils.prepare_coordinate_mapping(self._ct_series_hdrs[z_index])
+        coords = utils.poly_to_coords_2D(polygon, ctcoord=ctcoord)
+        #coords = utils.poly_to_coords_2D(polygon, ct_hdr=self._ct_series_hdrs[z_index])
         # Fill the Contour Sequence
         contour_seq = pydicom.dataset.Dataset()
         contour_seq.ContourImageSequence = pydicom.sequence.Sequence([ref_uid])
