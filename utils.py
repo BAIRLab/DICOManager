@@ -94,7 +94,6 @@ def wire_mask(arr, invert=False):
     Either way, the reconstruction polygon fill is first priority, and then
         this deconstruction minium polygon surface computation.
     """
-    # TODO: #10 While this returns the surface, the vertex ordering is incorrect. We need to use ITK's ContourExtractor2DImageFilter function
     assert arr.ndim == 2, 'The input boolean mask is not 2D'
 
     if arr.dtype != 'bool':
@@ -289,15 +288,15 @@ def find_nearest(inner, outer):
     """
     outer_tree = spatial.cKDTree(outer, balanced_tree=True)
     min_dist = np.inf
-    outer_index = None
     point_pair = None  # inner, outer
-    for i_pt in inner:
+    index_pair = None  # inner, outer
+    for i_idx, i_pt in enumerate(inner):
         dist, o_idx = outer_tree.query(i_pt)
         if dist < min_dist:
             min_dist = dist
-            outer_index = o_idx
-            nearest = [i_pt, outer[o_idx]]
-    return (nearest, outer_index)
+            point_pair = [i_pt, outer[o_idx]]
+            index_pair = [i_idx, o_idx]
+    return (point_pair, index_pair)
 
 
 def merge_sorted_points(inner, outer):
@@ -330,17 +329,62 @@ def merge_sorted_points(inner, outer):
     ----------
     Could reduce ops by n points in outer if passed in outer_tree from
         when tree was sorted.
+    og_outer exists to prevent inner structures from mapping to other
+        inner structures which were previously inserted
+    offset allows for compensation of insertion from og_outer to outer
     """
     if type(inner) is list:
+        og_outer = outer.copy()
+        previous = [] # for index offset due to previous insertions 
         for n_inner in inner:
-            nearest, index = find_nearest(n_inner, outer)
-            n_inner = np.append(n_inner, nearest, axis=0)
-            outer = np.insert(outer, index, n_inner, axis=0)
+            point_pair, index_pair = find_nearest(n_inner, og_outer)
+            n_inner = np.roll(n_inner, n_inner.shape[0] - index_pair[0], axis=0)
+            n_inner = np.append(n_inner, point_pair, axis=0)
+            offset = calc_offset(previous, index_pair[1])
+            outer = np.insert(outer, index_pair[1] + offset + 1, n_inner, axis=0)
+            previous.append((index_pair[1], n_inner.shape[0]))
     else:
-        nearest, index = find_nearest(inner, outer)
-        inner = np.append(inner, nearest, axis=0)
-        outer = np.insert(outer, index, inner, axis=0)
+        point_pair, index_pair = find_nearest(inner, outer)
+        inner = np.roll(inner, inner.shape[0] - index_pair[0], axis=0)
+        inner = np.append(inner, point_pair, axis=0)
+        outer = np.insert(outer, index_pair[1] + 1, inner, axis=0)
     return outer
+
+
+def calc_offset(prevoius, index):
+    """
+    Function
+    ----------
+    Given the previous insertions and the current insertion index, 
+        the necessary offset is calculated
+
+    Paramters
+    ----------
+    previous : [(int, int),]
+        A list of tuples with:
+            tuple[0] : previous insertion index
+            tuple[1] : length of previous insertion
+    index : int
+        The location of the current insertion into the list
+
+    Returns
+    ----------
+    int
+        An integer represnting the number of slices to offset the insertion
+
+    Notes
+    ----------
+    When we have mulitple nested structures, we need to compute what the 
+        potential offset is when placing into the sorted list. We cannot do
+        this in the original list because then future structures may map to 
+        a newly inserted structure as opposed to the exterior polygon 
+    """
+    offset = 0
+    for item in prevoius:
+        idx, n_pts = item
+        if index > idx:
+            offset += n_pts
+    return offset
 
 
 def split_by_holes(poly):
@@ -396,7 +440,6 @@ def all_points_merged(poly, merged):
     return total_pts.shape[0] <= merged.shape[0]
 
 
-# DICOM stores each polygon as a unique item in the ContourImageSequence
 def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     """
     Function
@@ -460,7 +503,6 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     return points_sorted
 
 
-# TODO: #8 Move common utilities into a shared library for re and deconstruction
 def img_dims(dicom_list):
     """
     Function
@@ -530,7 +572,6 @@ def img_dims(dicom_list):
     return thickness, n_slices, loc_list.min(), loc_list.max(), flip
 
 
-# TODO: Check with MIM on how they generate their Instance UID
 def generate_instance_uid():
     """
     Function
