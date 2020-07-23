@@ -14,9 +14,14 @@ class RTStruct:
     ----------
     ct_series : list
         A list of posix paths to the DICOMs for a CT image volume
-    new_rt : pydicom.dataset.FileDataset
+    rt_dcm : pydicom.dataset.FileDataset
         The current working pydicom.dataset.Filedataset
         A deep copy is made if an RTSTRUCT is provided
+    mim : bool (Default = True)
+        Creates MIM style contours if True
+            MIM connects holes with a line of width zero
+        Creates Pinnacle style contours if False
+            Pinnacle creates holes as a seperate structure
 
     Methods
     ----------
@@ -39,9 +44,10 @@ class RTStruct:
         deconstruction.from_ct(...): create a new file from an CT image
         deconstruction.save_rt(...): save the generated pydicom.FileDataset
     """
-    def __init__(self, ct_series, rt_dcm=None):
+    def __init__(self, ct_series, rt_dcm=None, mim=True):
         self.ct_series = ct_series
         self.new_rt = copy.deepcopy(rt_dcm)
+        self.mim = mim
         self._ref_sop_uids = {}
         self._ct_series_hdrs = {} 
         self._unpack_ct_hdrs()
@@ -369,11 +375,9 @@ class RTStruct:
         # For RTSTRURCTs, a contour sequence item is a unconnected 2D z-axis polygon
         for z_index in range(mask.shape[-1]):
             z_slice = mask[:, :, z_index]
-            polygons, n_polygons = skm.label(z_slice, connectivity=2, return_num=True)
-            # First polygon returned by skimage.measure.label is background
-            for poly_index in range(1, n_polygons + 1):
-                polygon = polygons == poly_index
-                contour_seq = self._contour_seq(polygon, z_index) 
+            each_polygon = utils.seperate_polygons(z_slice, mim=self.mim)
+            for polygon in each_polygon:
+                contour_seq = self._contour_seq(polygon, z_index)
                 roi_contour_seq.ContourSequence.append(contour_seq)
         # Append entire sequence for the given contour
         self.new_rt.ROIContourSequence.append(roi_contour_seq)
@@ -411,7 +415,6 @@ class RTStruct:
         ref_uid = self._ref_sop_uids[z_index].ref_uid
         ctcoord = utils.prepare_coordinate_mapping(self._ct_series_hdrs[z_index])
         coords = utils.poly_to_coords_2D(polygon, ctcoord=ctcoord)
-        #coords = utils.poly_to_coords_2D(polygon, ct_hdr=self._ct_series_hdrs[z_index])
         # Fill the Contour Sequence
         contour_seq = pydicom.dataset.Dataset()
         contour_seq.ContourImageSequence = pydicom.sequence.Sequence([ref_uid])
@@ -516,7 +519,7 @@ class ParseSOPUID:
         self.ct_hdr = None  # Clear out the header because its not needed
 
 
-def to_rt(ct_series, source_rt, masks, roi_names=None):
+def to_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
     """
     Function
     ----------
@@ -536,6 +539,11 @@ def to_rt(ct_series, source_rt, masks, roi_names=None):
     roi_names : list (Defualt = None)
         A list of N names corresponding to each added structure. If
             not provided, the ROIs are named 'GeneratedContour#'
+    mim : bool (Default = True)
+        Creates MIM style contours if True
+            MIM connects holes with a line of width zero
+        Creates Pinnacle style contours if False
+            Pinnacle creates holes as a seperate structure
 
     Returns
     ----------
@@ -552,12 +560,12 @@ def to_rt(ct_series, source_rt, masks, roi_names=None):
     if type(source_rt) is str:
         souce_rt = pydicom.dcmread(source_rt)
     
-    new_rt = RTStruct(ct_series, source_rt)
+    new_rt = RTStruct(ct_series, rt_dcm=source_rt, mim=mim)
     new_rt.append_masks(masks, roi_names)
     return new_rt.to_pydicom()
 
 
-def from_rt(ct_series, source_rt, masks, roi_names=None):
+def from_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
     """
     Function
     ----------
@@ -577,6 +585,11 @@ def from_rt(ct_series, source_rt, masks, roi_names=None):
     roi_name_list : list (Defualt = None)
         A list of N names corresponding to each added structure. If
             not provided, the ROIs are named 'GeneratedContour#'
+    mim : bool (Default = True)
+        Creates MIM style contours if True
+            MIM connects holes with a line of width zero
+        Creates Pinnacle style contours if False
+            Pinnacle creates holes as a seperate structure
 
     Returns
     ----------
@@ -593,14 +606,14 @@ def from_rt(ct_series, source_rt, masks, roi_names=None):
     if type(source_rt) is str:
         souce_rt = pydicom.dcmread(source_rt)
     
-    new_rt = RTStruct(ct_series, source_rt)
+    new_rt = RTStruct(ct_series, rt_dcm=source_rt, mim=mim)
     new_rt.udpate_hdr()
     new_rt.empty()
     new_rt.append_masks(masks, roi_names)
     return new_rt.to_pydicom()
 
 
-def from_ct(ct_series, masks, roi_names=None):
+def from_ct(ct_series, masks, roi_names=None, mim=True):
     """
     Function
     ----------
@@ -617,6 +630,11 @@ def from_ct(ct_series, masks, roi_names=None):
     roi_names : list (Defualt = None)
         A list of N names corresponding to each added structure. If
             not provided, the ROIs are named 'GeneratedContour#'
+    mim : bool (Default = True)
+        Creates MIM style contours if True
+            MIM connects holes with a line of width zero
+        Creates Pinnacle style contours if False
+            Pinnacle creates holes as a seperate structure
 
     Returns
     ----------
@@ -633,7 +651,7 @@ def from_ct(ct_series, masks, roi_names=None):
         warning = 'No names, or a name for each mask must be given'
         assert masks.shape[0] == len(roi_names), warning 
     
-    new_rt = RTStruct(ct_series)
+    new_rt = RTStruct(ct_series, mim=mim)
     new_rt.initialize()
     new_rt.append_masks(masks, roi_names)
     return new_rt.to_pydicom()

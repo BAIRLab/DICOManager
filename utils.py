@@ -440,6 +440,7 @@ def all_points_merged(poly, merged):
     return total_pts.shape[0] <= merged.shape[0]
 
 
+# TODO: Make two poly coords functions for MIM or Pinnacle
 def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     """
     Function
@@ -489,8 +490,7 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     # Check if there are mupltiple polygons
     polygons, n_polygons = skm.label(poly, connectivity=2, return_num=True)
     if n_polygons > 1:
-        i_polys = [polygons == n for n in range(
-            1, n_polygons + 1)]  # 0=background
+        i_polys = [polygons == n for n in range(1, n_polygons + 1)]  # 0=background
         return [poly_to_coords_2D(x, ctcoord, flatten=False, invert=True) for x in i_polys]
 
     # Convert poly to coords and sort
@@ -501,6 +501,44 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     if flatten:
         return points_sorted.flatten()
     return points_sorted
+
+
+def seperate_polygons(z_slice, mim=True):
+    """
+    Function
+    ----------
+    Given a z-slice, return each polygon to convert to a ContourSeqeuence
+
+    Parameters
+    ----------
+    z-slice : numpy.ndarray
+        A 2D boolean numpy array of the segmentation mask
+    mim : bool (Default = True)
+        Creates MIM style contours if True
+            MIM connects holes with a line of width zero
+        Creates Pinnacle style contours if False
+            Pinnacle creates holes as a seperate structure
+
+    Returns
+    ----------
+    [numpy.ndarray]
+        A list of 2D boolean numpy arrays corresponding to each
+        polygon to be converted into a Contour Sequence
+    """
+    each_polygon = []
+    polygons, n_polygons = skm.label(z_slice, connectivity=2, return_num=True)
+    for poly_index in range(1, n_polygons + 1):
+        polygon = polygons == poly_index
+        if mim:  # Mim doesnt seperate holes
+            each_polygon.extend([polygon])
+        else:  # Pinnacle seperates holes
+            holes, filled = split_by_holes(polygon)
+            if holes is not None:
+                each_polygon.extend([filled])
+                each_polygon.extend(seperate_polygons(holes, mim=False))
+            else:
+                each_polygon.extend([polygon])
+    return each_polygon
 
 
 def img_dims(dicom_list):

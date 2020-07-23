@@ -592,7 +592,8 @@ def struct(patient_path, wanted_contours, raises=False):
                 fill_array[:, :, points[0, 2]] += poly_2D
 
         # Protect against any overlaps in the contour
-        fill_array[fill_array > 2] = 1
+        #fill_array[fill_array > 2] = 1
+        fill_array = fill_array % 2
         masks.append(fill_array)
     # Reorders the list to match the wanted contours
     key_list = _key_list_creator(wanted_contours)
