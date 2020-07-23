@@ -4,9 +4,8 @@
 To take DICOM files, imported to /data/imported_data (or another specified location)
 and sorts based by provided MRN list.
 
-User can then reconstruct volumes with the reconstruct.py functions.
-
-Future support for inline, post-stored automatic reconstruction will be added.
+User can then reconstruct volumes with the reconstruct.py functions or deconstuct
+binary masks into RTSTRUCT files with deconstruction.py.
 
 ## Prequisites
 ### Packages
@@ -32,9 +31,13 @@ data / base directory
 │   └──  <file>.dcm
 ├── DICOManager
 |   ├── <project>.csv
+│   ├── clean_rtstructs.csv
+│   ├── deconstruction.py
+│   ├── file_sorting.py
 │   ├── modality.csv
 │   ├── reconstruction.py
-|   └── file_sorting.py
+│   ├── recon_sorted.py
+|   └── utils.py
 ├── rejected_files
 |   └── *.dcm
 └── sorted_data
@@ -147,9 +150,10 @@ the RTDOSE file.
 #### MRI: mri
 Creates an MRI volume and returns a numpy array of float32 values.
 
-### deconstruction.py (currently called beaunet_predict_dicom.py)
+### deconstruction.py
 Deconstruct boolean mask numpy arrays into DICOM compliant RTSTRUCT files
-with reference to a series of registered CT DICOM files. 
+with reference to a series of registered CT DICOM files. Can generate both
+MIM and Pinnacle style contours, as specified. Default is MIM compliant.
 
 #### to_rt
 Appends a boolean numpy array to a provided rtstruct DICOM file with the
@@ -163,3 +167,6 @@ DICOM file.
 #### from_ct
 Creates a new RTSTRUCT DICOM file from the corresponding CT DICOMs. Appends
 a boolean numpy array to the created DICOM file.
+
+#### save_rt
+Saves a provided pydicom.dataset object to the specified posix path or filename
