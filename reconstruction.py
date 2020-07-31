@@ -73,7 +73,7 @@ def _slice_thickness(dcm0, dcm1):
     ----------
     slice_thickness : float
         A float representing the robustly calculated slice thickness
-    
+
     Notes
     ----------
         Calculates based on slice location and instance number.
@@ -487,7 +487,7 @@ def struct(patient_path, wanted_contours, raises=False):
     rtstruct_array : np.array
         A reconstructed RTSTRUCT array in the shape of [struct, x, y, z], where
             x, y, z are the same dimensions as the registered CT volume
-    
+ 
     Notes
     ----------
     MIM saves the contour data at a sampling rate twice that of the image coordinate
@@ -600,6 +600,50 @@ def struct(patient_path, wanted_contours, raises=False):
     ordered = [masks[contours.index(x)]
                for x in sorted(contours, key=key_list)]
     return np.array(ordered, dtype='bool')
+
+
+def nm(patient_path, raises=False):
+    """
+    Function
+    ----------
+    Reconstructs a NM volume
+
+    Parameters
+    ----------
+    patient_pat : str
+        A path directing towards a patient database in the following format:
+            MRN/NM/*.dcm
+    raises : bool (Default = False)
+        Determines if errors are raised or not. As false, only printing occurs
+
+    Raises
+    ----------
+    AssertionError
+        Raised if the directory contains more than 1 NM volume
+    
+    Returns
+    ----------
+    numpy.ndarray 
+        A [X, Y, Z] dimension numpy array of the NM volume
+
+    Notes
+    ----------
+    The values are returned raw (as they are stored). If the DICOM header specifies
+        offsets or slope adjustments, that is not included currently
+    """
+    if patient_path[-1] != '/':
+        patient_path += '/'
+
+    nm_files = glob.glob(patient_path + 'NM/*.dcm')
+    nm_files.sort()
+
+    if raises:
+        assert len(nm_files) > 1, 'can only reconstruct one nm file at a time'
+    elif len(nm_files) > 1:
+        print('Will only construct the first nm file in this dir')
+
+    ds = pydicom.dcmread(nm_files[0])
+    return np.rollaxis(ds.pixel_array, 0, 3)
 
 
 def ct(patient_path, path_mod=None, HU=False, raises=False):

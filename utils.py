@@ -475,13 +475,11 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
         done in the case where a nested hole contains a polygon and
         the edge detection must alternate between erison and dilation
     """
-    # Check if the polygon has hole and inner is None if no holes
     inner, outer = split_by_holes(poly)
+    # inner=None if polygon has no holes
     if inner is not None:
-        inner_pts = poly_to_coords_2D(
-            inner, ctcoord, flatten=False, invert=not invert)
-        outer_pts = poly_to_coords_2D(
-            outer, ctcoord, flatten=False, invert=invert)
+        inner_pts = poly_to_coords_2D(inner, ctcoord, flatten=False, invert=not invert)
+        outer_pts = poly_to_coords_2D(outer, ctcoord, flatten=False, invert=invert)
         merged = merge_sorted_points(inner_pts, outer_pts)
         if all_points_merged(poly, merged) and not invert:
             return merged.flatten()
@@ -493,10 +491,9 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
         i_polys = [polygons == n for n in range(1, n_polygons + 1)]  # 0=background
         return [poly_to_coords_2D(x, ctcoord, flatten=False, invert=True) for x in i_polys]
 
-    # Convert poly to coords and sort
+    # Convert poly to coords and sort, if no holes or multi-polygons
     mask = wire_mask(poly, invert=invert)
-    points = np.rollaxis(
-        ctcoord[tuple(mask.nonzero())+np.index_exp[:]].T, 0, 2)
+    points = np.rollaxis(ctcoord[tuple(mask.nonzero())+np.index_exp[:]].T, 0, 2)
     points_sorted = sort_points(points)
     if flatten:
         return points_sorted.flatten()

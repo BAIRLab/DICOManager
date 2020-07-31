@@ -68,6 +68,7 @@ class FileCollect:
     project: str = None
     mrn: str = None
     mr: list = None
+    nm: list = None
     ct: list = None
     pet: list = None
     rtstruct: list = None
@@ -94,7 +95,7 @@ class FileCollect:
 
     def __post_init__(self):
         self.project, _, self.mrn = self.path.rpartition('/')
-        paths = [os.path.join(self.path, x, '*.dcm') for x in self]
+        paths = [os.path.join(self.path, x.upper(), '*.dcm') for x in self]
 
         for i, mod in enumerate(self):
             self[mod] = glob(paths[i])
@@ -124,24 +125,32 @@ PROJECT = options.project
 if not BASE_DIR:
     raise NameError('A sorted project folder must be provided to reconstruct')
 
-if not DEST_DIR: 
-    DEST_DIR = BASE_DIR 
+if not DEST_DIR:
+    DEST_DIR = BASE_DIR
 
 file_tree = glob(os.path.join(BASE_DIR, '**/*[!.dcm]'), recursive=True)
 
 with open(CSV_FILE, mode='r') as mrn_csv:
     filter_list = list(str(x[0][1:-1]) for x in csv.reader(mrn_csv))[1:]
 
-pat_folders = list(set([df.rpartition('/')[0]
-                        for df in file_tree if df.split('/')[-2] in filter_list]))
+pat_folders = []
+for df in file_tree:
+    fname = df.rpartition('/')[0]
+    for mrn in filter_list:
+        if mrn in fname:
+            pat_folders.append(fname)
+pat_folders = list(set(pat_folders))
 
 for path in tqdm(pat_folders):
     patient_group = FileCollect(path)
-    mr, ct, pet, rts, dose = [[] for _ in range(5)]
+    mr, nm, ct, pet, rts, dose = [[] for _ in range(6)]
 
     if patient_group.mr:
         mr = reconstruction.mri(path)
         aspect = _aspect_ratio(path, 'MR')
+    if patient_group.nm:
+        nm = reconstruction.nm(path)
+        aspect = _aspect_ratio(path, 'NM')
     if patient_group.ct:
         ct = reconstruction.ct(path)
         aspect = _aspect_ratio(path, 'CT')
@@ -158,6 +167,7 @@ for path in tqdm(pat_folders):
         dose = reconstruction.dose(path)
 
     pool_dict = {'MR': mr,
+                 'NM': nm,
                  'CT': ct,
                  'PET': pet,
                  'RTSTRUCT': rts,
@@ -169,6 +179,6 @@ for path in tqdm(pat_folders):
         os.makedirs(DEST_DIR)
 
     if not PROJECT:
-        PROJECT = patient_group.project
+        PROJECT = patient_group.project.rpartition('/')[-1]
 
     np.save(Path(DEST_DIR) / (PROJECT + '_' + patient_group.mrn), pool_dict)
