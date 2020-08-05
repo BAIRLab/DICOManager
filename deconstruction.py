@@ -2,10 +2,10 @@
 import copy
 import pydicom
 import utils
-import matplotlib.cm as cm
 import skimage.measure as skm
 from datetime import datetime
 from dataclasses import dataclass
+from matplotlib import cm
 import numpy as np
 
 class RTStruct:
@@ -282,7 +282,7 @@ class RTStruct:
 
         # P.10.C.7.1 DICOM File Meta Information
         self.new_rt.file_meta.MediaStorageSOPInstanceUID = instance_uid
-        
+    
     def append_masks(self, masks, roi_names=None):
         """
         Function
@@ -523,7 +523,8 @@ def to_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
     """
     Function
     ----------
-    Adds numpy boolean array contours to a DICOM RTSTRUCT
+    Adds numpy boolean array contours to a DICOM RTSTRUCT without
+        modifying the existing data, but updating the SOP Instance
 
     Parameters
     ----------
@@ -552,20 +553,15 @@ def to_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
 
     Notes
     ----------
-    This function is without input error checking. Will be added later
+    This function is the same as from_rt except it does not empty the
+        rtstruct. To not modify the SOP Instance either, use from_rt.
+    WARNING: Identitical SOP Instances associated with diffrent files
+        can cause issue with certain databases
     """
-    if roi_names:
-        warning = 'No names, or a name for each mask must be given'
-        assert masks.shape[0] == len(roi_names), warning 
-    if type(source_rt) is str:
-        souce_rt = pydicom.dcmread(source_rt)
-    
-    new_rt = RTStruct(ct_series, rt_dcm=source_rt, mim=mim)
-    new_rt.append_masks(masks, roi_names)
-    return new_rt.to_pydicom()
+    return from_rt(ct_series, source_rt, masks, roi_names, mim, False, True)
 
-
-def from_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
+def from_rt(ct_series, source_rt, masks, roi_names=None,
+            mim=True, empty=True, update=True):
     """
     Function
     ----------
@@ -590,25 +586,25 @@ def from_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
             MIM connects holes with a line of width zero
         Creates Pinnacle style contours if False
             Pinnacle creates holes as a seperate structure
+    empty : bool (Default = True)
+        Remove all ROI data from the RTSTRUCT before appending new data
 
     Returns
     ----------
     source_rt : pydicom.dataset.FileDataset
         A RTSTRUCT pydicom dataset object for the new object
-
-    Notes
-    ----------
-    This function is without input error checking. Will be added later
     """
     if roi_names:
         warning = 'No names, or a name for each mask must be given'
         assert masks.shape[0] == len(roi_names), warning 
     if type(source_rt) is str:
-        souce_rt = pydicom.dcmread(source_rt)
+        source_rt = pydicom.dcmread(source_rt)
     
     new_rt = RTStruct(ct_series, rt_dcm=source_rt, mim=mim)
-    new_rt.udpate_hdr()
-    new_rt.empty()
+    if update:
+        new_rt.update_header()
+    if empty:
+        new_rt.empty()
     new_rt.append_masks(masks, roi_names)
     return new_rt.to_pydicom()
 
@@ -643,9 +639,7 @@ def from_ct(ct_series, masks, roi_names=None, mim=True):
 
     Notes
     ----------
-    This creates MIM compatiable RTSTRUCT files. Compatiablity with other
-        systems is unknown. This will be updated with compatiable /
-        incompatiable going forward
+    This has not been tested with Eclipse
     """
     if roi_names:
         warning = 'No names, or a name for each mask must be given'
@@ -695,12 +689,10 @@ def save_rt(source_rt, filename=None):
         file_meta = pydicom.dataset.FileMetaDataset()
         file_meta.FileMetaInformationGroupLength = 222  # Check
         file_meta.FileMetaInformationVersion = b'\x00\x01'
-        file_meta.MediaStorageSOPClassUID = pydicom.uid.UID(
-            '1.2.840.10008.5.1.4.1.1.481.3')
+        file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
         file_meta.MediaStorageSOPInstanceUID = source_rt.SOPInstanceUID
         file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-        file_meta.ImplementationClassUID = pydicom.uid.UID(
-            '1.2.276.0.7230010.3.0.3.6.2')
+        file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
         file_meta.ImplementationVersionName = 'OFFIS_DCMTK_362'
         file_meta.SourceApplicationEntityTitle = 'RO_AE_MIM'
 
