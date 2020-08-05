@@ -129,44 +129,49 @@ Reconstructs PET, CT, CBCT, RTSTRUCT, RTDOSE DICOM formats into float32 numpy
 arrays of original coordinate systems. Each function takes a specified list of
 patient .dcm files of a given modality and returns a reconstructed volume.
 
-#### PET: pet
+#### PET: reconstruction.pet
 Calculates the time corrected SUVbw PET value for the registered CT coordinate
 system. Returns a numpy array of float32 values.
 
-#### CBCT / CT : ct
+#### CBCT / CT : reconstruction.ct
 Both CBCT and CT perform similarly, they are simply stored under different names.
 Reconstruction is done at original image coordinates. Future work will include
 projection of CBCT into CT coordinate space.
 
-#### DOSE : dose
+#### DOSE : reconstruction.dose
 Reconstruction of Pinnacle 11.0 dose files into registered CT coordinate space.
 
-#### RTSTRUCT : struct
+#### RTSTRUCT : reconstruction.struct
 RTSTRUCT files are saved as a list of arrays, but the dimensions are
 (number-of-masks, x, y, z). Each element in the arrays are boolean. Masks are
 returned in order as specified, except in cases where mask is not present in
 the RTDOSE file.
 
-#### MRI: mri
+#### MRI: reconstruction.mri
 Creates an MRI volume and returns a numpy array of float32 values.
+
+#### NM: reconstruction.nm
+Creates a Nuclear Medicine (NM) volume and returns a numpy array of 
+float32 values. Unlike other DICOM reconstruction functions, NM files store
+the entire 3D volume within a single DICOM file
 
 ### deconstruction.py
 Deconstruct boolean mask numpy arrays into DICOM compliant RTSTRUCT files
 with reference to a series of registered CT DICOM files. Can generate both
 MIM and Pinnacle style contours, as specified. Default is MIM compliant.
 
-#### to_rt
+#### deconstruction.to_rt
 Appends a boolean numpy array to a provided rtstruct DICOM file with the
 corresponding CT DICOMs.
 
-#### from_rt
+#### deconstruction.from_rt
 Creates a new RTSTRUCT DICOM file from a provided RTSTRUCT file with the
 corresponding CT DICOMs. Then appends a boolean numpy array to the created
 DICOM file.
 
-#### from_ct
+#### deconstruction.from_ct
 Creates a new RTSTRUCT DICOM file from the corresponding CT DICOMs. Appends
 a boolean numpy array to the created DICOM file.
 
-#### save_rt
+#### deconstruction.save_rt
 Saves a provided pydicom.dataset object to the specified posix path or filename
