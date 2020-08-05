@@ -32,8 +32,8 @@ def _aspect_ratio(file_path, modality):
 
     Returns
     -------
-    asepct : Tuple
-        (*Pixel Spacing, SliceThickness) for use in setting aspect ratio in saggital/coronal plots
+    aspect : Tuple
+        (*Pixel Spacing, SliceThickness) for use in setting aspect ratio in sagittal/coronal plots
     """
     # If path is a string, convert to pathlib.Path
     if not isinstance(file_path, Path):
@@ -74,24 +74,19 @@ class FileCollect:
     rtstruct: list = None
     rtdose: list = None
 
-
     def __repr__(self):
         unpack = ":".join(str(len(self[x])) for x in self)
         return (f'{self.mrn}-{unpack}')
 
-
     def __getitem__(self, name):
         return self.__dict__[name]
-
 
     def __setitem__(self, name, value):
         self.__dict__[name] = value
 
-
     def __iter__(self):
         modalities = [x.name for x in fields(self)]
         return iter(modalities[3:])
-
 
     def __post_init__(self):
         self.project, _, self.mrn = self.path.rpartition('/')
@@ -101,7 +96,7 @@ class FileCollect:
             self[mod] = glob(paths[i])
 
 
-usage = "usage: recon_sorted.py [opt1] ... \n Reconstructs from DICOM to Numpy arrays and saves in -d"
+usage = "usage: recon_sorted.py [opt1] ... \n Reconstructs from DICOM to np.array and saves in -d"
 parser = optparse.OptionParser(usage)
 
 parser.add_option('-b', '--base', action='store', dest='base_dir',
@@ -174,7 +169,7 @@ for path in tqdm(pat_folders):
                  'RTSTRUCT': rts,
                  'RTDOSE': dose,
                  'ASPECT': aspect
-                }
+                 }
 
     if not os.path.exists(DEST_DIR):
         os.makedirs(DEST_DIR)

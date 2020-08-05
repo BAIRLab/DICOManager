@@ -4,14 +4,10 @@ import glob
 import os
 import numpy as np
 import pydicom
-import glob
-import collections
-import os
 import cv2
 import utils
 from scipy.interpolate import RegularGridInterpolator
 from pathlib import Path
-from matplotlib import pyplot as plt
 
 
 __author__ = ["Evan Porter", "David Solis", "Ron Levitin"]
@@ -51,7 +47,7 @@ def mri(patient_path, path_mod=False, raises=False):
     # -- if dicom file, check directory for related dicoms
     # -- if directory, check for "[CT, MRI, CBCT, PET, RTSTRUCT, RTDOSE]" folder and read those in.
 
-    # If path is a string, conver to pathlib.Path
+    # If path is a string, convert to pathlib.Path
     if not isinstance(patient_path, Path):
         patient_path = Path(patient_path).expanduser()
 
@@ -104,7 +100,7 @@ def struct(patient_path, wanted_contours, raises=False):
             MRN/[CT,PET,RTSTRUCT,RTDOSE]/*.dcm
     contour_names : list or dict
         A list of contour names that will be included if found. Array will order
-            in the same format as the recieved list of names, or order of keys
+            in the same format as the received list of names, or order of keys
         If list, then only items in the list will be output. If a dict, then
             each list will map to the key and saved the respective index
     raises : bool (Default = False)
@@ -112,7 +108,7 @@ def struct(patient_path, wanted_contours, raises=False):
 
     Raises
     ----------
-    ValueEror
+    ValueError
         Raised if the RTSTRUCT and CT are not registered
     ValueError
         Raised if values are missing from an RTSTRUCT contour sequence
@@ -122,12 +118,12 @@ def struct(patient_path, wanted_contours, raises=False):
     rtstruct_array : np.array
         A reconstructed RTSTRUCT array in the shape of [struct, x, y, z], where
             x, y, z are the same dimensions as the registered CT volume
- 
+
     Notes
     ----------
     MIM saves the contour data at a sampling rate twice that of the image coordinate
         system. This function resamples the contour to the image coordinate system.
-        If high percision is required, the following changes should be made:
+        If high precision is required, the following changes should be made:
             dimensions = (2 * ..., 2 * ..., vol_n_z)
             ix, iy, iz = (*volume_dcm.PixelSpacing / 2, ...)
         Which should generate a mask of dimensions 1024x1024xN for a 512x512xN image
@@ -200,7 +196,6 @@ def struct(patient_path, wanted_contours, raises=False):
         contours.append(contour.ROIName.lower())
 
         fill_array = np.zeros(shape=dimensions)
-        # Make these nested operations into a util function which takes ds, fill_array returns fill_array
         if hasattr(struct_dcm.ROIContourSequence[index], 'ContourSequence'):
             contour_list = struct_dcm.ROIContourSequence[index].ContourSequence
 
@@ -214,7 +209,7 @@ def struct(patient_path, wanted_contours, raises=False):
                 points = _points_to_coords(
                     contour_data, img_origin, ix, iy, iz)
                 coords = np.array([points[:, :2]], dtype=np.int32)
-                
+
                 # scimage.draw.Polygon is incorrect, use cv2.fillPoly instead
                 poly_2D = np.zeros(dimensions[:2])
                 cv2.fillPoly(poly_2D, coords, 1)
@@ -248,10 +243,10 @@ def nm(patient_path, raises=False):
     ----------
     AssertionError
         Raised if the directory contains more than 1 NM volume
-    
+
     Returns
     ----------
-    numpy.ndarray 
+    numpy.ndarray
         A [X, Y, Z] dimension numpy array of the NM volume
 
     Notes
@@ -354,7 +349,7 @@ def pet(patient_path, path_mod=None, raises=False):
 
     Raises
     ----------
-    ValueEror
+    ValueError
         Raised if the PET and CT are not registered
     IndexError
         Raised if any instances are missing from the PET directory
@@ -522,18 +517,16 @@ def dose(patient_path, raises=False):
                         if xtra[0][0] and index == 2:  # 511 and z
                             cropped_dose_array = dose_array[:, :, : -xtra[0][1]]
                         elif index == 2:  # 0 and z
-                            cropped_dose_array = dose_array[:, :, xtra[0][1] :]
+                            cropped_dose_array = dose_array[:, :, xtra[0][1]:]
                         elif xtra[0][0] and index == 1:  # 511 and y
                             cropped_dose_array = dose_array[:, : -xtra[0][1]]
                         elif index == 1:  # 0 and y
-                            cropped_dose_array = dose_array[:, xtra[0][1] :]
+                            cropped_dose_array = dose_array[:, xtra[0][1]:]
                         elif xtra[0][0]:  # 511 and x
                             cropped_dose_array = dose_array[: -xtra[0][1]]
                         else:  # 0 and x
                             cropped_dose_array = dose_array[: xtra[0][1]]
-            interp = RegularGridInterpolator(
-                list_of_grids, cropped_dose_array, method="linear"
-            )
+            interp = RegularGridInterpolator(list_of_grids, cropped_dose_array, method="linear")
             dose_array = cropped_dose_array
     except ValueError:
         if raises:
@@ -541,25 +534,18 @@ def dose(patient_path, raises=False):
                 f"This patient, {patient_path}, has failed dose recontruction"
             )
         else:
-            print(f"This patient, {patient_path}, has failed dose reconstruciton")
+            print(f"This patient, {patient_path}, has failed dose reconstruction")
     else:
         # Determine the upper and lower values for x, y, z for projection
         x_mm, y_mm, z_mm = [[t[0], t[-1]] for t in list_of_grids]
         total_pts = np.product([[y - x] for x, y in [x_mm, y_mm, z_mm]])
-        interp_pts = np.squeeze(
-            np.array(
-                [
-                    np.mgrid[
-                        x_mm[0] : x_mm[1], y_mm[0] : y_mm[1], z_mm[0] : z_mm[1]
-                    ].reshape(3, total_pts)
-                ]
-            ).T
-        )
+        grid = np.mgrid[x_mm[0]: x_mm[1], y_mm[0]: y_mm[1], z_mm[0]: z_mm[1]].reshape(3, total_pts)
+        interp_pts = np.squeeze(np.array([grid]).T)
         interp_vals = interp(interp_pts)
         # This flipping may be redundant with flipping below
-        interp_vol = interp_vals.reshape(
-            x_mm[1] - x_mm[0], y_mm[1] - y_mm[0], z_mm[1] - z_mm[0]
-        )[..., ::-1]
+        interp_vol = interp_vals.reshape(x_mm[1] - x_mm[0],
+                                         y_mm[1] - y_mm[0],
+                                         z_mm[1] - z_mm[0])[..., ::-1]
 
         full_vol = np.zeros(img_dims)
         if z_1 < z_0:  # Because some images were flipped for interpolation
@@ -576,9 +562,9 @@ def dose(patient_path, raises=False):
             z_mm[0] = 0
 
         # Places the dose into the volume, which is usually correct
-        full_vol[x_mm[0] : x_mm[1], y_mm[0] : y_mm[1], z_mm[0] : z_mm[1]] = interp_vol[
-            ..., interp_lo:interp_hi
-        ]
+        full_vol[x_mm[0]: x_mm[1],
+                 y_mm[0]: y_mm[1],
+                 z_mm[0]: z_mm[1]] = interp_vol[..., interp_lo:interp_hi]
 
         # This is to ensure that d_max matches, if not, the image will be
         # adjusted to match accordingly
@@ -602,16 +588,12 @@ def dose(patient_path, raises=False):
                     diff_lo = abs(z_mm[0] + o_z)
                     z_mm[0] = z_mm[0] + diff_lo
 
-                full_vol[
-                    x_mm[0] - o_x : x_mm[1] - o_x,
-                    y_mm[0] - o_y : y_mm[1] - o_y,
-                    z_mm[0] + o_z : z_mm[1] + o_z,
-                ] = interp_vol[..., diff_lo:diff_hi]
+                full_vol[x_mm[0] - o_x: x_mm[1] - o_x,
+                         y_mm[0] - o_y: y_mm[1] - o_y,
+                         z_mm[0] + o_z: z_mm[1] + o_z] = interp_vol[..., diff_lo:diff_hi]
             else:
-                z_mm = [
-                    full_vol.shape[-1] - z_mm[1] - 1,
-                    full_vol.shape[-1] - z_mm[0] - 1,
-                ]
+                z_mm = [full_vol.shape[-1] - z_mm[1] - 1,
+                        full_vol.shape[-1] - z_mm[0] - 1]
                 # Crops, if necessary
                 if (z_mm[1] - o_z) > full_vol.shape[-1]:
                     diff_hi = full_vol.shape[-1] - (z_mm[1] - o_z)
@@ -620,11 +602,9 @@ def dose(patient_path, raises=False):
                     diff_lo = abs(z_mm[0] - o_z)
                     z_mm[0] = z_mm[0] + diff_lo
 
-                full_vol[
-                    x_mm[0] - o_x : x_mm[1] - o_x,
-                    y_mm[0] - o_y : y_mm[1] - o_y,
-                    z_mm[0] - o_z : z_mm[1] - o_z,
-                ] = interp_vol[..., diff_lo:diff_hi]
+                full_vol[x_mm[0] - o_x: x_mm[1] - o_x,
+                         y_mm[0] - o_y: y_mm[1] - o_y,
+                         z_mm[0] - o_z: z_mm[1] - o_z] = interp_vol[..., diff_lo:diff_hi]
 
         # Adjusts for HFS if coordinates are negative
         if z_0 > z_1:

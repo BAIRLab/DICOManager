@@ -1,6 +1,5 @@
 #!/usr/bin/python
 
-import csv
 import glob
 import optparse
 import os
@@ -93,12 +92,10 @@ parser.add_option('-b', '--base', action='store', dest='base_dir',
                   help='Directory containing unsorted files', default='/data/imported_data/')
 parser.add_option('-c', '--csv', action='store', dest='csv_file',
                   help='MRN csv to sort from, should be located in -b', default=None)
-#parser.add_option('-d', '--date', action='store_true', dest='date',
-#                  help='sort modalities by date', default=False)
 parser.add_option('-m', '--move', action='store_true', dest='move_file',
                   help='Move instead of default of copy', default=False)
 parser.add_option('-p', '--project-dest', action='store', dest='project_dir',
-                    default = '/data/sorted_data/')
+                  default='/data/sorted_data/')
 
 options, args = parser.parse_args()
 
@@ -138,4 +135,4 @@ else:
             _specific_sort(dicom_file=dicom_file,
                            dest_dir=options.project_dir,
                            cohort_list=cohort_list,
-                           ds=ds) 
+                           ds=ds)

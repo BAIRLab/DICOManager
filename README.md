@@ -4,10 +4,10 @@
 To take DICOM files, imported to /data/imported_data (or another specified location)
 and sorts based by provided MRN list.
 
-User can then reconstruct volumes with the reconstruct.py functions or deconstuct
+User can then reconstruct volumes with the reconstruct.py functions or deconstruct
 binary masks into RTSTRUCT files with deconstruction.py.
 
-## Prequisites
+## Prerequisites
 ### Packages
 Package requirements are specified in requirements.txt
 These requirements can be installed with
@@ -16,7 +16,7 @@ pip install -r requirements.txt
 ```
 
 ### File Tree Structure
-This libary is designed to function with the following directory tree. Any
+This library is designed to function with the following directory tree. Any
 alterations will require changing directory locations within file_sorting.py.
 
 Any non-DICOM files, or those with corrupted headers will be moved to the
@@ -43,8 +43,8 @@ data / base directory
 └── sorted_data
     └── <project>
         └── MRN0
-            ├── MODAILITY0
-            └── MODAILITY1
+            ├── MODALITY0
+            └── MODALITY1
                 └── *.dcm
  ```
 
@@ -53,7 +53,7 @@ data / base directory
 Required libraries for pip install, see above for guide
 
 ### file_sorting.py
-Initally imported data of just DICOM files will be dumped into imported_data.
+Initially imported data of just DICOM files will be dumped into imported_data.
 From which, sorting cam be completed for a given <project>. Sorting is completed
 via a <project>.csv of MRN values and sorts them by MRN and date (if desired),
 and then modality. It is recommended for PHI confidentiality, that MRNs are
@@ -62,13 +62,13 @@ replaced by anonymously coded numbers per patient.
 Modalities are chosen from the modality.csv. Unique encodings can be provided,
 with mapping of first row to directories of the second row.
 
-Modalities will be choosen from the standard DICOM molalities, unless 'CBCT' is
-in the SeriesDesecription, in which the .dcm files will be stored under CBCT.
+Modalities will be chosen from the standard DICOM modalities, unless 'CBCT' is
+in the SeriesDescription, in which the .dcm files will be stored under CBCT.
 
 Parsed arguments for this function include:
 ```
 -b, --base: str (Default : pwd)
-    Specify the base directory that sorting is occuring.  
+    Specify the base directory that sorting is occurring.
 -c, --csv: str
     Specify the path to a .csv file contained within sort_csv directory
 -m, --move: bool
@@ -82,7 +82,7 @@ Parsed arguments for this function include:
 This function is a script to apply the reconstruction.py functions to a
 sorted project directory.
 
-Parsed arguements for this function include:
+Parsed arguments for this function include:
 ```
 -b, --base: str
         A path to the sorted project directory
@@ -101,10 +101,10 @@ Parsed arguements for this function include:
 
 ### clean_rtstructs.py
 If specified, this function will move all but the newest RTSTRUCT from a
-sorted patient directory for simpler management of redunant outdate rt files.
-If specified the remaining strutures and be printed.
+sorted patient directory for simpler management of redundant outdate rt files.
+If specified the remaining structures and be printed.
 
-Parsed arguements for this function include:
+Parsed arguments for this function include:
 ```
 -b, --base: str
         A path to the sorted project directory
@@ -135,7 +135,7 @@ system. Returns a numpy array of float32 values.
 
 #### CBCT / CT : ct
 Both CBCT and CT perform similarly, they are simply stored under different names.
-Reconstuction is done at original image coordinates. Future work will include
+Reconstruction is done at original image coordinates. Future work will include
 projection of CBCT into CT coordinate space.
 
 #### DOSE : dose

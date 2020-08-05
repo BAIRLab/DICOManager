@@ -30,7 +30,7 @@ def prepare_coordinate_mapping(ct_hdr):
     ----------
     numpy.ndarray
         A numpy array of shape Mx2 where M is the dcm.Rows x dcm.Cols,
-        the number of (x, y) pairs represnting coordinates of each pixel
+        the number of (x, y) pairs representing coordinates of each pixel
 
     Notes
     ----------
@@ -81,15 +81,15 @@ def wire_mask(arr, invert=False):
 
     Notes
     ----------
-    The resultant surface is not the minimium points to fully enclose the
+    The resultant surface is not the minimum points to fully enclose the
         surface, like the standard DICOM RTSTRUCT uses. Instead this gives
         all points along the surface. Should construct the same, but this
-        calculation is faster than using Shapely. 
+        calculation is faster than using Shapely.
     Could also use skimage.measure.approximate_polygon(arr, 0.001)
         To compute an approximate polygon. Better yet, do it after doing
-        the binary erosion techniqe, and compare that to the speed of 
+        the binary erosion technique, and compare that to the speed of
         using shapely to find the surface
-    The most accurate way would be with ITK using: 
+    The most accurate way would be with ITK using:
         itk.GetImageFromArray
         itk.ContourExtractor2DImageFilter
     Another option is to use VTK:
@@ -112,7 +112,7 @@ def sort_points(points, method='kd'):
     ----------
     Given a set of points, the points are sorted by the
         specified method and returned
-    
+
     Parameters
     ----------
     points : numpy.ndarray
@@ -122,7 +122,7 @@ def sort_points(points, method='kd'):
             'kd' : Sort by KDTrees, convex robust
             'ccw' : Sort counterclockwise, not convex robust
             'cw' : Sort clockwise, not convex robust
-    
+
     Returns
     ----------
     numpy.ndarray
@@ -148,12 +148,12 @@ def sort_points_ccw(points, counterclockwise=True):
     ----------
     points : numpy.ndarray
         A Nx3 numpy array of (x, y, z) coordinates
-    
+
     Returns
     ----------
     numpy.ndarray
         The points array sorted in a counterclockwise direction
-    
+
     Notes
     ----------
     Sorting (counter)clockwise only works for concave structures, for
@@ -185,7 +185,7 @@ def kd_sort_nearest(points):
     Given the nonzero surface points of the mask, as sorted
         array of points is returned
 
-    Parameters 
+    Parameters
     ----------
     points : numpy.ndarray
         A Nx3 numpy array of (x, y, z) coordinates
@@ -197,15 +197,15 @@ def kd_sort_nearest(points):
 
     Notes
     ----------
-    This method uses KDTrees which is approximately 5x slower than 
+    This method uses KDTrees which is approximately 5x slower than
         clockwise sorting, but robust to convexities
     """
-    tracker = [] 
+    tracker = []
     sorted_points = []
-    
+
     first_index = get_first_index(points)
     current = points[first_index]
-   
+
     sorted_points.append(current)
     tracker.append(first_index)
 
@@ -213,7 +213,7 @@ def kd_sort_nearest(points):
     n_search = 2
     while len(tracker) != points.shape[0]:
         _, nearest = tree.query(current, k=n_search)
-        
+
         # Expand search width if needed
         if set(nearest).issubset(set(tracker)):
             n_search += 2
@@ -234,7 +234,7 @@ def get_first_index(points):
     ----------
     Returns the first index to start the kd sorting
 
-    Parameters 
+    Parameters
     ----------
     points : numpy.ndarray
         A Nx3 numpy array of (x, y, z) coordinates
@@ -247,7 +247,7 @@ def get_first_index(points):
     Notes
     ----------
     Semi-redundant with rotational sorting, but this runs
-        quicker than fisrt clockwise sorting all points
+        quicker than first clockwise sorting all points
     """
     if points.dtype != 'float64':
         points = np.array(points, dtype=np.float)
@@ -257,7 +257,7 @@ def get_first_index(points):
     v2 = np.array([0, -CoM[1], CoM[2]])
     v1_u = v1 / np.linalg.norm(v1)
     v2_u = v2 / np.linalg.norm(v2)
-    
+
     angles = np.arccos(np.dot(v1_u, v2_u))
     return np.argmin(angles)
 
@@ -266,7 +266,7 @@ def find_nearest(inner, outer):
     """
     Function
     ----------
-    Given two arrays of polygon points, the nearest points between the 
+    Given two arrays of polygon points, the nearest points between the
         arrays is returned
 
     Parameters
@@ -324,10 +324,10 @@ def merge_sorted_points(inner, outer):
 
     Notes
     ----------
-    Because we append to merged for each inner, when larger we have recursed 
+    Because we append to merged for each inner, when larger we have iterated
         through all the points, unless the holes constitute a single pixel,
         in which they are likely undesired anyways
-    
+
     Future Work
     ----------
     Could reduce ops by n points in outer if passed in outer_tree from
@@ -338,7 +338,7 @@ def merge_sorted_points(inner, outer):
     """
     if type(inner) is list:
         og_outer = outer.copy()
-        previous = [] # for index offset due to previous insertions 
+        previous = []  # for index offset due to previous insertions
         for n_inner in inner:
             point_pair, index_pair = find_nearest(n_inner, og_outer)
             n_inner = np.roll(n_inner, n_inner.shape[0] - index_pair[0], axis=0)
@@ -354,11 +354,11 @@ def merge_sorted_points(inner, outer):
     return outer
 
 
-def calc_offset(prevoius, index):
+def calc_offset(previous, index):
     """
     Function
     ----------
-    Given the previous insertions and the current insertion index, 
+    Given the previous insertions and the current insertion index,
         the necessary offset is calculated
 
     Paramters
@@ -373,17 +373,17 @@ def calc_offset(prevoius, index):
     Returns
     ----------
     int
-        An integer represnting the number of slices to offset the insertion
+        An integer representing the number of slices to offset the insertion
 
     Notes
     ----------
-    When we have mulitple nested structures, we need to compute what the 
+    When we have multiple nested structures, we need to compute what the
         potential offset is when placing into the sorted list. We cannot do
-        this in the original list because then future structures may map to 
-        a newly inserted structure as opposed to the exterior polygon 
+        this in the original list because then future structures may map to
+        a newly inserted structure as opposed to the exterior polygon
     """
     offset = 0
-    for item in prevoius:
+    for item in previous:
         idx, n_pts = item
         if index > idx:
             offset += n_pts
@@ -434,7 +434,7 @@ def all_points_merged(poly, merged):
 
     Notes
     ----------
-    Because we append to merged for each inner, when larger we have recursed 
+    Because we append to merged for each inner, when larger we have iterated
         through all the points, unless the holes constitute a single pixel,
         in which they are likely undesired anyways
     """
@@ -458,7 +458,7 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     ctcoord : numpy.ndarray
         A numpy array of the ct image coordinate system returned from
         utils.prepare_coordinate_mapping()
-    flatten : bool (Default = True) 
+    flatten : bool (Default = True)
         Specifies if the returned coordinates are flattend into DICOM
         RT standard, as a single dimensional array
     invert : bool (Default = False)
@@ -473,9 +473,9 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
 
     Notes
     ----------
-    Invert is called as the negation of the prevoius value. This is
+    Invert is called as the negation of the previous value. This is
         done in the case where a nested hole contains a polygon and
-        the edge detection must alternate between erison and dilation
+        the edge detection must alternate between erosion and dilation
     """
     inner, outer = split_by_holes(poly)
     # inner=None if polygon has no holes
@@ -487,7 +487,7 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
             return merged.flatten()
         return merged
 
-    # Check if there are mupltiple polygons
+    # Check if there are multiple polygons
     polygons, n_polygons = skm.label(poly, connectivity=2, return_num=True)
     if n_polygons > 1:
         i_polys = [polygons == n for n in range(1, n_polygons + 1)]  # 0=background
@@ -502,11 +502,11 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     return points_sorted
 
 
-def seperate_polygons(z_slice, mim=True):
+def separate_polygons(z_slice, mim=True):
     """
     Function
     ----------
-    Given a z-slice, return each polygon to convert to a ContourSeqeuence
+    Given a z-slice, return each polygon to convert to a ContourSequence
 
     Parameters
     ----------
@@ -516,7 +516,7 @@ def seperate_polygons(z_slice, mim=True):
         Creates MIM style contours if True
             MIM connects holes with a line of width zero
         Creates Pinnacle style contours if False
-            Pinnacle creates holes as a seperate structure
+            Pinnacle creates holes as a separate structure
 
     Returns
     ----------
@@ -528,13 +528,13 @@ def seperate_polygons(z_slice, mim=True):
     polygons, n_polygons = skm.label(z_slice, connectivity=2, return_num=True)
     for poly_index in range(1, n_polygons + 1):
         polygon = polygons == poly_index
-        if mim:  # Mim doesnt seperate holes
+        if mim:  # Mim doesn't separate holes
             each_polygon.extend([polygon])
-        else:  # Pinnacle seperates holes
+        else:  # Pinnacle separates holes
             holes, filled = split_by_holes(polygon)
             if holes is not None:
                 each_polygon.extend([filled])
-                each_polygon.extend(seperate_polygons(holes, mim=False))
+                each_polygon.extend(separate_polygons(holes, mim=False))
             else:
                 each_polygon.extend([polygon])
     return each_polygon
@@ -590,7 +590,7 @@ def img_dims(dicom_list):
     n_slices = round(1 + (loc_list.max() - loc_list.min()) / thickness)
 
     # Accounts for known missing instances on the low end. This is likely
-    # unnecessary but good edge conditon protection for missing slices
+    # unnecessary but good edge condition protection for missing slices
     # Probably could save runtime by rewriting to use arrays
     if int_list.min() > 1:
         diff = int_list.min() - 1
@@ -637,18 +637,18 @@ def key_list_creator(key_list, *args):
     key_list : list
         A list of the desired index order of structures, if present
     *args : list of arguments
-        Arguements to be passed to key_list.index(*)
+        Arguments to be passed to key_list.index(*)
 
     Returns
     ----------
-    Returns a function which yeilds the proper index of each structure
+    Returns a function which yields the proper index of each structure
     """
     if isinstance(key_list, dict):
         key_list = list(key_list.keys())
 
     def new_key(*args):
         return key_list.index(*args)
-      
+
     return new_key
 
 
@@ -752,7 +752,7 @@ def d_max_coords(patient_path, dose_volume, printing=True):
 
     Notes
     ----------
-    Due to the RTDOSE computation, it is likely in a slighly different
+    Due to the RTDOSE computation, it is likely in a slightly different
         coordinate system than the CT coordinates. But, the slice difference
         should be < 1/2 * voxel size of the CT coordinates
     """
@@ -783,7 +783,7 @@ def d_max_coords(patient_path, dose_volume, printing=True):
     dose_dims = np.rollaxis(dose_dcm.pixel_array, 0, 3).shape
     dose_iso = np.array(dose_dcm.ImagePositionPatient)
     dx, dy, dz = (*dose_dcm.PixelSpacing, dose_dcm.SliceThickness)
-    
+
     d_grid_x = dose_iso[1]+dx * np.arange(dose_dims[0])
     d_grid_y = dose_iso[0]+dy * np.arange(dose_dims[1])
     d_grid_z = dose_iso[2]+dz * np.arange(dose_dims[2])
@@ -918,9 +918,10 @@ def find_series_slices(path, find_associated=False):
         raise ValueError("Path is not a file or a directory")
 
     if find_associated:
-        dcmheader = pydicom.dcmread(str(seed_file), stop_before_pixels=True)
-        if "ReferencedFrameOfReferenceSequence" in dir(dcmheader):
-            target_frame_of_reference = dcmheader.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
+        dcm_hdr = pydicom.dcmread(str(seed_file), stop_before_pixels=True)
+        if "ReferencedFrameOfReferenceSequence" in dir(dcm_hdr):
+            ref_for_seq = dcm_hdr.ReferencedFrameOfReferenceSequence[0]
+            target_frame_of_reference = ref_for_seq.FrameOfReferenceUID
             pt_folders = list(path.parent.parent.iterdir())
             for p in pt_folders:
                 if p.name in modality_list:
@@ -1007,7 +1008,8 @@ def show_contours(volume_arr, contour_arr, rows=2, cols=6,
         An integer representing the pyplot figure size
     """
 
-    # Currently hard coded the aspect ratio for MRI context. May need to adapt it to make it more adaptible.
+    # Currently hard coded the aspect ratio for MRI context.
+    # May need to adapt it to make it more adaptible.
 
     if not figsize:
         figsize = (cols * 4, rows * 3)

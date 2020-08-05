@@ -2,11 +2,11 @@
 import copy
 import pydicom
 import utils
-import skimage.measure as skm
 from datetime import datetime
 from dataclasses import dataclass
 from matplotlib import cm
 import numpy as np
+
 
 class RTStruct:
     """
@@ -21,7 +21,7 @@ class RTStruct:
         Creates MIM style contours if True
             MIM connects holes with a line of width zero
         Creates Pinnacle style contours if False
-            Pinnacle creates holes as a seperate structure
+            Pinnacle creates holes as a separate structure
 
     Methods
     ----------
@@ -33,9 +33,9 @@ class RTStruct:
         Updates new_rt header to represent a unique RTSTRUCT file
     to_pydicom : (None) -> pydicom.dataset.FileDataset
         Returns a pydicom.dataset.FileDataset object
-    append_masks: (masks:np.ndarray, roi_names=None:[str]) -> None 
+    append_masks: (masks:np.ndarray, roi_names=None:[str]) -> None
         Appends the contours and ROI names to new_rt
-    
+
     Notes
     ----------
     Helper functions for this class are avaliable:
@@ -49,7 +49,7 @@ class RTStruct:
         self.new_rt = copy.deepcopy(rt_dcm)
         self.mim = mim
         self._ref_sop_uids = {}
-        self._ct_series_hdrs = {} 
+        self._ct_series_hdrs = {}
         self._unpack_ct_hdrs()
 
     def initialize(self):
@@ -65,13 +65,13 @@ class RTStruct:
         Modifies
         ----------
         new_rt : pydicom.dataset.FileDataset
-            Initializes the currently working RTSTRUCT file to become a 
+            Initializes the currently working RTSTRUCT file to become a
             pydicom.dataset.FileDataset, which is stored at self.new_rt
 
         Notes
         ----------
         Modules referenced throughout code based on DICOM standard layout:
-            http://dicom.nema.org/medical/dicom/current/output/html/part03.html  
+            http://dicom.nema.org/medical/dicom/current/output/html/part03.html
         In-line references follow the format of Part (P) and Chapter (C) as P.#.C.#
         Common names references are provided with the byte location (XXXX, XXXX),
             and therein referred to with the byte locations
@@ -132,7 +132,7 @@ class RTStruct:
             rt_dcm.StudyDescription = ct_dcm.StudyDescription
 
         # P.3.C.7.5.1 General Equipment Module
-        rt_dcm.Manufacturer = 'Beaumont Artifical Intelligence Lab'
+        rt_dcm.Manufacturer = 'Beaumont Artificial Intelligence Lab'
         rt_dcm.InstitutionName = 'Beaumont Health'
         rt_dcm.ManufacturersModelName = 'DICOManager'
         rt_dcm.SoftwareVersions = ['0.1.0']
@@ -163,10 +163,9 @@ class RTStruct:
 
         # RT Referenced Series Sequence (3006,0012)
         rt_ref_study_ds = pydicom.dataset.Dataset()
-        # TODO: The uncommented UID is Retired, MIM uses that one
-        #rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
-        rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID(
-            '1.2.840.10008.3.1.2.3.1')
+        # TODO: The un-commented UID is Retired, MIM uses that one
+        # rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
+        rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.1')
         rt_ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
 
         # RT Referenced Series Sequence (3006,0014)
@@ -203,9 +202,9 @@ class RTStruct:
         file_meta.FileMetaInformationGroupLength = 222
         file_meta.FileMetaInformationVersion = b'\x00\x01'
         file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
-        file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')  # Check UID
+        file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
         file_meta.MediaStorageSOPInstanceUID = instance_uid
-        file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')  # Check UID
+        file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
         file_meta.ImplementationVersionName = 'OFFIS_DCMTK_362'
         file_meta.SourceApplicationEntityTitle = 'RO_AE_MIM'
 
@@ -215,7 +214,7 @@ class RTStruct:
                   'file_meta': file_meta,
                   'preamble': b'\x00'*128}
         self.new_rt = pydicom.dataset.FileDataset(**inputs)
-        
+
     def empty(self):
         """
         Function
@@ -226,17 +225,17 @@ class RTStruct:
         ----------
         None
 
-        Modifies 
+        Modifies
         ----------
         new_rt : pydicom.dataset.FileDataset
             Clears out contour information from the currently working RTSTRUCT
         """
         assert self.new_rt is not None, 'No RTSTRUCT provided or initialized'
-       
+
         self.new_rt.StructureSetROISequence.clear()
         self.new_rt.ROIContourSequence.clear()
         self.new_rt.RTROIObservationsSequence.clear()
-        
+
     def update_header(self):
         """
         Function
@@ -247,13 +246,13 @@ class RTStruct:
         ----------
         None
 
-        Modifies 
+        Modifies
         ----------
         new_rt : pydicom.dataset.FileDataset
             Updates the header of the currently working RTSTRUCT
         """
         assert self.new_rt is not None, 'No RTSTRUCT provided or initialized'
-        
+
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
         instance_uid = utils.generate_instance_uid()
@@ -282,7 +281,7 @@ class RTStruct:
 
         # P.10.C.7.1 DICOM File Meta Information
         self.new_rt.file_meta.MediaStorageSOPInstanceUID = instance_uid
-    
+
     def append_masks(self, masks, roi_names=None):
         """
         Function
@@ -292,9 +291,9 @@ class RTStruct:
         Parameters
         ----------
         masks : numpy.ndarray
-            A boolean array of N segmentaiton masks with dimension [N, x, y, z] 
-        roi_names : [str] (Defualt = None)        
-            A list of N strings, represnting the names of each contour
+            A boolean array of N segmentation masks with dimension [N, x, y, z]
+        roi_names : [str] (Default = None)
+            A list of N strings, representing the names of each contour
 
         Modifies
         ----------
@@ -302,7 +301,7 @@ class RTStruct:
             Appends the contours to the current working RTSTRUCT
         """
         assert self.new_rt is not None, 'No RTSTRUCT provided or initialized'
-        
+
         if not roi_names:
             roi_names = ['NewName' + str(x) for x in range(masks.shape[0])]
 
@@ -325,9 +324,9 @@ class RTStruct:
             The currently working RTSTRUCT file as a pydicom.datastet object
         """
         assert self.new_rt is not None, 'No RTSTRUCT provided or initialized'
-        
+
         return self.new_rt
-    
+
     def _append_one_mask(self, mask, roi_name, rgb_color):
         """
         Function
@@ -349,18 +348,19 @@ class RTStruct:
         ----------
         new_rt : pydicom.dataset.FileDataset
             The provided pydicom object is returned with appended contour
-        
+
         References
         ----------
         Citations are to the DICOM NEMA standard:
             http://dicom.nema.org/medical/dicom/current/output/html/part03.html
         """
         roi_number = len(self.new_rt.StructureSetROISequence) + 1
-        
+
         # P.3.C.8.8.5 Structure Set Module
         str_set_roi = pydicom.dataset.Dataset()
         str_set_roi.ROINumber = roi_number
-        str_set_roi.ReferencedFrameOfReferenceUID = self.new_rt.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
+        ref_for_seq = self.new_rt.ReferencedFrameOfReferenceSequence[0]
+        str_set_roi.ReferencedFrameOfReferenceUID = ref_for_seq.FrameOfReferenceUID
         str_set_roi.ROIName = roi_name
         str_set_roi.StructureSetROIDescription = ''
         str_set_roi.ROIGenerationAlgorithm = 'AUTOMATIC'
@@ -375,7 +375,7 @@ class RTStruct:
         # For RTSTRURCTs, a contour sequence item is a unconnected 2D z-axis polygon
         for z_index in range(mask.shape[-1]):
             z_slice = mask[:, :, z_index]
-            each_polygon = utils.seperate_polygons(z_slice, mim=self.mim)
+            each_polygon = utils.separate_polygons(z_slice, mim=self.mim)
             for polygon in each_polygon:
                 contour_seq = self._contour_seq(polygon, z_index)
                 roi_contour_seq.ContourSequence.append(contour_seq)
@@ -384,11 +384,11 @@ class RTStruct:
 
         # P.3.C.8.8.8 RT ROI Observation Module
         rt_roi_obs = pydicom.dataset.Dataset()
-        rt_roi_obs.ObservationNumber = roi_number # This might be different than roi_number...
+        rt_roi_obs.ObservationNumber = roi_number  # This might be different than roi_number...
         rt_roi_obs.ReferencedROINumber = roi_number
         rt_roi_obs.ROIObservationDescription = 'Type:Soft, Range:*/*, Fill:0, Opacity:0.0, Thickness:1, LineThickness:2, read-only:false'
         rt_roi_obs.ROIObservationLabel = roi_name
-        rt_roi_obs.RTROIInterpretedType = '' #'ORGAN'
+        rt_roi_obs.RTROIInterpretedType = ''
         rt_roi_obs.InterpreterType = ''
         self.new_rt.RTROIObservationsSequence.append(rt_roi_obs)
 
@@ -402,7 +402,7 @@ class RTStruct:
         Parameters
         ----------
         polygon : numpy.ndarray
-            A 2D numpy boolean segmentatio anrray of a unique polygon 
+            A 2D numpy boolean segmentation array of a unique polygon
         z_index : int
             The index of the z-axis in the image coordinate system
 
@@ -420,19 +420,19 @@ class RTStruct:
         contour_seq.ContourImageSequence = pydicom.sequence.Sequence([ref_uid])
         contour_seq.ContourGeometricType = 'CLOSED_PLANAR'
         contour_seq.NumberOfContourPoints = len(coords) // 3
-        contour_seq.ContourData = [f'{pt:0.3f}' for  pt in coords]
+        contour_seq.ContourData = [f'{pt:0.3f}' for pt in coords]
         return contour_seq
 
     def _contour_img_seq(self):
         """
         Function
         ----------
-        A function which organizes and sorts the image set Referenced SOP UIDs 
-        
-        Parameters 
+        A function which organizes and sorts the image set Referenced SOP UIDs
+
+        Parameters
         ----------
         None
-        
+
         Returns
         ----------
         contour_img_seq : list
@@ -446,7 +446,7 @@ class RTStruct:
         """
         uids = [x.ref_uid for x in self._ref_sop_uids.values()]
         z_indices = list(self._ref_sop_uids)
-        contour_img_seq = [x for _, x in sorted(zip(z_indices, uids))][::-1] # May not need this flipping
+        contour_img_seq = [x for _, x in sorted(zip(z_indices, uids))][::-1]
         return contour_img_seq
 
     def _unpack_ct_hdrs(self):
@@ -454,14 +454,14 @@ class RTStruct:
         Function
         ----------
         Generates two dictionaries for the uid structure and ct header. Both
-            dictionaries are keyed to the image coordinate z-slice locataion
+            dictionaries are keyed to the image coordinate z-slice location
 
         Parameters
         ----------
-        ct_series : [str] 
+        ct_series : [str]
             A list of absolute paths to each CT DICOM file
 
-        Modifies 
+        Modifies
         ----------
         self._ref_sop_dict
             Keyed to z-locations with values of UidItem
@@ -486,7 +486,7 @@ class ParseSOPUID:
     """
     Function
     ----------
-    A dataclass for collecting and storing UID information    
+    A dataclass for collecting and storing UID information
 
     Parameters
     ----------
@@ -531,20 +531,20 @@ def to_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
     source_rt : str OR pydicom.dataset.FileDataset
         An absolute path to a DICOM RTSTRUCT file OR a pydicom filedataset,
             for which the new RTSTRUCT DICOM will be based
-    ct_series : [str] 
+    ct_series : [str]
         A list of absolute paths to each DICOM CT file
     masks : numpy.ndarray
         A boolean numpy.ndarray of segmentation masks to be added to
             the DICOM RTSTRUCT file of dims [N, X, Y, Z] where N is
             the number of contours to be added
-    roi_names : list (Defualt = None)
+    roi_names : list (Default = None)
         A list of N names corresponding to each added structure. If
             not provided, the ROIs are named 'GeneratedContour#'
     mim : bool (Default = True)
         Creates MIM style contours if True
             MIM connects holes with a line of width zero
         Creates Pinnacle style contours if False
-            Pinnacle creates holes as a seperate structure
+            Pinnacle creates holes as a separate structure
 
     Returns
     ----------
@@ -555,10 +555,11 @@ def to_rt(ct_series, source_rt, masks, roi_names=None, mim=True):
     ----------
     This function is the same as from_rt except it does not empty the
         rtstruct. To not modify the SOP Instance either, use from_rt.
-    WARNING: Identitical SOP Instances associated with diffrent files
+    WARNING: Identical SOP Instances associated with diffrent files
         can cause issue with certain databases
     """
     return from_rt(ct_series, source_rt, masks, roi_names, mim, False, True)
+
 
 def from_rt(ct_series, source_rt, masks, roi_names=None,
             mim=True, empty=True, update=True):
@@ -572,20 +573,20 @@ def from_rt(ct_series, source_rt, masks, roi_names=None,
     source_rt : str OR pydicom.dataset.FileDataset
         An absolute path to a DICOM RTSTRUCT file OR a pydicom filedataset,
             for which the new RTSTRUCT DICOM will be based
-    ct_series : [str] 
+    ct_series : [str]
         A list of absolute paths to each DICOM CT file
     masks : numpy.ndarray
         A boolean numpy.ndarray of segmentation masks to be added to
             the DICOM RTSTRUCT file of dims [N, X, Y, Z] where N is
             the number of contours to be added
-    roi_name_list : list (Defualt = None)
+    roi_name_list : list (Default = None)
         A list of N names corresponding to each added structure. If
             not provided, the ROIs are named 'GeneratedContour#'
     mim : bool (Default = True)
         Creates MIM style contours if True
             MIM connects holes with a line of width zero
         Creates Pinnacle style contours if False
-            Pinnacle creates holes as a seperate structure
+            Pinnacle creates holes as a separate structure
     empty : bool (Default = True)
         Remove all ROI data from the RTSTRUCT before appending new data
 
@@ -596,10 +597,10 @@ def from_rt(ct_series, source_rt, masks, roi_names=None,
     """
     if roi_names:
         warning = 'No names, or a name for each mask must be given'
-        assert masks.shape[0] == len(roi_names), warning 
+        assert masks.shape[0] == len(roi_names), warning
     if type(source_rt) is str:
         source_rt = pydicom.dcmread(source_rt)
-    
+
     new_rt = RTStruct(ct_series, rt_dcm=source_rt, mim=mim)
     if update:
         new_rt.update_header()
@@ -623,14 +624,14 @@ def from_ct(ct_series, masks, roi_names=None, mim=True):
         A boolean numpy.ndarray of segmentation masks to be added to
             the DICOM RTSTRUCT file of dims [N, X, Y, Z] where N is
             the number of contours to be added
-    roi_names : list (Defualt = None)
+    roi_names : list (Default = None)
         A list of N names corresponding to each added structure. If
             not provided, the ROIs are named 'GeneratedContour#'
     mim : bool (Default = True)
         Creates MIM style contours if True
             MIM connects holes with a line of width zero
         Creates Pinnacle style contours if False
-            Pinnacle creates holes as a seperate structure
+            Pinnacle creates holes as a separate structure
 
     Returns
     ----------
@@ -643,8 +644,8 @@ def from_ct(ct_series, masks, roi_names=None, mim=True):
     """
     if roi_names:
         warning = 'No names, or a name for each mask must be given'
-        assert masks.shape[0] == len(roi_names), warning 
-    
+        assert masks.shape[0] == len(roi_names), warning
+
     new_rt = RTStruct(ct_series, mim=mim)
     new_rt.initialize()
     new_rt.append_masks(masks, roi_names)
@@ -679,7 +680,7 @@ def save_rt(source_rt, filename=None):
     if not filename:
         try:
             filename = source_rt.SOPInstanceUID + '.dcm'
-        except:
+        except Exception:
             raise TypeError('source_rt must be a pydicom.dataset object')
 
     if type(source_rt) is pydicom.dataset.FileDataset:
