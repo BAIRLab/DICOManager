@@ -643,11 +643,12 @@ def key_list_creator(key_list, *args):
     ----------
     Returns a function which yeilds the proper index of each structure
     """
-    if type(key_list) is dict:
+    if isinstance(key_list, dict):
         key_list = list(key_list.keys())
 
     def new_key(*args):
         return key_list.index(*args)
+      
     return new_key
 
 
@@ -666,15 +667,11 @@ def slice_thickness(dcm0, dcm1):
     ----------
     slice_thickness : float
         A float representing the robustly calculated slice thickness
-
-    Notes
-    ----------
-        Calculates based on slice location and instance number.
-        Does not trust SliceThickness DICOM Header
     """
-    if type(dcm0) != pydicom.dataset.FileDataset:
+
+    if not isinstance(dcm0, pydicom.dataset.FileDataset):
         dcm0 = pydicom.dcmread(dcm0)
-    if type(dcm1) != pydicom.dataset.FileDataset:
+    if not isinstance(dcm0, pydicom.dataset.FileDataset):
         dcm1 = pydicom.dcmread(dcm1)
 
     loc0 = dcm0.SliceLocation
@@ -759,14 +756,15 @@ def d_max_coords(patient_path, dose_volume, printing=True):
         coordinate system than the CT coordinates. But, the slice difference
         should be < 1/2 * voxel size of the CT coordinates
     """
-    if patient_path[0] == '~':
-        patient_path = os.path.expanduser('~') + patient_path[1:]
 
-    if patient_path[-1] != '/':
-        patient_path += '/'
+    if patient_path[0] == "~":
+        patient_path = os.path.expanduser("~") + patient_path[1:]
 
-    dose_files = glob.glob(patient_path + 'RTDOSE/*.dcm')
-    ct_files = glob.glob(patient_path + 'CT/*.dcm')
+    if patient_path[-1] != "/":
+        patient_path += "/"
+
+    dose_files = glob.glob(patient_path + "RTDOSE/*.dcm")
+    ct_files = glob.glob(patient_path + "CT/*.dcm")
     ct_files.sort()
 
     dose_dcm = pydicom.dcmread(dose_files[0])
@@ -785,7 +783,7 @@ def d_max_coords(patient_path, dose_volume, printing=True):
     dose_dims = np.rollaxis(dose_dcm.pixel_array, 0, 3).shape
     dose_iso = np.array(dose_dcm.ImagePositionPatient)
     dx, dy, dz = (*dose_dcm.PixelSpacing, dose_dcm.SliceThickness)
-
+    
     d_grid_x = dose_iso[1]+dx * np.arange(dose_dims[0])
     d_grid_y = dose_iso[0]+dy * np.arange(dose_dims[1])
     d_grid_z = dose_iso[2]+dz * np.arange(dose_dims[2])
@@ -817,8 +815,7 @@ def d_max_coords(patient_path, dose_volume, printing=True):
             print(f'dose_volume max (voxels): {np.array(volume_max)}')
             print(f'D_max CT coordinate (mm): {ct_max_mm}')
             print(f'D_max RT coordinate (mm): {dose_max_mm}')
-            print(
-                f'D_max RT/CT coord abs(\u0394): {abs(ct_max_mm - dose_max_mm)}')
+            print(f'D_max RT/CT coord abs(\u0394): {abs(ct_max_mm - dose_max_mm)}')
             print(f'1/2 CT voxel dimensions : {ct_voxel_size / 2}')
 
     return (volume_max, ct_max_mm, dose_max_mm, ct_voxel_size)
@@ -847,6 +844,7 @@ def d_max_check(path, volume, printing):
         An array of the voxel offset in the [x, y, z] axis
     """
     _, ct_max, dose_max, v_size = d_max_coords(path, volume, printing)
+
     offset = [0, 0, 0]
 
     for i, diff in enumerate(ct_max - dose_max):
@@ -882,12 +880,12 @@ def find_series_slices(path, find_associated=False):
     if not isinstance(path, Path):
         path = Path(path)
 
-    modality_list = ['CT', 'MR', 'PET', 'CBCT', 'RTSTRUCT']
+    modality_list = ["CT", "MR", "PET", "CBCT", "RTSTRUCT"]
 
     if path.is_dir():
         dir_contents = list(path.iterdir())
         if dir_contents[0].is_file():
-            if dir_contents[0].suffix == '.dcm':
+            if dir_contents[0].suffix == ".dcm":
                 seed_file = dir_contents[0]
             else:
                 print(f"{dir_contents}")
@@ -897,13 +895,13 @@ def find_series_slices(path, find_associated=False):
                 if d.is_dir():
                     if d.name in modality_list:
                         print("Using first volume/RTSTRUCT found")
-                        d_sub = [f for f in d.iterdir() if f.suffix == '.dcm']
+                        d_sub = [f for f in d.iterdir() if f.suffix == ".dcm"]
                         seed_file = d_sub[0]
                         print(f"{seed_file}")
                         break
                     else:
                         print("Using first dicom found")
-                        d_globs = list(d.rglob('*.dcm'))
+                        d_globs = list(d.rglob("*.dcm"))
                         seed_file = d_globs[0]
                         print(f"{seed_file}")
                         break
@@ -921,16 +919,14 @@ def find_series_slices(path, find_associated=False):
 
     if find_associated:
         dcmheader = pydicom.dcmread(str(seed_file), stop_before_pixels=True)
-        if 'ReferencedFrameOfReferenceSequence' in dir(dcmheader):
-            target_frame_of_reference = dcmheader.ReferencedFrameOfReferenceSequence[
-                0].FrameOfReferenceUID
+        if "ReferencedFrameOfReferenceSequence" in dir(dcmheader):
+            target_frame_of_reference = dcmheader.ReferencedFrameOfReferenceSequence[0].FrameOfReferenceUID
             pt_folders = list(path.parent.parent.iterdir())
             for p in pt_folders:
                 if p.name in modality_list:
                     candidate_file = next(p.iterdir())
-                    target_header = pydicom.dcmread(
-                        str(candidate_file), stop_before_pixels=True)
-                    if 'FrameOfReferenceUID' in dir(target_header):
+                    target_header = pydicom.dcmread(str(candidate_file), stop_before_pixels=True)
+                    if "FrameOfReferenceUID" in dir(target_header):
                         if target_header.FrameOfReferenceUID == target_frame_of_reference:
                             seed_file = candidate_file
                             break

@@ -157,6 +157,7 @@ for path in tqdm(pat_folders):
     if patient_group.pet:
         pet = reconstruction.pet(path)
         aspect = _aspect_ratio(path, 'PET')
+
     if patient_group.rtstruct:
         if not CONTOUR_LIST:
             raise NameError('A .csv of contours must be specified with -l')
