@@ -73,7 +73,7 @@ def mri(patient_path, path_mod=False, raises=False):
     try:
         for slice_file in volume_slices:
             ds = pydicom.dcmread(str(slice_file))
-            z_loc = round(abs((loc0-ds.SliceLocation) / slice_thick))
+            z_loc = int(round(abs((loc0-ds.SliceLocation) / slice_thick)))
             image_array[:, :, z_loc] = ds.pixel_array
 
     except IndexError:
@@ -253,6 +253,9 @@ def nm(patient_path, raises=False):
     ----------
     The values are returned raw (as they are stored). If the DICOM header specifies
         offsets or slope adjustments, that is not included currently
+    Each volume appears to be flipped in the z-axis, so it will be flipped to be HFS
+        but, this may not be entirely robust and the flip param in img_dims may be
+        needed here to match the CT flipping
     """
     if patient_path[-1] != '/':
         patient_path += '/'
@@ -266,7 +269,12 @@ def nm(patient_path, raises=False):
         print('Will only construct the first nm file in this dir')
 
     ds = pydicom.dcmread(nm_files[0])
-    return np.rollaxis(ds.pixel_array, 0, 3)
+    # DICOM stores as [z, x, y]
+    raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
+    # NM Rescale slope and intercept values
+    slope = ds.RealWorldValueMappingSequence[0].RealWorldValueSlope
+    intercept = ds.RealWorldValueMappingSequence[0].RealWorldValueIntercept
+    return raw * slope + intercept
 
 
 def ct(patient_path, path_mod=None, HU=False, raises=False):
@@ -314,14 +322,14 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     try:
         for ct_file in ct_files:
             ds = pydicom.dcmread(ct_file)
-            z_loc = round(abs((ct_loc0-ds.SliceLocation) / ct_thick))
+            z_loc = int(round(abs((ct_loc0-ds.SliceLocation) / ct_thick)))
             ct_array[:, :, z_loc] = ds.pixel_array
 
     except IndexError:
         if raises:
-            raise IndexError(f"There is a discontinuity in {patient_path}/CT")
+            raise IndexError(f"There is a discontinuity in {patient_path}CT")
         else:
-            print(f"This is a discontinuity in {patient_path}/CT")
+            print(f"This is a discontinuity in {patient_path}CT")
     else:
         if flip:
             ct_array = ct_array[..., ::-1]
@@ -392,7 +400,7 @@ def pet(patient_path, path_mod=None, raises=False):
         try:
             for _, pet_file in enumerate(pet_files):
                 ds = pydicom.dcmread(pet_file)
-                z_loc = round(abs((pet_loc0 - ds.SliceLocation) / pet_thick))
+                z_loc = int(round(abs((pet_loc0 - ds.SliceLocation) / pet_thick)))
                 pet_array[:, :, z_loc] = ds.pixel_array
         except IndexError:
             if raises:
