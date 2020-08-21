@@ -39,6 +39,10 @@ def prepare_coordinate_mapping(ct_hdr):
     Due to DICOM header orientation:
         D_i, D_j = (Column, Row)
         PixelSpacing = (Row, Column)
+    For up or down-scaled segmentation masks scaled by a factor of N_x, N_y:
+        D_j, D_i = np.array(ct_hdr.PixelSpacing) * np.array([N_x, N_y])
+        j, i = np.indicies((ct_hdr.Rows // N_x, ct_hdr.Columns // N_y))
+        ** This will be implemented and tested in the future **
     """
     # Unpacking arrays is poor form, but I'm feeling rebellious...
     X_x, X_y, X_z = np.array(ct_hdr.ImageOrientationPatient[:3]).T
