@@ -7,6 +7,8 @@ and sorts based by provided MRN list.
 User can then reconstruct volumes with the reconstruct.py functions or deconstruct
 binary masks into RTSTRUCT files with deconstruction.py.
 
+Note: reconstuction.py is functional, but in need of refactoring. 
+
 ## Prerequisites
 ### Packages
 Package requirements are specified in requirements.txt
