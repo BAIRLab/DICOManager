@@ -67,7 +67,7 @@ def mri(patient_path, path_mod=False, raises=False):
             else:
                 print(err_msg)
 
-    slice_thick, n_z, loc0, _, flip = utils._img_dims(volume_slices)
+    slice_thick, n_z, loc0, _, flip = utils.img_dims(volume_slices)
     image_array = np.zeros((*dcmheader.pixel_array.shape, n_z), dtype="float32")
 
     try:
