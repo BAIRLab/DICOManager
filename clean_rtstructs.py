@@ -97,7 +97,7 @@ options, args = parser.parse_args()
 
 if not options.base_dir:
     raise NameError('A sorted DICOM directory must be specified by --base')
-if move and not options.dest_dir:
+if options.move and not options.dest_dir:
     raise NameError('A destination directory must be specified by --dest_dir')
 
 if options.csv_file:
