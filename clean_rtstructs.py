@@ -91,13 +91,13 @@ parser.add_option('-s', '--summary', action='store_true', dest='summary',
                   help='Prints remaining ROI Names for RTSTRUCTs in -b', default=False)
 parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
                   help='Prints moved files', default=False)
-parser.add_option('-r', '--read_only', action='store_true', dest='read_only',
-                  help='Use flag to interrogate RTSTRUCTS without moving', default=False)
+parser.add_option('-m', '--move', action='store_true', dest='move',
+                  help='Use flag to interrogate RTSTRUCTS or move files', default=False)
 options, args = parser.parse_args()
 
 if not options.base_dir:
     raise NameError('A sorted DICOM directory must be specified by --base')
-if not options.read_only and not options.dest_dir:
+if move and not options.dest_dir:
     raise NameError('A destination directory must be specified by --dest_dir')
 
 if options.csv_file:
@@ -107,7 +107,7 @@ else:
 
 mrns.sort()
 
-if not options.read_only:
+if options.move:
     for mrn in mrns:
         struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'))
         if len(struct_list) > 1:
@@ -115,7 +115,7 @@ if not options.read_only:
             _ = struct_list.pop(times.index(max(times)))
 
             for struct in struct_list:
-                dest = os.path.join(options.dest_dir, str(mrn))
+                dest = os.path.join(options.dest_dir, str(mrn), 'RTSTRUCT')
                 if not os.path.exists(dest):
                     os.makedirs(dest)
                 if options.verbose:
@@ -123,6 +123,8 @@ if not options.read_only:
                 shutil.move(struct, dest)
 
 if options.summary or options.contour_list:
+    if not os.path.isfile(options.contour_list):
+        raise FileNotFoundError(options.contour_list)
     try:
         with open(options.contour_list, 'r') as json_file:
             contours = json.load(json_file)
@@ -133,7 +135,7 @@ if options.summary or options.contour_list:
     print('        MRN   : # :   Contour Names')
 
     for mrn in mrns:
-        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'))
+        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'), recursive=True)
         if options.read_only:
             count_files = []
             for i, f in enumerate(struct_list):
