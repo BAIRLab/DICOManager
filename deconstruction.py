@@ -163,7 +163,7 @@ class RTStruct:
 
         # RT Referenced Series Sequence (3006,0012)
         rt_ref_study_ds = pydicom.dataset.Dataset()
-        # TODO: The un-commented UID is Retired, MIM uses that one
+        # The un-commented UID is Retired, MIM uses that one
         # rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.2')
         rt_ref_study_ds.ReferencedSOPClassUID = pydicom.uid.UID('1.2.840.10008.3.1.2.3.1')
         rt_ref_study_ds.ReferencedSOPInstanceUID = ct_dcm.StudyInstanceUID
@@ -199,7 +199,7 @@ class RTStruct:
 
         # P.10.C.7.1 DICOM File Meta Information
         file_meta = pydicom.dataset.FileMetaDataset()
-        file_meta.FileMetaInformationGroupLength = 222
+        file_meta.FileMetaInformationGroupLength = 202
         file_meta.FileMetaInformationVersion = b'\x00\x01'
         file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
         file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
@@ -688,7 +688,7 @@ def save_rt(source_rt, filename=None):
     elif type(source_rt) is pydicom.dataset.Dataset:
         # P.10.C.7.1 DICOM File Meta Information
         file_meta = pydicom.dataset.FileMetaDataset()
-        file_meta.FileMetaInformationGroupLength = 222  # Check
+        file_meta.FileMetaInformationGroupLength = 202
         file_meta.FileMetaInformationVersion = b'\x00\x01'
         file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
         file_meta.MediaStorageSOPInstanceUID = source_rt.SOPInstanceUID
