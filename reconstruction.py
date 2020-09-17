@@ -73,7 +73,11 @@ def mri(patient_path, path_mod=False, raises=False):
     try:
         for slice_file in volume_slices:
             ds = pydicom.dcmread(str(slice_file))
-            z_loc = int(round(abs((loc0-ds.SliceLocation) / slice_thick)))
+            try:
+                z_loc = int(round(abs((loc0-ds.SliceLocation) / slice_thick)))
+            except AttributeError:
+                ipp = ds.ImagePositionPatient
+                z_loc = int(round(abs((loc-ipp[-1]) / slice_thick)))
             image_array[:, :, z_loc] = ds.pixel_array
 
     except IndexError:
