@@ -126,7 +126,7 @@ if not DEST_DIR:
 file_tree = glob(os.path.join(BASE_DIR, '**/*[!.dcm]'), recursive=True)
 
 with open(CSV_FILE, mode='r') as mrn_csv:
-    filter_list = list(str(x[0][1:-1]) for x in csv.reader(mrn_csv))[1:]
+    filter_list = list(str(x[0]) for x in csv.reader(mrn_csv))[1:]
 
 pat_folders = []
 for df in file_tree:
