@@ -577,7 +577,11 @@ def img_dims(dicom_list):
     for f in dicom_list:
         dcm = pydicom.dcmread(f, stop_before_pixels=True)
         int_list.append(round(dcm.InstanceNumber))
-        loc_list.append(float(dcm.SliceLocation))
+        try:
+            loc_list.append(float(dcm.SliceLocation))
+        except AttributeError:
+            ipp = dcm.ImagePositionPatient
+            loc_list.append(float(ipp[-1]))
 
     # Sort both lists based on the int_list ordering
     int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
