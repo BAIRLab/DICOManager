@@ -136,7 +136,7 @@ if options.summary or options.contour_list:
 
     for mrn in mrns:
         struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'), recursive=True)
-        if options.read_only:
+        if not options.move:
             count_files = []
             for i, f in enumerate(struct_list):
                 count_files.append(_get_structs(f, contours))

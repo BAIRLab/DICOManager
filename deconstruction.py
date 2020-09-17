@@ -20,8 +20,10 @@ class RTStruct:
     mim : bool (Default = True)
         Creates MIM style contours if True
             MIM connects holes with a line of width zero
+            MIM adheres to the DICOM C.8.8.6.3 standard for inner
+                and outer contours
         Creates Pinnacle style contours if False
-            Pinnacle creates holes as a separate structure
+            Pinnacle creates separate structures for inner and outer contours
 
     Methods
     ----------
