@@ -8,12 +8,30 @@ import struct
 import pydicom
 import pandas as pd
 from tqdm import tqdm
-
+from pathos.multiprocessing import ProcessPool
 
 __author__ = ["Evan Porter", "Ron Levitin", "Nick Myziuk"]
 __liscense__ = "Beaumont Artificial Intelligence Research Lab"
 __email__ = "evan.porter@beaumont.org"
 __status__ = "Research"
+
+
+class sorting:
+    def __init__(self, cohort_list, project_dir):
+        self.cohort_list = cohort_list
+        self.options = options
+
+    def sort_file(self, dicom_file):
+        try:
+            ds = pydicom.dcmread(dicom_file, stop_before_pixels=True)
+        except (pydicom.errors.InvalidDicomError, struct.error):
+            shutil.move(dicom_file,
+                        os.path.join(self.options.base_dir, 'rejected_files'))
+        else:
+            _specific_sort(dicom_file=dicom_file,
+                           dest_dir=self.options.project_dir,
+                           cohort_list=self.cohort_list,
+                           ds=ds)
 
 
 def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
@@ -39,7 +57,10 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
         new_path = os.path.join(*path_list)
 
     if not os.path.exists(new_path):
-        os.makedirs(new_path)
+        try:
+            os.makedirs(new_path)
+        except FileExistsError:
+            pass
 
     _, filename = os.path.split(dicom_file)
     destination = os.path.join(new_path, filename)
@@ -71,7 +92,7 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
                     "dicom_file": dicom_file,
                     }
     try:
-        if int(ds.PatientID) in cohort_list or ds.PatientID in str(cohort_list):
+        if match_id(ds.PatientID, cohort_list):
             if hasattr(ds, "StudyDescription"):
                 if "CBCT" in ds.StudyDescription:
                     subfolder = "CBCT"
@@ -83,6 +104,19 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
             _write_to_path(**write_params)
     except ValueError:
         pass
+
+
+def match_id(ID, cohort_list):
+    if ID in cohort_list:
+        return True
+    try:
+        if ID in str(cohort_list):
+            return True
+    except Exception:
+        if ID in int(cohort_list):
+            return True
+    except Exception:
+        return False
 
 
 # Command line starts below here
@@ -99,40 +133,33 @@ parser.add_option('-p', '--project-dest', action='store', dest='project_dir',
 
 options, args = parser.parse_args()
 
-if not options.csv_file:
-    raise NameError('A sorting csv file must be specified with flag --csv')
+if __name__ == '__main__':
+    if not options.csv_file:
+        raise NameError('A sorting csv file must be specified with flag --csv')
 
-if options.move_file:
-    bad_input = True
-    while bad_input:
-        confirm = input("Confirm you want to move and not copy the files (y/n): ")
-        if confirm.lower() == "n":
-            print("Copying instead...")
-            bad_input = False
-            options.move_file = False
-            break
-        if confirm.lower() == "y":
-            bad_input = False
-            break
-        else:
-            bad_input = True
+    if options.move_file:
+        bad_input = True
+        while bad_input:
+            confirm = input("Confirm you want to move and not copy the files (y/n): ")
+            if confirm.lower() == "n":
+                print("Copying instead...")
+                bad_input = False
+                options.move_file = False
+                break
+            if confirm.lower() == "y":
+                bad_input = False
+                break
+            else:
+                bad_input = True
 
-dicom_files = glob.glob(os.path.join(options.base_dir, '**/*.dcm*'), recursive=True)
+    dicom_files = glob.glob(os.path.join(options.base_dir, '**/*.dcm*'), recursive=True)
 
-try:
-    csv_path = os.path.join(options.csv_file)
-    cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
-except FileNotFoundError:
-    raise FileNotFoundError(f'The specified .csv is not at {csv_path}')
-else:
-    for _, dicom_file in enumerate(tqdm(dicom_files)):
-        try:
-            ds = pydicom.dcmread(dicom_file, stop_before_pixels=True)
-        except (pydicom.errors.InvalidDicomError, struct.error):
-            shutil.move(dicom_file,
-                        os.path.join(options.base_dir, 'rejected_files'))
-        else:
-            _specific_sort(dicom_file=dicom_file,
-                           dest_dir=options.project_dir,
-                           cohort_list=cohort_list,
-                           ds=ds)
+    try:
+        csv_path = os.path.join(options.csv_file)
+        cohort_list = pd.read_csv(csv_path, engine='python')['MRN'].tolist()
+    except FileNotFoundError:
+        raise FileNotFoundError(f'The specified .csv is not at {csv_path}')
+    else:
+        with ProcessPool() as P:
+            fn = sorting(cohort_list, options)
+            _ = list(tqdm(P.imap(fn.sort_file, dicom_files), total=len(dicom_files)))
