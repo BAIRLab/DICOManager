@@ -58,7 +58,6 @@ def prepare_coordinate_mapping(ct_hdr):
 
     C = np.array([i, j, 0, 1])
 
-    # Returns coordinates in [x, y, 3], with [:-1] to reduce runtime
     return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
 
