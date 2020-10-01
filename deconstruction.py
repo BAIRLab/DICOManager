@@ -415,7 +415,7 @@ class RTStruct:
         """
         # Get referenced SOP UIDs and Polygon surface points
         ref_uid = self._ref_sop_uids[z_index].ref_uid
-        ctcoord = utils.prepare_coordinate_mapping(self._ct_series_hdrs[z_index])
+        ctcoord = utils.prepare_coordinate_mapping(self._ct_series_hdrs[z_index])[..., :3]
         coords = utils.poly_to_coords_2D(polygon, ctcoord=ctcoord)
         # Fill the Contour Sequence
         contour_seq = pydicom.dataset.Dataset()
