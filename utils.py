@@ -12,6 +12,7 @@ from scipy.ndimage.morphology import binary_erosion
 from scipy.ndimage.morphology import binary_dilation
 from scipy import spatial
 from skimage import measure as skm
+from datetime import datetime
 
 
 def prepare_coordinate_mapping(ct_hdr):
@@ -59,7 +60,7 @@ def prepare_coordinate_mapping(ct_hdr):
     C = np.array([i, j, 0, 1])
 
     # Returns coordinates in [x, y, 3], with [:-1] to reduce runtime
-    return np.rollaxis(np.stack(np.dot(M[:-1], C)), 0, 3)
+    return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
 
 def wire_mask(arr, invert=False):
@@ -587,15 +588,30 @@ def img_dims(dicom_list):
     int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
     # Calculate slice thickness
-    loc0, loc1 = loc_list[:2]
-    inst0, inst1 = int_list[:2]
-    thickness = abs((loc1-loc0) / (inst1-inst0))
+    #loc0, loc1 = loc_list[:2]
+    #inst0, inst1 = int_list[:2]
+    #thickness = abs((loc1-loc0) / (inst1-inst0))
+    loc_difference_array = np.abs(np.append(loc_list, 0) - np.insert(loc_list, 0, 0))[1:-1]
+    int_difference_array = (np.append(int_list, 0) - np.insert(int_list, 0, 0))[1:-1]
+    thicknesses = loc_difference_array / int_difference_array
+    print(np.round(thicknesses,3))
+    thicknesses = sorted(list(set(np.round(thicknesses, 3))))
+
+    if len(thicknesses) == 1:
+        mult_thick = False
+        min_thickness = thicknesses[0]
+    else:
+        mult_thick = True
+        min_thickness = thicknesses.pop(0)
+        divisible = [t % min_thickness == 0 for t in thicknesses]
+        if not all(divisible):
+            print("Patient may not reconstruct correctly.")
 
     # Compute if Patient and Image coords are flipped relatively
-    flip = False if loc0 > loc1 else True  # Check
-
+    #flip = False if loc0 > loc1 else True  # Check
+    flip = False if loc_list[0] > loc_list[1] else True
     # Compute number of slices and account for missing dicom files
-    n_slices = round(1 + (loc_list.max() - loc_list.min()) / thickness)
+    n_slices = round(1 + (loc_list.max() - loc_list.min()) / min_thickness)
 
     # Accounts for known missing instances on the low end. This is likely
     # unnecessary but good edge condition protection for missing slices
@@ -607,13 +623,13 @@ def img_dims(dicom_list):
         int_list += list(range(1, diff + 1))
         # Adds the new locations to correspond with instances
         if flip:
-            loc_list += list(loc0 - np.arange(1, diff + 1) * thickness)
+            loc_list += list(loc0 - np.arange(1, diff + 1) * min_thickness)
         else:
-            loc_list += list(loc0 + np.arange(1, diff + 1) * thickness)
+            loc_list += list(loc0 + np.arange(1, diff + 1) * min_thickness)
         # Resorts the list with the new points
         int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
-    return thickness, int(n_slices), loc_list.min(), loc_list.max(), flip
+    return min_thickness, int(n_slices), loc_list.min(), loc_list.max(), flip, mult_thick
 
 
 def nearest(array, value):
@@ -932,7 +948,7 @@ def find_series_slices(path, find_associated=False):
             target_frame_of_reference = ref_for_seq.FrameOfReferenceUID
             pt_folders = list(path.parent.parent.iterdir())
             for p in pt_folders:
-                if p.name in modality_list:
+                if p.name in modality_list and p.name != 'RTSTRUCT':
                     candidate_file = next(p.iterdir())
                     target_header = pydicom.dcmread(str(candidate_file), stop_before_pixels=True)
                     if "FrameOfReferenceUID" in dir(target_header):
@@ -1067,3 +1083,43 @@ def show_contours(volume_arr, contour_arr, rows=2, cols=6,
         plt.title(f"{dim}={s}")
 
     plt.show()
+
+def struct_sort(struct_path):
+    struct_dcm = pydicom.dcmread(str(struct_path))
+
+    try:
+        date = struct_dcm.InstanceCreationDate
+        time = struct_dcm.InstanceCreationTime
+    except AttributeError:
+        date = struct_dcm.SeriesDate
+        time = struct_dcm.SeriesTime
+    except AttributeError:
+        date = '19700101'
+        time = '000000'
+    
+    try:
+        sort_time = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f').timestamp()
+    except ValueError:
+        sort_time = datetime.strptime((date+time).split('.')[0], '%Y%m%d%H%M%S').timestamp()
+
+    return sort_time
+    
+def multi_slice_resample(volume_array):
+
+    slice_sum = np.sum(volume_array, axis=(0,1))
+    missing_ind = np.asarray(slice_sum == 0).nonzero()[0]
+    filled_ind = np.nonzero(slice_sum)[0]
+
+    n_slices = volume_array.shape[-1]
+
+    for i in missing_ind:
+        if i != 0 or i != (n_slices - 1):
+            inds = abs(filled_ind - i).argsort()
+            nearest_filled_ind = filled_ind[inds]
+            ind0, ind1 = sorted(nearest_filled_ind[:2])
+            #Linear interpolation between slices
+            volume_array[...,i] = (volume_array[...,ind0] * (ind1 - i)\
+                                + volume_array[...,ind1] * (i - ind0))\
+                                / (ind1-ind0)
+    
+    return volume_array

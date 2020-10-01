@@ -126,7 +126,7 @@ if not DEST_DIR:
 file_tree = glob(os.path.join(BASE_DIR, '**/*[!.dcm]'), recursive=True)
 
 with open(CSV_FILE, mode='r') as mrn_csv:
-    filter_list = list(str(x[0][1:-1]) for x in csv.reader(mrn_csv))[1:]
+    filter_list = list(str(x[0]) for x in csv.reader(mrn_csv))[1:]
 
 pat_folders = []
 for df in file_tree:
@@ -138,7 +138,8 @@ pat_folders = list(set(pat_folders))
 
 for path in tqdm(pat_folders):
     patient_group = FileCollect(path)
-    mr, nm, ct, pet, rts, dose = [[] for _ in range(6)]
+    mr, nm, ct, pet, rts, dose, rts_found = [[] for _ in range(7)]
+    #print(patient_group)
 
     if patient_group.mr:
         mr = reconstruction.mri(path)
@@ -158,9 +159,9 @@ for path in tqdm(pat_folders):
             raise NameError('A .csv of contours must be specified with -l')
         with open(CONTOUR_LIST, mode='r') as json_file:
             contour_list = json.load(json_file)
-        rts = reconstruction.struct(path, contour_list)
-    if patient_group.rtdose:
-        dose = reconstruction.dose(path)
+        rts, rts_found = reconstruction.struct(path, contour_list)
+    #if patient_group.rtdose:
+    #    dose = reconstruction.dose(path)
 
     pool_dict = {'MR': mr,
                  'NM': nm,
@@ -168,7 +169,8 @@ for path in tqdm(pat_folders):
                  'PET': pet,
                  'RTSTRUCT': rts,
                  'RTDOSE': dose,
-                 'ASPECT': aspect
+                 'ASPECT': aspect,
+                 'RT_FOUND': rts_found
                  }
 
     if not os.path.exists(DEST_DIR):

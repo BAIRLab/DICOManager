@@ -67,7 +67,7 @@ def mri(patient_path, path_mod=False, raises=False):
             else:
                 print(err_msg)
 
-    slice_thick, n_z, loc0, _, flip = utils.img_dims(volume_slices)
+    slice_thick, n_z, loc0, _, flip, _ = utils.img_dims(volume_slices)
     image_array = np.zeros((*dcmheader.pixel_array.shape, n_z), dtype="float32")
 
     try:
@@ -77,14 +77,14 @@ def mri(patient_path, path_mod=False, raises=False):
                 z_loc = int(round(abs((loc0-ds.SliceLocation) / slice_thick)))
             except AttributeError:
                 ipp = ds.ImagePositionPatient
-                z_loc = int(round(abs((loc-ipp[-1]) / slice_thick)))
+                z_loc = int(round(abs((loc0-ipp[-1]) / slice_thick)))
             image_array[:, :, z_loc] = ds.pixel_array
 
     except IndexError:
         if raises:
-            raise IndexError(f"There is a discontinuity in {patient_path}/MR")
+            raise IndexError(f"There is a discontinuity in {patient_path}")
         else:
-            print(f"This is a discontinuity in {patient_path}/MR")
+            print(f"This is a discontinuity in {patient_path}")
     else:
         if not flip:
             image_array = image_array[..., ::-1]
@@ -142,7 +142,10 @@ def struct(patient_path, wanted_contours, raises=False):
     elif patient_path.is_dir():
         patient_path_sub = patient_path / "RTSTRUCT"
         if patient_path_sub.is_dir():
-            struct_file = next(patient_path_sub.iterdir())
+            if len(list(patient_path_sub.iterdir())) > 1:
+                struct_file = sorted(patient_path_sub.iterdir(), key=utils.struct_sort, reverse=True)[0]
+            else:
+                struct_file = next(patient_path_sub.iterdir())
         else:
             err_msg = f"No RTSTRUCT folder in patient path: {patient_path.parent}"
             if raises:
@@ -164,10 +167,13 @@ def struct(patient_path, wanted_contours, raises=False):
 
     for vfile in volume_slice_files:
         volume_dcm = pydicom.dcmread(vfile, stop_before_pixels=True)
-        if volume_dcm.InstanceNumber == 1:
-            break
+        try:
+            if volume_dcm.InstanceNumber == 1:
+                break
+        except Exception:
+            print(volume_dcm)
 
-    _, vol_n_z, _, _, _ = utils.img_dims(volume_slice_files)
+    _, vol_n_z, _, _, _, _ = utils.img_dims(volume_slice_files)
     dimensions = (volume_dcm.Rows, volume_dcm.Columns, vol_n_z)
     img_origin = np.array(volume_dcm.ImagePositionPatient)
     ix, iy, iz = (*volume_dcm.PixelSpacing, volume_dcm.SliceThickness)
@@ -226,7 +232,7 @@ def struct(patient_path, wanted_contours, raises=False):
     key_list = utils.key_list_creator(wanted_contours)
     ordered = [masks[contours.index(x)]
                for x in sorted(contours, key=key_list)]
-    return np.array(ordered, dtype='bool')
+    return np.array(ordered, dtype='bool'), contours
 
 
 def nm(patient_path, raises=False):
@@ -319,10 +325,10 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     ct_files.sort()
     ct_dcm = pydicom.dcmread(ct_files[0])
 
-    ct_thick, ct_n_z, ct_loc0, ct_loc1, flip = utils.img_dims(ct_files)
+    ct_thick, ct_n_z, ct_loc0, ct_loc1, flip, mult_thick = utils.img_dims(ct_files)
     ct_array = np.zeros((*ct_dcm.pixel_array.shape,
                          ct_n_z), dtype='float32')
-
+    
     try:
         for ct_file in ct_files:
             ds = pydicom.dcmread(ct_file)
@@ -337,6 +343,9 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     else:
         if flip:
             ct_array = ct_array[..., ::-1]
+        if mult_thick:
+            print(f"Multiple slice thicknesses found in {patient_path}CT")
+            ct_array = utils.multi_slice_resample(ct_array)
         if HU:
             return ct_array * ct_dcm.RescaleSlope + ct_dcm.RescaleIntercept
         else:
@@ -387,7 +396,7 @@ def pet(patient_path, path_mod=None, raises=False):
     pet_files = glob.glob(patient_path + "PET" + str(path_mod) + "/*.dcm")
     pet_dcm = pydicom.dcmread(pet_files[0])
 
-    pet_thick, pet_n_z, pet_loc0, pet_loc1, flip = utils.img_dims(pet_files)
+    pet_thick, pet_n_z, pet_loc0, pet_loc1, flip, _ = utils.img_dims(pet_files)
     pet_array = np.zeros((*pet_dcm.pixel_array.shape,
                           pet_n_z), dtype='float32')
 
