@@ -146,7 +146,7 @@ class recon_project:
                 raise NameError('A .csv of contours must be specified with -l')
             with open(self.contour_list, mode='r') as json_file:
                 contour_list = json.load(json_file)
-            rts = reconstruction.struct(path, contour_list)
+            rts, rts_found = reconstruction.struct(path, contour_list)
         if patient_group.rtdose:
             dose = reconstruction.dose(path)
 
@@ -157,6 +157,7 @@ class recon_project:
                     'RTSTRUCT': rts,
                     'RTDOSE': dose,
                     'ASPECT': aspect
+                    'RT_FOUND': rts_found
                     }
 
         if not os.path.exists(self.dest_dir):

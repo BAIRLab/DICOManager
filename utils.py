@@ -587,13 +587,9 @@ def img_dims(dicom_list):
     int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
     # Calculate slice thickness
-    #loc0, loc1 = loc_list[:2]
-    #inst0, inst1 = int_list[:2]
-    #thickness = abs((loc1-loc0) / (inst1-inst0))
     loc_difference_array = np.abs(np.append(loc_list, 0) - np.insert(loc_list, 0, 0))[1:-1]
     int_difference_array = (np.append(int_list, 0) - np.insert(int_list, 0, 0))[1:-1]
     thicknesses = loc_difference_array / int_difference_array
-    print(np.round(thicknesses,3))
     thicknesses = sorted(list(set(np.round(thicknesses, 3))))
 
     if len(thicknesses) == 1:
