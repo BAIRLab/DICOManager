@@ -15,7 +15,7 @@ from skimage import measure as skm
 from datetime import datetime
 
 
-def prepare_coordinate_mapping(ct_hdr):
+def prepare_coordinate_mapping(ct_hdr: pydicom.dataset) -> np.ndarray:
     """
     Function
     ----------
@@ -62,7 +62,7 @@ def prepare_coordinate_mapping(ct_hdr):
     return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
 
-def wire_mask(arr, invert=False):
+def wire_mask(arr: np.ndarray, invert: bool = False) -> np.ndarray:
     """
     Function
     ----------
@@ -110,7 +110,7 @@ def wire_mask(arr, invert=False):
     return binary_erosion(arr) ^ arr
 
 
-def sort_points(points, method='kd'):
+def sort_points(points: np.ndarray, method: str = 'kd') -> np.ndarray:
     """
     Function
     ----------
@@ -142,7 +142,8 @@ def sort_points(points, method='kd'):
         raise TypeError('The method must be one of kd, cw, ccw')
 
 
-def sort_points_ccw(points, counterclockwise=True):
+def sort_points_ccw(points: np.ndarray,
+                    counterclockwise: bool = True) -> np.ndarray:
     """
     Function
     ----------
@@ -182,7 +183,7 @@ def sort_points_ccw(points, counterclockwise=True):
     return np.array(sorted(points, key=_angle))
 
 
-def kd_sort_nearest(points):
+def kd_sort_nearest(points: np.ndarray) -> np.ndarray:
     """
     Function
     ----------
@@ -232,7 +233,7 @@ def kd_sort_nearest(points):
     return np.array(sorted_points)
 
 
-def get_first_index(points):
+def get_first_index(points: np.ndarray) -> int:
     """
     Function
     ----------
@@ -266,7 +267,7 @@ def get_first_index(points):
     return np.argmin(angles)
 
 
-def find_nearest(inner, outer):
+def find_nearest(inner: np.ndarray, outer: np.ndarray) -> ([tuple, tuple], int):
     """
     Function
     ----------
@@ -306,7 +307,7 @@ def find_nearest(inner, outer):
     return (point_pair, index_pair)
 
 
-def merge_sorted_points(inner, outer):
+def merge_sorted_points(inner: np.ndarray, outer: np.ndarray) -> np.ndarray:
     """
     Function
     ----------
@@ -358,7 +359,7 @@ def merge_sorted_points(inner, outer):
     return outer
 
 
-def calc_offset(previous, index):
+def calc_offset(previous: tuple, index: int) -> int:
     """
     Function
     ----------
@@ -394,7 +395,7 @@ def calc_offset(previous, index):
     return offset
 
 
-def split_by_holes(poly):
+def split_by_holes(poly: np.ndarray) -> tuple:
     """
     Function
     ----------
@@ -417,7 +418,7 @@ def split_by_holes(poly):
     return None, poly
 
 
-def all_points_merged(poly, merged):
+def all_points_merged(poly: np.ndarray, merged: np.ndarray) -> bool:
     """
     Function
     ----------
@@ -447,7 +448,9 @@ def all_points_merged(poly, merged):
     return total_pts.shape[0] <= merged.shape[0]
 
 
-def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
+def poly_to_coords_2D(poly: np.ndarray, ctcoord: np.ndarray,
+                      flatten: bool = True,
+                      invert: bool = False) -> np.ndarray:
     """
     Function
     ----------
@@ -506,7 +509,7 @@ def poly_to_coords_2D(poly, ctcoord, flatten=True, invert=False):
     return points_sorted
 
 
-def separate_polygons(z_slice, mim=True):
+def separate_polygons(z_slice: np.ndarray, mim: bool = True) -> [np.ndarray]:
     """
     Function
     ----------
@@ -544,7 +547,7 @@ def separate_polygons(z_slice, mim=True):
     return each_polygon
 
 
-def img_dims(dicom_list):
+def img_dims(dicom_list: list) -> (float, int, float, float, bool):
     """
     Function
     ----------
@@ -618,16 +621,16 @@ def img_dims(dicom_list):
         int_list += list(range(1, diff + 1))
         # Adds the new locations to correspond with instances
         if flip:
-            loc_list += list(loc0 - np.arange(1, diff + 1) * min_thickness)
+            loc_list += list(loc_list[0] - np.arange(1, diff + 1) * min_thickness)
         else:
-            loc_list += list(loc0 + np.arange(1, diff + 1) * min_thickness)
+            loc_list += list(loc_list[0] + np.arange(1, diff + 1) * min_thickness)
         # Resorts the list with the new points
         int_list, loc_list = map(np.array, zip(*sorted(zip(int_list, loc_list))))
 
     return min_thickness, int(n_slices), loc_list.min(), loc_list.max(), flip, mult_thick
 
 
-def nearest(array, value):
+def nearest(array: np.ndarray, value: float) -> int:
     """
     Function
     ----------
@@ -645,7 +648,7 @@ def nearest(array, value):
     return np.abs(np.asarray(array) - value).argmin()
 
 
-def key_list_creator(key_list, *args):
+def key_list_creator(key_list: list, *args) -> object:
     """
     Function
     ----------
@@ -671,7 +674,8 @@ def key_list_creator(key_list, *args):
     return new_key
 
 
-def slice_thickness(dcm0, dcm1):
+def slice_thickness(dcm0: pydicom.dataset.FileDataset,
+                    dcm1: pydicom.dataset.FileDataset) -> float:
     """
     Function
     ----------
@@ -701,7 +705,7 @@ def slice_thickness(dcm0, dcm1):
     return abs((loc1-loc0) / (inst1-inst0))
 
 
-def generate_instance_uid():
+def generate_instance_uid() -> str:
     """
     Function
     ----------
@@ -741,7 +745,8 @@ def generate_instance_uid():
     return '2.16.840.1.' + '.'.join(terms)
 
 
-def d_max_coords(patient_path, dose_volume, printing=True):
+def d_max_coords(patient_path: str, dose_volume: np.ndarray,
+                 printing: bool = True) -> (float, float, float, float):
     """
     Function
     ----------
@@ -840,7 +845,8 @@ def d_max_coords(patient_path, dose_volume, printing=True):
     return (volume_max, ct_max_mm, dose_max_mm, ct_voxel_size)
 
 
-def d_max_check(path, volume, printing):
+def d_max_check(path: str, volume: np.ndarray,
+                printing: bool = True) -> np.ndarray:
     """
     Function
     ----------
@@ -875,7 +881,7 @@ def d_max_check(path, volume, printing):
     return np.array(offset, dtype=int)
 
 
-def find_series_slices(path, find_associated=False):
+def find_series_slices(path: str, find_associated: bool = False) -> list:
     """
     Function
     ----------
@@ -973,7 +979,8 @@ def find_series_slices(path, find_associated=False):
     return volume_slice_list
 
 
-def show_volume(volume_array, rows=2, cols=6, figsize=None):
+def show_volume(volume_array: np.ndarray, rows: int = 2,
+                cols: int = 6, figsize: int = None):
     """
     Function
     ----------
@@ -1005,8 +1012,9 @@ def show_volume(volume_array, rows=2, cols=6, figsize=None):
     plt.show
 
 
-def show_contours(volume_arr, contour_arr, rows=2, cols=6,
-                  orientation='axial', aspect=3, figsize=None):
+def show_contours(volume_arr: np.ndarray, contour_arr: np.ndarray,
+                  rows: int = 2, cols: int = 6, orientation: str = 'axial',
+                  aspect: int = 3, figsize: int = None):
     """
     Function
     ----------
@@ -1079,7 +1087,16 @@ def show_contours(volume_arr, contour_arr, rows=2, cols=6,
 
     plt.show()
 
-def struct_sort(struct_path):
+
+def struct_sort(struct_path: str) -> str:
+    """[structure sorting]
+
+    Args:
+        struct_path (str): [path to the structure to be named]
+
+    Returns:
+        [str]: [sorting time timestamp]
+    """
     struct_dcm = pydicom.dcmread(str(struct_path))
 
     try:
@@ -1091,16 +1108,24 @@ def struct_sort(struct_path):
     except AttributeError:
         date = '19700101'
         time = '000000'
-    
+
     try:
-        sort_time = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f').timestamp()
+        sort_time = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f')
     except ValueError:
-        sort_time = datetime.strptime((date+time).split('.')[0], '%Y%m%d%H%M%S').timestamp()
+        sort_time = datetime.strptime((date+time).split('.')[0], '%Y%m%d%H%M%S')
 
-    return sort_time
-    
-def multi_slice_resample(volume_array):
+    return sort_time.timestamp()
 
+
+def multi_slice_resample(volume_array: np.ndarray) -> np.ndarray:
+    """[linearly interpolates missing numpy array slices]
+
+    Args:
+        volume_array (np.ndarray): [volume array with missing slices]
+
+    Returns:
+        [np.ndarray]: [interpolated numpy array]
+    """
     slice_sum = np.sum(volume_array, axis=(0,1))
     missing_ind = np.asarray(slice_sum == 0).nonzero()[0]
     filled_ind = np.nonzero(slice_sum)[0]
@@ -1108,13 +1133,13 @@ def multi_slice_resample(volume_array):
     n_slices = volume_array.shape[-1]
 
     for i in missing_ind:
-        if i != 0 or i != (n_slices - 1):
+        if i != 0 and i != (n_slices - 1):
             inds = abs(filled_ind - i).argsort()
             nearest_filled_ind = filled_ind[inds]
             ind0, ind1 = sorted(nearest_filled_ind[:2])
             #Linear interpolation between slices
-            volume_array[...,i] = (volume_array[...,ind0] * (ind1 - i)\
-                                + volume_array[...,ind1] * (i - ind0))\
-                                / (ind1-ind0)
-    
+            slice0 = volume_array[..., ind0] * (ind1 - i)
+            slice1 = volume_array[..., ind1] * (i - ind0)
+            volume_array[..., i] = (slice0 + slice1) / (ind1 - ind0)
+
     return volume_array

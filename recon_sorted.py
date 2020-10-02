@@ -151,14 +151,14 @@ class recon_project:
             dose = reconstruction.dose(path)
 
         pool_dict = {'MR': mr,
-                    'NM': nm,
-                    'CT': ct,
-                    'PET': pet,
-                    'RTSTRUCT': rts,
-                    'RTDOSE': dose,
-                    'ASPECT': aspect
-                    'RT_FOUND': rts_found
-                    }
+                     'NM': nm,
+                     'CT': ct,
+                     'PET': pet,
+                     'RTSTRUCT': rts,
+                     'RTDOSE': dose,
+                     'ASPECT': aspect,
+                     'RT_FOUND': rts_found
+                     }
 
         if not os.path.exists(self.dest_dir):
             os.makedirs(self.dest_dir)

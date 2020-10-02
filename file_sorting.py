@@ -17,11 +17,24 @@ __status__ = "Research"
 
 
 class sorting:
-    def __init__(self, cohort_list, project_dir):
+    """[class for parallelized mapping to sort DICOMs]
+    """
+    def __init__(self, cohort_list: list, project_dir: str):
+        """[initialize sorting class instance]
+
+        Args:
+            cohort_list ([str OR int]): [list of mrn values]
+            project_dir (str): [path to the working directory]
+        """
         self.cohort_list = cohort_list
         self.options = options
 
-    def sort_file(self, dicom_file):
+    def sort_file(self, dicom_file: str):
+        """[sorts and individual file]
+
+        Args:
+            dicom_file (str): [a path to a DICOM file]
+        """
         try:
             ds = pydicom.dcmread(dicom_file, stop_before_pixels=True)
         except (pydicom.errors.InvalidDicomError, struct.error):
@@ -34,20 +47,16 @@ class sorting:
                            ds=ds)
 
 
-def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
-    """
-    Function
-    ---------
-    Write the dicom_file into a folder at file_path
+def _write_to_path(dicom_file: str, dest_dir: str,
+                   patientID: [str, int], subfolder: bool = False):
+    """[write a DICOM file to a path location]
 
-    Parameters
-    ---------
-    dicom_file, dest_dir : str
-        Strings for the current location of the DICOM and its new location
-    patientID : int
-        The patient's Medical Record Number (MRN) identifier
-    subfolder : bool (Default = False)
-        A subfolder to be placed within the file_path
+    Args:
+        dicom_file (str): [path to original DICOM location]
+        dest_dir (str, int): [path to DICOM directory destination]
+        patientID (str): [string of the mrn value]
+        subfolder (bool, optional): [subfolder name to nest within
+                                     mrn folder]. Defaults to False.
     """
     path_list = [dest_dir, patientID]
 
@@ -71,22 +80,16 @@ def _write_to_path(dicom_file, dest_dir, patientID, subfolder=False):
         shutil.copy(dicom_file, destination)
 
 
-def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
-    """
-    Function
-    ----------
-    To sort the provided files into their correct paths
+def _specific_sort(dicom_file: str, dest_dir: str,
+                   cohort_list: list, ds: pydicom.dataset.FileDataset):
+    """[given a DICOM, sorts into the proper file structure]
 
-    Parameters
-    ---------
-    dicom_file, dest_dir : str
-        Strings for the current location of the DICOM and its new location
-    cohort_list : list
-        A list of MRN's corresponding to files which should be moved
-    ds : pydicom.dataset.FileDataset
-        The pydicom dataset header for the DICOM file to be moved
+    Args:
+        dicom_file (str): []
+        dest_dir (str): [description]
+        cohort_list (list): [description]
+        ds (pydicom.dataset.FileDataset): [description]
     """
-
     write_params = {"dest_dir": dest_dir,
                     "patientID": ds.PatientID,
                     "dicom_file": dicom_file,
@@ -106,7 +109,16 @@ def _specific_sort(dicom_file, dest_dir, cohort_list, ds):
         pass
 
 
-def match_id(ID, cohort_list):
+def match_id(ID: [str, int], cohort_list: list) -> bool:
+    """[returns boolean if ID matches cohort_list]
+
+    Args:
+        ID (str OR int): [mrn string or int value]
+        cohort_list ([str OR int]): [list of mrns in cohort]
+
+    Returns:
+        bool: [representing if ID is in cohort]
+    """
     if ID in cohort_list:
         return True
     try:

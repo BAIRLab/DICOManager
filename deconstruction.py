@@ -475,7 +475,7 @@ class RTStruct:
         Not all the DICOM header is necessary down-stream. Memory footprint
             could be reduced by removing private tags and other info
         """
-        ct_thick, _, ct_loc0, _, _ = utils.img_dims(self.ct_series)
+        ct_thick, _, ct_loc0, _, _, _ = utils.img_dims(self.ct_series)
         for ct in self.ct_series:
             ct_hdr = pydicom.dcmread(ct, stop_before_pixels=True)
             parsed_uids = ParseSOPUID(ct_hdr, ct_thick, ct_loc0)
@@ -608,6 +608,7 @@ def from_rt(ct_series, source_rt, masks, roi_names=None,
         new_rt.update_header()
     if empty:
         new_rt.empty()
+
     new_rt.append_masks(masks, roi_names)
     return new_rt.to_pydicom()
 
