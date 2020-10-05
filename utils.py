@@ -8,8 +8,6 @@ import uuid
 import scipy
 import matplotlib.pyplot as plt
 from pathlib import Path
-from scipy.ndimage.morphology import binary_erosion
-from scipy.ndimage.morphology import binary_dilation
 from scipy import spatial
 from skimage import measure as skm
 from datetime import datetime
@@ -60,211 +58,6 @@ def prepare_coordinate_mapping(ct_hdr: pydicom.dataset) -> np.ndarray:
     C = np.array([i, j, 0, 1])
 
     return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
-
-
-def wire_mask(arr: np.ndarray, invert: bool = False) -> np.ndarray:
-    """
-    Function
-    ----------
-    Given an 2D boolean array, returns those pixels on the surface
-
-    Parameters
-    ----------
-    arr : numpy.ndarray
-        A 2D array corresponding to the segmentation mask
-    invert : boolean (Default = False)
-        Designates if the polygon is a subtractive structure from
-            a larger polygon, warranting XOR dilation instead
-        True when the structure is a hole / subtractive
-        False when the array is a filled polygon
-
-    Returns
-    ----------
-    numpy.ndarray
-        A 2D boolean array, with points representing the contour surface
-
-    Notes
-    ----------
-    The resultant surface is not the minimum points to fully enclose the
-        surface, like the standard DICOM RTSTRUCT uses. Instead this gives
-        all points along the surface. Should construct the same, but this
-        calculation is faster than using Shapely.
-    Could also use skimage.measure.approximate_polygon(arr, 0.001)
-        To compute an approximate polygon. Better yet, do it after doing
-        the binary erosion technique, and compare that to the speed of
-        using shapely to find the surface
-    The most accurate way would be with ITK using:
-        itk.GetImageFromArray
-        itk.ContourExtractor2DImageFilter
-    Another option is to use VTK:
-        https://pyscience.wordpress.com/2014/09/11/surface-extraction-creating-a-mesh-from-pixel-data-using-python-and-vtk/
-    Either way, the reconstruction polygon fill is first priority, and then
-        this deconstruction minium polygon surface computation.
-    """
-    assert arr.ndim == 2, 'The input boolean mask is not 2D'
-
-    if arr.dtype != 'bool':
-        arr = np.array(arr, dtype='bool')
-    if invert:
-        return binary_dilation(arr) ^ arr
-    return binary_erosion(arr) ^ arr
-
-
-def sort_points(points: np.ndarray, method: str = 'kd') -> np.ndarray:
-    """
-    Function
-    ----------
-    Given a set of points, the points are sorted by the
-        specified method and returned
-
-    Parameters
-    ----------
-    points : numpy.ndarray
-        A Nx3 numpy array of (x, y, z) coordinates
-    method : str (Default = 'kd')
-        The method to use for sorting. Options are:
-            'kd' : Sort by KDTrees, convex robust
-            'ccw' : Sort counterclockwise, not convex robust
-            'cw' : Sort clockwise, not convex robust
-
-    Returns
-    ----------
-    numpy.ndarray
-        The points in the provided array, sorted as specified
-    """
-    if method == 'kd':
-        return kd_sort_nearest(points)
-    elif method == 'ccw':
-        return sort_points_ccw(points)
-    elif method == 'cw':
-        return sort_points_ccw(points, counterclockwise=False)
-    else:
-        raise TypeError('The method must be one of kd, cw, ccw')
-
-
-def sort_points_ccw(points: np.ndarray,
-                    counterclockwise: bool = True) -> np.ndarray:
-    """
-    Function
-    ----------
-    Computes the counterclockwise angle between CoM to point and y-axis
-
-    Parameters
-    ----------
-    points : numpy.ndarray
-        A Nx3 numpy array of (x, y, z) coordinates
-
-    Returns
-    ----------
-    numpy.ndarray
-        The points array sorted in a counterclockwise direction
-
-    Notes
-    ----------
-    Sorting (counter)clockwise only works for concave structures, for
-        convex structures, use kd_sort_nearest
-    """
-    CoM = np.mean(points, axis=0)
-
-    def _angle(v1_og):
-        v1 = v1_og - CoM
-        v2 = np.array([0, -CoM[1], CoM[2]])
-        v1_u = v1 / np.linalg.norm(v1)
-        v2_u = v2 / np.linalg.norm(v2)
-        if counterclockwise:
-            if v1_og[0] > CoM[0]:
-                return np.arccos(np.dot(v1_u, v2_u))
-            return 100 - np.arccos(np.dot(v1_u, v2_u))
-        # Clockwise sorting
-        if v1_og[0] < CoM[0]:
-            return -np.arccos(np.dot(v1_u, v2_u))
-        return 100 + np.arccos(np.dot(v1_u, v2_u))
-
-    return np.array(sorted(points, key=_angle))
-
-
-def kd_sort_nearest(points: np.ndarray) -> np.ndarray:
-    """
-    Function
-    ----------
-    Given the nonzero surface points of the mask, as sorted
-        array of points is returned
-
-    Parameters
-    ----------
-    points : numpy.ndarray
-        A Nx3 numpy array of (x, y, z) coordinates
-
-    Returns
-    ----------
-    sorted_points : numpy.ndarray
-        A sorted array of dimensions equal to points
-
-    Notes
-    ----------
-    This method uses KDTrees which is approximately 5x slower than
-        clockwise sorting, but robust to convexities
-    """
-    tracker = []
-    sorted_points = []
-
-    first_index = get_first_index(points)
-    current = points[first_index]
-
-    sorted_points.append(current)
-    tracker.append(first_index)
-
-    tree = spatial.cKDTree(points, balanced_tree=True)
-    n_search = 2
-    while len(tracker) != points.shape[0]:
-        _, nearest = tree.query(current, k=n_search)
-
-        # Expand search width if needed
-        if set(nearest).issubset(set(tracker)):
-            n_search += 2
-            continue
-
-        for i in nearest:
-            if i not in tracker:
-                current = points[i]
-                sorted_points.append(current)
-                tracker.append(i)
-                break
-    return np.array(sorted_points)
-
-
-def get_first_index(points: np.ndarray) -> int:
-    """
-    Function
-    ----------
-    Returns the first index to start the kd sorting
-
-    Parameters
-    ----------
-    points : numpy.ndarray
-        A Nx3 numpy array of (x, y, z) coordinates
-
-    Returns
-    ----------
-    index : int
-        The index of the lowest point along the central line
-
-    Notes
-    ----------
-    Semi-redundant with rotational sorting, but this runs
-        quicker than first clockwise sorting all points
-    """
-    if points.dtype != 'float64':
-        points = np.array(points, dtype=np.float)
-
-    CoM = np.mean(points, axis=0)
-    v1 = points - CoM
-    v2 = np.array([0, -CoM[1], CoM[2]])
-    v1_u = v1 / np.linalg.norm(v1)
-    v2_u = v2 / np.linalg.norm(v2)
-
-    angles = np.arccos(np.dot(v1_u, v2_u))
-    return np.argmin(angles)
 
 
 def find_nearest(inner: np.ndarray, outer: np.ndarray) -> ([tuple, tuple], int):
@@ -418,36 +211,6 @@ def split_by_holes(poly: np.ndarray) -> tuple:
     return None, poly
 
 
-def all_points_merged(poly: np.ndarray, merged: np.ndarray) -> bool:
-    """
-    Function
-    ----------
-    Determines if all points have been sorted and merged
-
-    Parameters
-    ----------
-    poly : numpy.ndarray
-        A 2D boolean mask array corresponding to the segmentation mask
-    merged : numpy.ndarray
-        An array of coordinates, in dimensions Nx3
-
-    Returns
-    ----------
-    bool
-        True if the number of coordinates in merged >= poly
-        False if the number of coordinates in merged < poly
-
-    Notes
-    ----------
-    Because we append to merged for each inner, when larger we have iterated
-        through all the points, unless the holes constitute a single pixel,
-        in which they are likely undesired anyways
-    """
-    mask = wire_mask(poly)
-    total_pts = np.rollaxis(np.transpose(mask.nonzero()), 0, 2)
-    return total_pts.shape[0] <= merged.shape[0]
-
-
 def poly_to_coords_2D(poly: np.ndarray, ctcoord: np.ndarray,
                       flatten: bool = True,
                       invert: bool = False,
@@ -485,34 +248,19 @@ def poly_to_coords_2D(poly: np.ndarray, ctcoord: np.ndarray,
         done in the case where a nested hole contains a polygon and
         the edge detection must alternate between erosion and dilation
     """
-    if mim:
-        inner, outer = split_by_holes(poly)
-        # inner=None if polygon has no holes
-        if inner is not None:
-            inner_pts = poly_to_coords_2D(inner, ctcoord, flatten=False, invert=not invert)
-            outer_pts = poly_to_coords_2D(outer, ctcoord, flatten=False, invert=invert)
-            merged = merge_sorted_points(inner_pts, outer_pts)
-            if all_points_merged(poly, merged) and not invert:
-                return merged.flatten()
-            return merged
-
-        # Check if there are multiple polygons
-        polygons, n_polygons = skm.label(poly, connectivity=2, return_num=True)
-        if n_polygons > 1:
-            i_polys = [polygons == n for n in range(1, n_polygons + 1)]  # 0=background
-            return [poly_to_coords_2D(x, ctcoord, flatten=False, invert=True) for x in i_polys]
-
-        # Convert poly to coords and sort, if no holes or multi-polygons
-        mask = wire_mask(poly, invert=invert)
-        points = np.rollaxis(ctcoord[tuple(mask.nonzero())+np.index_exp[:]].T, 0, 2)
-        points_sorted = sort_points(points)
+    # implementing this code and its modifications would save about 300 lines of code
+    point_list = skm.find_contours(poly, 1-1e-7)
+    if len(point_list) == 1:  # Already merged, single polygon
+        merged = point_list[0]
     else:
-        points = np.array(np.round(skm.find_contours(poly, 1-1e-7)[0]), dtype='int')
-        indices = (points[:, 0], points[:, 1])
-        points_sorted = np.rollaxis(ctcoord[indices + np.index_exp[:]].T, 0, 2)
+        # passed as inner polygons, outer polygon
+        merged = merge_sorted_points(point_list[1:], point_list[0])
+    merged = np.array(np.round(merged), dtype='int')
+    indices = (merged[:, 0], merged[:, 1])
+    coord_points = np.rollaxis(ctcoord[indices + np.index_exp[:]].T, 0, 2)
     if flatten:
-        return points_sorted.flatten()
-    return points_sorted
+        return coord_points.flatten()
+    return coord_points
 
 
 def separate_polygons(z_slice: np.ndarray, mim: bool = True) -> [np.ndarray]:
