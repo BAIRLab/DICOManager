@@ -450,7 +450,8 @@ def all_points_merged(poly: np.ndarray, merged: np.ndarray) -> bool:
 
 def poly_to_coords_2D(poly: np.ndarray, ctcoord: np.ndarray,
                       flatten: bool = True,
-                      invert: bool = False) -> np.ndarray:
+                      invert: bool = False,
+                      mim: bool = True) -> np.ndarray:
     """
     Function
     ----------
@@ -484,26 +485,31 @@ def poly_to_coords_2D(poly: np.ndarray, ctcoord: np.ndarray,
         done in the case where a nested hole contains a polygon and
         the edge detection must alternate between erosion and dilation
     """
-    inner, outer = split_by_holes(poly)
-    # inner=None if polygon has no holes
-    if inner is not None:
-        inner_pts = poly_to_coords_2D(inner, ctcoord, flatten=False, invert=not invert)
-        outer_pts = poly_to_coords_2D(outer, ctcoord, flatten=False, invert=invert)
-        merged = merge_sorted_points(inner_pts, outer_pts)
-        if all_points_merged(poly, merged) and not invert:
-            return merged.flatten()
-        return merged
+    if mim:
+        inner, outer = split_by_holes(poly)
+        # inner=None if polygon has no holes
+        if inner is not None:
+            inner_pts = poly_to_coords_2D(inner, ctcoord, flatten=False, invert=not invert)
+            outer_pts = poly_to_coords_2D(outer, ctcoord, flatten=False, invert=invert)
+            merged = merge_sorted_points(inner_pts, outer_pts)
+            if all_points_merged(poly, merged) and not invert:
+                return merged.flatten()
+            return merged
 
-    # Check if there are multiple polygons
-    polygons, n_polygons = skm.label(poly, connectivity=2, return_num=True)
-    if n_polygons > 1:
-        i_polys = [polygons == n for n in range(1, n_polygons + 1)]  # 0=background
-        return [poly_to_coords_2D(x, ctcoord, flatten=False, invert=True) for x in i_polys]
+        # Check if there are multiple polygons
+        polygons, n_polygons = skm.label(poly, connectivity=2, return_num=True)
+        if n_polygons > 1:
+            i_polys = [polygons == n for n in range(1, n_polygons + 1)]  # 0=background
+            return [poly_to_coords_2D(x, ctcoord, flatten=False, invert=True) for x in i_polys]
 
-    # Convert poly to coords and sort, if no holes or multi-polygons
-    mask = wire_mask(poly, invert=invert)
-    points = np.rollaxis(ctcoord[tuple(mask.nonzero())+np.index_exp[:]].T, 0, 2)
-    points_sorted = sort_points(points)
+        # Convert poly to coords and sort, if no holes or multi-polygons
+        mask = wire_mask(poly, invert=invert)
+        points = np.rollaxis(ctcoord[tuple(mask.nonzero())+np.index_exp[:]].T, 0, 2)
+        points_sorted = sort_points(points)
+    else:
+        points = np.array(np.round(skm.find_contours(poly, 1-1e-7)[0]), dtype='int')
+        indices = (points[:, 0], points[:, 1])
+        points_sorted = np.rollaxis(ctcoord[indices + np.index_exp[:]].T, 0, 2)
     if flatten:
         return points_sorted.flatten()
     return points_sorted
