@@ -148,7 +148,7 @@ class FileUtils(ABC):
             item_iter = self.data.items()
             length = len(item_iter)
             for index, (key, value) in enumerate(item_iter):
-                pad = '| ' + '  ' * self._hierarchy
+                pad = '| ' + '  ' * self._depth
                 if (index + 1) < length:
                     pad += '├─'
                 else:
@@ -159,7 +159,7 @@ class FileUtils(ABC):
         self._tot_string += str(name) + ': ' + self._identifer + '\n'
 
         for index, (key, value) in enumerate(self.data.items()):
-            pad = '| ' * max(0, self._hierarchy - 1)
+            pad = '| ' * max(0, self._depth - 1)
             if index < (len(self.data) - 1):
                 pad += '├─'
             else:
@@ -258,7 +258,7 @@ class FileUtils(ABC):
                       '_identifer': key}
             if self.data is None:
                 self.data = {key: value}
-            if self._hierarchy < 4:
+            if self._depth < 4:
                 self.data[key] = self._child_type(**params)
             else:
                 self.data[key] = value
@@ -274,6 +274,7 @@ class FileUtils(ABC):
                 filtered_files.append(f)
         return filtered_files
 
-    @abstractmethod
     def group_id(self):
-        pass
+        if hasattr(self, 'identifier'):
+            return self.identifier
+        return None

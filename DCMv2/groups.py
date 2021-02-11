@@ -62,11 +62,6 @@ class NewSeries(FileUtils):
     def __post_init__(self):
         self.digest_data()
 
-    def group_id(self):
-        if hasattr(self, 'SeriesUID'):
-            return self.SeriesUID
-        return None
-
     def frame_of_ref_subset(self, frameUID):
         FoRSeries = NewSeries()
 
@@ -86,10 +81,9 @@ class Series(FileUtils, BasicData):
     dose: dict = None
     recon: object = Reconstruction()
     decon: object = Deconstruction()
-    #sorter: object = Sort.by_series()
     _organize_by: str = 'Modality'
     _child_type: object = DicomGroup
-    _hierarchy: int = 4
+    _depth: int = 4
 
     def __post_init__(self):
         self.digest_data()
@@ -108,17 +102,13 @@ class Series(FileUtils, BasicData):
         for mod in self:
             print(mod, ' : ', len(self[mod]))
 
-    def group_id(self):
-        if hasattr(self, 'SeriesUID'):
-            return self.SeriesUID
-
     def frame_of_ref_subset(self, frameUID):
         NewSeries = Series()
 
         for mod in self:
-            for dlist in mod:
-                if dlist.FrameOfRef == frameUID:
-                    NewSeries.append(dlist)
+            for group in mod:
+                if group.FrameOfRef == frameUID:
+                    NewSeries.append(group)
 
         return NewSeries
 
@@ -127,15 +117,10 @@ class Series(FileUtils, BasicData):
 class Study(FileUtils, BasicData):
     _organize_by: str = 'SeriesUID'
     _child_type: object = Series
-    _hierarchy: int = 3
+    _depth: int = 3
 
     def __post_init__(self):
         self.digest_data()
-
-    def group_id(self):
-        if hasattr(self, 'StudyUID'):
-            return self.StudyUID
-        return None
 
 
 @dataclass
@@ -144,16 +129,10 @@ class Patient(FileUtils, BasicData):
     # Representing a patient with N study groups
     _organize_by: str = 'StudyUID'
     _child_type: object = Study
-    _hierarchy: int = 2
+    _depth: int = 2
 
     def __post_init__(self):
         self.digest_data()
-
-    def group_id(self):
-        if hasattr(self, 'PatientID'):
-            return self.PatientID
-        return None
-
 
 
 @dataclass
@@ -161,7 +140,7 @@ class Cohort(FileUtils, BasicData):
     name: str = None
     _organize_by: str = 'PatientID'  # specifies how this group is sorted and filtered
     _child_type: object = Patient
-    _hierarchy: int = 1
+    _depth: int = 1
 
     def __post_init__(self):
         datetime_str = datetime.now().strftime('%H%M%S')
@@ -171,8 +150,3 @@ class Cohort(FileUtils, BasicData):
             self._identifer = self.name
 
         self.digest_data()
-
-    def group_id(self):
-        if hasattr(self, 'identifier'):
-            return self.identifier
-        return None
