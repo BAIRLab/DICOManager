@@ -115,15 +115,7 @@ class Cohort(abilities):
 
 
 
-l3 = Cohort(4, np.arange(7))
-print(l3.test)
-l3.test = 5
-print(l3.test)
-l3.immutable = False
-l3.test = 6
-print(l3.test)
-l3._test = 5
-print(l3.test)
+l3 = Cohort(np.arange(7), 4)
 print(l3)
 repr(l3)
 new = l3.split()

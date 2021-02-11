@@ -1,10 +1,22 @@
 import pydicom
 from glob import glob
 from copy import deepcopy
-from proessing import Reconstruction, Deconstruction
+from processing import Reconstruction, Deconstruction
 from dataclasses import dataclass, fields, field
 from fileutils import FileUtils, DicomGroup, DicomFile
+from datetime import datetime
 
+
+@dataclass
+class BasicData:
+    path: str = None
+    all_files: list = None
+    name: str = None
+    data: dict = None
+    filter_list: list = None
+    _identifer: str = None
+    _files: DicomGroup = None
+    _tot_string: str = ''
 
 @dataclass
 class Modality(FileUtils):
@@ -40,7 +52,7 @@ class Modality(FileUtils):
 
 @dataclass
 class NewSeries(FileUtils):
-    data: dict = None # That is comprised of modality groups: CT0 ... CT#, MR0 ... MR#
+    data: dict = None  # That is comprised of modality groups: CT0 ... CT#, MR0 ... MR#
     files: list = None
     path: str = None
     recon: object = Reconstruction()
@@ -65,19 +77,19 @@ class NewSeries(FileUtils):
 
 
 @dataclass
-class Series(FileUtils):
+class Series(FileUtils, BasicData):
     ct: dict = None
     nm: dict = None
     mr: dict = None
     pet: dict = None
     struct: dict = None
     dose: dict = None
-    files: list = None
-    path: str = None
     recon: object = Reconstruction()
     decon: object = Deconstruction()
     #sorter: object = Sort.by_series()
-    child_type: object = DicomGroup
+    _organize_by: str = 'Modality'
+    _child_type: object = DicomGroup
+    _hierarchy: int = 4
 
     def __post_init__(self):
         self.digest_data()
@@ -112,16 +124,10 @@ class Series(FileUtils):
 
 
 @dataclass
-class Study(FileUtils):
-    # Representing an image study group
-    # Can only do reconstruction on this type
-    # This group can also be manually filled
-    path: str = None
-    files: list = None  # All files contained withing group
-    data: dict = None
-    organize_by: str = 'SeriesUID'
-    child_by: object = Series
-    #sorter: object = Sort.by_study
+class Study(FileUtils, BasicData):
+    _organize_by: str = 'SeriesUID'
+    _child_type: object = Series
+    _hierarchy: int = 3
 
     def __post_init__(self):
         self.digest_data()
@@ -133,16 +139,12 @@ class Study(FileUtils):
 
 
 @dataclass
-class Patient(FileUtils):
+class Patient(FileUtils, BasicData):
     # Frame of References associated with a data group
     # Representing a patient with N study groups
-    all_files: list = None  # All files contained within group
-    path: str = None  # A path to the directory
-    PatientID: str = None
-    data: dict = None
-    organize_by: str = 'StudyUID'
-    child_type: object = Study
-    #sorter: object = Sort.by_study
+    _organize_by: str = 'StudyUID'
+    _child_type: object = Study
+    _hierarchy: int = 2
 
     def __post_init__(self):
         self.digest_data()
@@ -153,23 +155,24 @@ class Patient(FileUtils):
         return None
 
 
+
 @dataclass
-class Cohort(FileUtils):  # Alternatively 'Dataset'
-    # A data set of multiple patients
-    path: str
-    all_files: list = None
+class Cohort(FileUtils, BasicData):
     name: str = None
-    data: dict = None
-    filter_list: list = None
-    organize_by: str = 'PatientID'  # specifies how this group is sorted and filtered
-    child_type: object = Patient
-    #sorter: object = Sort.by_patient
-    #filterer: object = Filter.by_patient
+    _organize_by: str = 'PatientID'  # specifies how this group is sorted and filtered
+    _child_type: object = Patient
+    _hierarchy: int = 1
 
     def __post_init__(self):
+        datetime_str = datetime.now().strftime('%H%M%S')
+        if self.name is None:
+            self._identifer = 'Cohort_from_' + datetime_str
+        else:
+            self._identifer = self.name
+
         self.digest_data()
 
     def group_id(self):
-        if hasattr(self, 'name'):
-            return self.name
+        if hasattr(self, 'identifier'):
+            return self.identifier
         return None

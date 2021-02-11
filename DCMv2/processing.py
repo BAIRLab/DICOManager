@@ -1,8 +1,8 @@
-import opencv2 as cv2
+import cv2
 import numpy as np
 import pydicom
 from scipy.interpolate import RegularGridInterpolator as RGI
-from dataclasses import datalcass, fields
+from dataclasses import dataclass, fields
 
 
 @dataclass
@@ -14,8 +14,8 @@ class ImageVolume:
     # struct = series.reconstruct.struct()
     array: np.array
     dicom_header: pydicom.dataset.Dataset
-    dimension: [int, int, int]
-    pixelspacing: [float, float] = [None, None]
+    dimension: list = None
+    pixelspacing: list = None
     slicethickness: float = None
     interpolated: bool = False
     missing_slices: list = None
@@ -29,8 +29,8 @@ class ImageVolume:
 @dataclass
 class StructVolumeSet:
     volumes: dict  # Named as the structures and the volumes
-    dimension: [int, int, int]
-    pixelspacing: [float, float] = [None, None]
+    dimension: list = None
+    pixelspacing: list = None
     slicethickness: float = None
     interpoltaed: bool = False
     missing_slices: list = None
@@ -61,7 +61,7 @@ class Reconstruction:
     def __init__(self):
         # We want this to inherit from the Series
         self.temp = None
-        self.dims = self._vol_dims()
+        self.dims = None #self._vol_dims()
 
     def __call__(self):
         for modality in self.modalities:
