@@ -26,8 +26,6 @@ class DicomFile:
         elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
             ref_seq = ds.ReferencedFrameOfReferenceSequence
             self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
-        else:
-            print(ds.Modality)
 
         if hasattr(ds, 'Columns'):
             self.cols = ds.Columns
@@ -131,7 +129,7 @@ class DicomGroup:
 class FileUtils(ABC):
     # A class to sort files and basic group management
     def __iter__(self):
-        return self.data.values()
+        return iter(self.data.values())
 
     def __getitem__(self, name):
         return self.data[name]
@@ -274,7 +272,12 @@ class FileUtils(ABC):
                 filtered_files.append(f)
         return filtered_files
 
+    @property
     def group_id(self):
-        if hasattr(self, 'identifier'):
-            return self.identifier
+        if hasattr(self, '_identifer'):
+            return self._identifer
         return None
+
+    @property
+    def name(self):
+        return self.group_id

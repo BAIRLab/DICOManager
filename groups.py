@@ -11,7 +11,6 @@ from datetime import datetime
 class BasicData:
     path: str = None
     all_files: list = None
-    name: str = None
     data: dict = None
     filter_list: list = None
     _identifer: str = None
@@ -137,16 +136,13 @@ class Patient(FileUtils, BasicData):
 
 @dataclass
 class Cohort(FileUtils, BasicData):
-    name: str = None
     _organize_by: str = 'PatientID'  # specifies how this group is sorted and filtered
     _child_type: object = Patient
     _depth: int = 1
 
     def __post_init__(self):
         datetime_str = datetime.now().strftime('%H%M%S')
-        if self.name is None:
+        if self._identifer is None:
             self._identifer = 'Cohort_from_' + datetime_str
-        else:
-            self._identifer = self.name
 
         self.digest_data()

@@ -6,3 +6,7 @@ path = '/data/imported_data/'
 group = Cohort(path)
 
 print(group)
+
+for patient in group:
+    for study in patient:
+        print(study)
