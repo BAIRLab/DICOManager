@@ -9,21 +9,19 @@ import shutil
 from datetime import datetime
 import time
 import pandas as pd
-import warnings
-from pathlib import Path
 
 
 def _get_structs(struct_path, contours=None):
     """
     _get_structs Given a path to an RTSTRUCT DICOM, return a list of contour names.
-    
+
     Args:
         struct_path (str): path to DICOM
     """
 
     ds = pydicom.dcmread(struct_list[0])
     struct_names = []
-    
+
     for contour in ds.StructureSetROISequence:
         name = contour.ROIName.lower()
         if contours:
@@ -33,16 +31,17 @@ def _get_structs(struct_path, contours=None):
                     struct_names.append(key.lower())
         else:
             struct_names.append(name)
-    
+
     struct_names.sort()
 
     return struct_names
+
 
 def _creation_posix(filepath):
     """
     Function
     ----------
-    Returns the POSIX time for the Instance Creation of DICOM 'f' 
+    Returns the POSIX time for the Instance Creation of DICOM 'f'
 
     Parameters
     ----------
@@ -89,16 +88,16 @@ parser.add_option('-d', '--dest_dir', action='store', dest='dest_dir',
 parser.add_option('-j', '--json', action='store', dest='contour_list',
                   help='Path to json of dictionary of RTSTRUCTS for summary', default=None)
 parser.add_option('-s', '--summary', action='store_true', dest='summary',
-                  help='Prints remaining ROI Names for RTSTRUCTs in -b', default=False) 
+                  help='Prints remaining ROI Names for RTSTRUCTs in -b', default=False)
 parser.add_option('-v', '--verbose', action='store_true', dest='verbose',
                   help='Prints moved files', default=False)
-parser.add_option('-r', '--read_only', action='store_true', dest='read_only',
-                  help='Use flag to interrogate RTSTRUCTS without moving', default=False)
+parser.add_option('-m', '--move', action='store_true', dest='move',
+                  help='Use flag to interrogate RTSTRUCTS or move files', default=False)
 options, args = parser.parse_args()
 
 if not options.base_dir:
     raise NameError('A sorted DICOM directory must be specified by --base')
-if not options.read_only and not options.dest_dir:
+if options.move and not options.dest_dir:
     raise NameError('A destination directory must be specified by --dest_dir')
 
 if options.csv_file:
@@ -108,34 +107,36 @@ else:
 
 mrns.sort()
 
-if not options.read_only:
+if options.move:
     for mrn in mrns:
-        struct_list = glob(os.path.join(options.base_dir, srt(mrn), 'RTSTRUCT/*.dcm'))
+        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'))
         if len(struct_list) > 1:
-            times = [_creation_posix(struct) for struct in struct_list] 
+            times = [_creation_posix(struct) for struct in struct_list]
             _ = struct_list.pop(times.index(max(times)))
-            
+
             for struct in struct_list:
-                dest = os.path.join(options.dest_dir, str(mrn))
+                dest = os.path.join(options.dest_dir, str(mrn), 'RTSTRUCT')
                 if not os.path.exists(dest):
                     os.makedirs(dest)
                 if options.verbose:
-                    print(f'{struct} -> {dest}') 
+                    print(f'{struct} -> {dest}')
                 shutil.move(struct, dest)
 
 if options.summary or options.contour_list:
+    if not os.path.isfile(options.contour_list):
+        raise FileNotFoundError(options.contour_list)
     try:
         with open(options.contour_list, 'r') as json_file:
             contours = json.load(json_file)
         print('\n\n')
-    except:
+    except Exception:
         contours = []
         print(f'\n{_bcolors.WARNING}No .json, will print raw ROI names{_bcolors.ENDC}\n')
-    print(f'        MRN   : # :   Contour Names')
-    
+    print('        MRN   : # :   Contour Names')
+
     for mrn in mrns:
-        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'))
-        if options.read_only:
+        struct_list = glob(os.path.join(options.base_dir, str(mrn), 'RTSTRUCT/*.dcm'), recursive=True)
+        if not options.move:
             count_files = []
             for i, f in enumerate(struct_list):
                 count_files.append(_get_structs(f, contours))
