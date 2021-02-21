@@ -164,7 +164,6 @@ def struct(patient_path, wanted_contours, raises=False):
     # Find the associated volume dicoms and read them.
     # Need the associated volume for the image space information
     volume_slice_files = utils.find_series_slices(str(struct_file), find_associated=True)
-
     for vfile in volume_slice_files:
         volume_dcm = pydicom.dcmread(vfile, stop_before_pixels=True)
         try:
@@ -173,7 +172,7 @@ def struct(patient_path, wanted_contours, raises=False):
         except Exception:
             print(volume_dcm)
 
-    _, vol_n_z, _, _, _, _ = utils.img_dims(volume_slice_files)
+    _, vol_n_z, _, _, flip, _ = utils.img_dims(volume_slice_files)
     dimensions = (volume_dcm.Rows, volume_dcm.Columns, vol_n_z)
     img_origin = np.array(volume_dcm.ImagePositionPatient)
     ix, iy, iz = (*volume_dcm.PixelSpacing, volume_dcm.SliceThickness)
@@ -219,7 +218,6 @@ def struct(patient_path, wanted_contours, raises=False):
                 points = _points_to_coords(
                     contour_data, img_origin, ix, iy, iz)
                 coords = np.array([points[:, :2]], dtype=np.int32)
-
                 # scimage.draw.Polygon is incorrect, use cv2.fillPoly instead
                 poly_2D = np.zeros(dimensions[:2])
                 cv2.fillPoly(poly_2D, coords, 1)
@@ -227,6 +225,8 @@ def struct(patient_path, wanted_contours, raises=False):
 
         # Protect against any overlaps in the contour
         fill_array = fill_array % 2
+        if flip:
+            fill_array = fill_array[..., ::-1]
         masks.append(fill_array)
     # Reorders the list to match the wanted contours
     key_list = utils.key_list_creator(wanted_contours)
@@ -328,7 +328,7 @@ def ct(patient_path, path_mod=None, HU=False, raises=False):
     ct_thick, ct_n_z, ct_loc0, ct_loc1, flip, mult_thick = utils.img_dims(ct_files)
     ct_array = np.zeros((*ct_dcm.pixel_array.shape,
                          ct_n_z), dtype='float32')
-    
+
     try:
         for ct_file in ct_files:
             ds = pydicom.dcmread(ct_file)
