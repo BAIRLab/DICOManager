@@ -13,20 +13,24 @@ class BasicData:
     all_files: list = None
     data: dict = None
     filter_list: list = None
-    _identifer: str = None
+    _identifier: str = None
     _files: DicomGroup = None
     _tot_string: str = ''
 
-@immutable(['modality_type'])
+
 @dataclass
-class Modality(FileUtils):
+class Modality(FileUtils, BasicData):
     # A single Modality group would be for, say MR
     # Within that would be a dictionary with each key being
     # the frame of reference and the value being a DicomGroup
     # for that given image set
-    modality_type: str
-    data: dict = None
-    organize_by: str = 'FrameOfReference'
+    _organize_by: str = 'FrameOfReference'
+    _child_type: object = DicomGroup
+    _depth: int = 5
+
+    def __post_int__(self):
+        print('in modalities')
+        self.digest_data()
 
     def group_id(self):
         if hasattr(self, 'FrameOfReference'):
@@ -34,13 +38,12 @@ class Modality(FileUtils):
         return None
 
 @dataclass
-class NewSeries(FileUtils):
-    data: dict = None  # That is comprised of modality groups: CT0 ... CT#, MR0 ... MR#
-    files: list = None
-    path: str = None
+class NewSeries(FileUtils, BasicData):
     recon: object = Reconstruction()
     decon: object = Deconstruction()
-    child_type: object = Modality
+    _organize_by: str = 'Modality'
+    _child_type: object = Modality
+    _depth: int = 4
 
     def __post_init__(self):
         self.digest_data()
@@ -99,7 +102,7 @@ class Series(FileUtils, BasicData):
 @dataclass
 class Study(FileUtils, BasicData):
     _organize_by: str = 'SeriesUID'
-    _child_type: object = Series
+    _child_type: object = NewSeries
     _depth: int = 3
 
     def __post_init__(self):
@@ -126,7 +129,7 @@ class Cohort(FileUtils, BasicData):
 
     def __post_init__(self):
         datetime_str = datetime.now().strftime('%H%M%S')
-        if self._identifer is None:
-            self._identifer = 'Cohort_from_' + datetime_str
+        if self._identifier is None:
+            self._identifier = 'Cohort_from_' + datetime_str
 
         self.digest_data()

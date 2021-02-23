@@ -185,6 +185,11 @@ class FileUtils:
     def __iter__(self):
         return iter(self.data.values())
 
+    def __next__(self):
+        if not hasattr(self, '_iter'):
+            self._iter = iter(self.data.values())
+        return next(self._iter)
+
     def __getitem__(self, name):
         return self.data[name]
 
@@ -208,7 +213,7 @@ class FileUtils:
                 output += pad + f'{key} : {len(value)} \n'
             return output
 
-        self._tot_string += str(name) + ': ' + self._identifer + '\n'
+        self._tot_string += str(name) + ': ' + self._identifier + '\n'
 
         for index, (key, value) in enumerate(self.data.items()):
             pad = '| ' * max(0, self._depth - 1)
@@ -245,6 +250,12 @@ class FileUtils:
         new_object = self.update(object)
         self.add(new_object)
 
+    def collapse(self):
+        # Designed to collapse all data in branches below into a single path
+        # i.e. if a patient has multiple studies and each has two series, then
+        # collapse would make it all one study with one series
+        return None
+
     def pop(self, uid):
         # Remove item from data dictionary
         if uid in self.data:
@@ -254,18 +265,24 @@ class FileUtils:
     def prune(self, uid):
         _ = self.pop(uid)
 
-    def merge(self, object):
+    def merge(self, other):
         # Merge two of equal order
         message = "Merge is for same group type, append is for different"
-        assert self.__class__ is object.__class__, message
-        new_object = self.update(object)
+        assert self.__class__ is other.__class__, message
+        print(other.group_id)
+        new_object = self.update(other)
+        print(new_object.group_id)
         new_dict = {**self.data, **new_object.data}
+        print(new_dict.keys())
         self.data = new_dict
+        print(self.data.keys())
 
-    def update(self, object):
+    def update(self, other):
         # This changes the UIDs necessary to make it into the new grouping
-        new_object = deepcopy(object)
-        new_object.FileData.group_id = self.group_id
+        new_object = deepcopy(other)
+        #new_object.immutable = False
+        new_object._identifier = self.group_id
+        #new_object.immutable = True
         return new_object
 
     def digest_data(self):
@@ -307,10 +324,11 @@ class FileUtils:
 
         for key, value in fill_dict.items():
             params = {'all_files': value,
-                      '_identifer': key}
+                      '_identifier': key}
             if self.data is None:
                 self.data = {key: value}
-            if self._depth < 4:
+            if self._depth < 5:
+                print(self._child_type)
                 self.data[key] = self._child_type(**params)
             else:
                 self.data[key] = value
@@ -328,8 +346,8 @@ class FileUtils:
 
     @property
     def group_id(self):
-        if hasattr(self, '_identifer'):
-            return self._identifer
+        if hasattr(self, '_identifier'):
+            return self._identifier
         return None
 
     @property
