@@ -1,12 +1,66 @@
 import pydicom
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, is_dataclass
 from copy import deepcopy
 from glob import glob
 from abc import ABC, abstractmethod
+import warnings
 
-# If we populate this with the __eq__ parameter as SliceLocation,
-# we can use that as a means of sorting the dataset
+
+# We may want to prevent users from changing the group metadata to not represent
+# the files contained within the group. We could either constantly read the files
+# to check they haven't been tampered with, let the user shoot themselves in the
+# foot or default to having protected attributes unless otherwise specified. Thus,
+# we could restrict the functionality to higher order user facing functions
+def immutable(imm_fields):
+    """[a decorator to make specified fields 'immutable'. This prevents
+        the specified fields from being altered unless <class>.immutable=False]
+
+    Args:
+        imm_field ([list OR str]): [field name(s) to make immutable]
+
+    Raises:
+        TypeError: [if immutable_field is not str or list]
+
+    Warns:
+        UserWarning: [if attempting to mutate immutable variable]
+
+    Returns:
+        [Object]: [returns inherited class of decorated type]
+    """
+    if not isinstance(imm_fields, list):
+        if isinstance(imm_fields, str):
+            imm_fields = [imm_fields]
+        else:
+            raise TypeError('Input must be a field name or list of names')
+    assert 'immutable' not in imm_fields, 'attribute immutable is protected'
+
+    def decorator(OldClass):
+        class NewClass(OldClass):
+            """[A new class with immutable fields]
+
+            Args:
+                OldClass ([object]): [decorated type class]
+            """
+
+            def __init__(self, *args, **kwargs):
+                if not is_dataclass(OldClass):
+                    # If type is not dataclass, it must be initialized
+                    super().__init__(*args, **kwargs)
+
+                if not hasattr(self, 'immutable'):
+                    self.immutable = True
+
+            def __setattr__(self, key, value):
+                # set field if not immutable type, otherwise _set_attr
+                if key in imm_fields and hasattr(self, key) and self.immutable:
+                    message = '<class>.immutable=True, change to mutate'
+                    warnings.warn(message, UserWarning)
+                else:
+                    object.__setattr__(self, key, value)
+
+        return NewClass
+    return decorator
 
 
 @dataclass
@@ -126,7 +180,7 @@ class DicomGroup:
 
 # Make into an abstractclass because this is never instantiated
 # Instead, this is generally inherited by all groups
-class FileUtils(ABC):
+class FileUtils:
     # A class to sort files and basic group management
     def __iter__(self):
         return iter(self.data.values())

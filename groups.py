@@ -3,7 +3,7 @@ from glob import glob
 from copy import deepcopy
 from processing import Reconstruction, Deconstruction
 from dataclasses import dataclass, fields, field
-from fileutils import FileUtils, DicomGroup, DicomFile
+from fileutils import FileUtils, DicomGroup, DicomFile, immutable
 from datetime import datetime
 
 
@@ -17,6 +17,7 @@ class BasicData:
     _files: DicomGroup = None
     _tot_string: str = ''
 
+@immutable(['modality_type'])
 @dataclass
 class Modality(FileUtils):
     # A single Modality group would be for, say MR
@@ -24,30 +25,13 @@ class Modality(FileUtils):
     # the frame of reference and the value being a DicomGroup
     # for that given image set
     modality_type: str
-    _modality_type: str = field(init=False)
     data: dict = None
     organize_by: str = 'FrameOfReference'
-    immutable_modality: bool = True
 
     def group_id(self):
         if hasattr(self, 'FrameOfReference'):
             return self.FrameOfReference
         return None
-
-    @property
-    def modality_type(self):
-        self._modality_type
-
-    @modality_type.setter
-    def modality_type(self, modality_type):
-        if not hasattr(self, '_modality_type'):
-            self._modality_type = modality_type
-        elif not self.immutable_modality:
-            self._modality_type = modality_type
-        else:
-            message = 'Modality.immutable_modality=True by default'
-            raise TypeError(message, UserWarning)
-
 
 @dataclass
 class NewSeries(FileUtils):
