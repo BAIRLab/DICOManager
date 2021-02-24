@@ -63,18 +63,9 @@ class Reconstruction:
         self.temp = None
         self.dims = None #self._vol_dims()
 
-    def __call__(self):
-        for modality in self.modalities:
-            name = modality.__name__
-            # see if there is an elegant way other than if statements
-
-        # For this we will reconstruct all modalities
-        # This will be multithreaded
-        return None
-
-    def _vol_dims(self, series):
+    def _vol_dims(self, frame_group):
         # For each should have this be at the group level???????????
-        ct_files = series.ct[0]
+        ct_files = frame_group.ct[0]
         z_min, z_max = ct_files.SliceRange
         n_slices = round(1 + (z_max - z_min) / ct_files.SliceThickness)
         return [n_slices, ct_files.cols, ct_files.rows]
