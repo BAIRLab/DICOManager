@@ -11,6 +11,26 @@ import warnings
 
 
 class GroupUtils(NodeMixin):
+    """[General utilities for all groups]
+
+    Args:
+        NodeMixin ([NodeMixin]): [AnyTree node mixin]
+        name (str, optional): [name of the group]. Defaults to None.
+        files (list, optional): [list of absolute paths
+            to *.dcm files]. Defaults to None.
+        parent (Node, optional): [the parent Node]. Defaults to None.
+        children (tuple, optional): [a tuple of Nodes which are the
+            children of the current Node]. Defaults to None.
+        include_series (bool, optional): [specifies if FrameOfRef points to
+            Series (True) or Modality (False)]. Defaults to False.
+
+    Methods:
+        merge (NodeMixin): merges another group into current
+        steal (NodeMixin): steals children from another group
+        append (NodeMixin): appends children to group
+        prune (str): prunes specified branch from tree
+        flatten (None): flattens tree to one child per parent
+    """
     def __init__(self, name=None, files=None, parent=None, children=None,
                  include_series=False):
         super().__init__()
@@ -21,8 +41,8 @@ class GroupUtils(NodeMixin):
         if children:
             self.children = children
 
-    def __setattr__(self, key, value):
-        object.__setattr__(self, key, value)
+    def __iter__(self):
+        return iter(self.children)
 
     def __repr__(self):
         return self.__class__.__name__
@@ -36,20 +56,24 @@ class GroupUtils(NodeMixin):
             output.append(line)
         return '\n'.join(output)
 
-    def __iter__(self):
-        return iter(self.children)
-
     def _str_sort(self, items):
         return sorted(items, key=lambda item: item.name)
 
     def _digest(self):
+        """[digests the file paths, building the tree]
+        """
         while self.files:
             f = self.files.pop()
             if f.__class__ is not DicomFile:
                 f = DicomFile(f)
             self._add_file(f)
 
-    def _add_file(self, dicomfile):
+    def _add_file(self, dicomfile: object):
+        """[adds a file to the file tree]
+
+        Args:
+            dicomfile (DicomFile): [a DicomFile object]
+        """
         key = str(dicomfile[self._organize_by])
         found = False
         for child in self.children:
@@ -61,30 +85,50 @@ class GroupUtils(NodeMixin):
                             'files': [dicomfile],
                             'parent': self,
                             'include_series': self.include_series}
-            _ = self._child_type(**child_params)
+            self._child_type(**child_params)
 
-    def merge(self, other):
-        # merges two parents
+    def merge(self, other: NodeMixin) -> None:
+        """[merges two groups]
+
+        Args:
+            other (NodeMixin): [merged into primary group]
+        """
         other.parent = self.parent
 
-    def steal(self, other):
-        # steals the children from another parent
+    def steal(self, other: NodeMixin) -> None:
+        """[steals children from one parent]
+
+        Args:
+            other (NodeMixin): [parent who loses children]
+
+        Notes:
+            Porter et al. do not condone kidnapping
+        """
         self.children += other.children
 
-    def append(self, others):
-        # appends children to another parent
+    def append(self, others: NodeMixin) -> None:
+        """[appends children onto parent]
+
+        Args:
+            others (NodeMixin): [children to be appended]
+        """
         for other in others:
             other.parent = self
 
-    def prune(self, childname):
-        # prunes branches from the tree
+    def prune(self, childname: str) -> None:
+        """[prunes branch from tree]
+
+        Args:
+            childname (str): [name of branch to prune]
+        """
         for child in self.children:
             if child.name in childname:
                 child.parent = None
 
     def flatten(self):
-        # ensures each parent has one child (except for modality)
-        # Warning: currently does not change dicom headers
+        """[flatten results in each parent having one child, except for
+            the Modality group. Flattened with specified group as root]
+        """
         if self.include_series:
             limit = 'Series'
         else:
@@ -101,7 +145,13 @@ class GroupUtils(NodeMixin):
 
 
 class Cohort(GroupUtils):
-    # For cohort and below, we need to take series as a variable
+    """[Group level for Cohort]
+
+    Args:
+        name (str): A string declaring the group name
+        include_series (bool, optional): [specifies if FrameOfRef points to
+            Series (True) or Modality (False)]. Defaults to False.
+    """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self._child_type = Patient
@@ -110,6 +160,13 @@ class Cohort(GroupUtils):
 
 
 class Patient(GroupUtils):
+    """[Group level for Patient, specified by PatientUID]
+
+    Args:
+        name (str): A string declaring the group name
+        include_series (bool, optional): [specifies if FrameOfRef points to
+            Series (True) or Modality (False)]. Defaults to False.
+    """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self._child_type = Study
@@ -118,6 +175,13 @@ class Patient(GroupUtils):
 
 
 class Study(GroupUtils):
+    """[Group level for Study, specified by StudyUID]
+
+    Args:
+        name (str): A string declaring the group name
+        include_series (bool, optional): [specifies if FrameOfRef points to
+            Series (True) or Modality (False)]. Defaults to False.
+    """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self._child_type = FrameOfRef
@@ -126,8 +190,13 @@ class Study(GroupUtils):
 
 
 class FrameOfRef(GroupUtils):
-    # A series must share a FrameOfReference, therefore we can
-    # exclude series for the default sorting
+    """[Group level for FrameOfReference, specified by FrameOfReferenceUID]
+
+    Args:
+        name (str): A string declaring the group name
+        include_series (bool, optional): [specifies if FrameOfRef points to
+            Series (True) or Modality (False)]. Defaults to False.
+    """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         if self.include_series:
@@ -140,6 +209,11 @@ class FrameOfRef(GroupUtils):
 
 
 class Series(GroupUtils):
+    """[Group level for Series, specified by SeriesUID]
+
+    Args:
+        name (str): A string declaring the group name
+    """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self._child_type = Modality
@@ -147,7 +221,16 @@ class Series(GroupUtils):
         self._digest()
 
 
-def mod_getter(modtype):
+def mod_getter(modtype: str) -> object:
+    """[decorator to yield a property getter for the
+        specified modality type]
+
+    Args:
+        modtype (str): [the specified modality type]
+
+    Returns:
+        object: [a property getter function]
+    """
     def func(self):
         modlist = []
         if modtype in self.data:
@@ -157,6 +240,19 @@ def mod_getter(modtype):
 
 
 class Modality(GroupUtils):
+    """[Group level for Modality, specified by Modality]
+
+    Args:
+        name (str): A string declaring the group name
+
+    Attributes:
+        ct: [ct files within group]
+        nm: [nm files within group]
+        mr: [mr files within group]
+        pet: [pet files within group]
+        dose: [dose files within group]
+        struct: [structf files within group]
+    """
     ct = property(mod_getter('CT'))
     nm = property(mod_getter('NM'))
     mr = property(mod_getter('MR'))
@@ -188,6 +284,11 @@ class Modality(GroupUtils):
             self.data.update({key: [dicomfile]})
 
 class DicomFile(GroupUtils):
+    """[Group level for individal Dicom files, pulls releveant header data out]
+
+    Args:
+        filename (str): absolute file path to the *.dcm file
+    """
     def __init__(self, filename, *args, **kwargs):
         super().__init__(None, *args, **kwargs)
         self.name = os.path.basename(filename)
