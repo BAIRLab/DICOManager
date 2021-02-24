@@ -10,6 +10,7 @@ import os
 from processing import Reconstruction, Deconstruction
 import warnings
 import shutil
+from datetime import datetime
 
 
 # Move to utils.py
@@ -27,31 +28,47 @@ def mod_getter(modtype: str) -> object:
         modlist = []
         if modtype in self.data:
             modlist.append(self.data[modtype])
-        return modlist
+        return sorted(modlist)
     return func
 
 
-def save_tree(tree: NodeMixin, path: str) -> None:
+def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
     """[saves copy of dicom files to specified location, ordered
         the same as the tree layout]
 
     Args:
         tree (NodeMixin): [tree to save]
         path (str): [absolute path to write the file tree]
+        prefix (str, optional): [Specifies directory prefix as
+            'group', 'date' or None]. Default to 'group'.
+
+    Notes:
+        prefix = 'date' not functional
     """
-    if path[:-1] != '/':
-        path += '/'
+    if path[:-1] == '/':
+        path = path[:-1]
+
+    prefix = prefix.lower()
 
     treeiter = LevelOrderIter(tree)
     for index, node in enumerate(treeiter):
-        subdir = '/'.join([p.name for p in node.path]) + '/'
-        os.mkdir(subdir)
+        if prefix == 'group':
+            names = [p.dirname for p in node.path]
+        elif prefix == 'date':
+            names = [p.datename for p in node.path]
+        else:
+            names = [p.name for p in node.path]
+
+        subdir = path + '/'.join(names) + '/'
+        if not os.path.isdir(subdir):
+            os.mkdir(subdir)
         if repr(node) == 'Modality':
             for key in node.data:
                 for fname in node.data[key]:
                     original = fname._filename
-                    newpath = path + subdir + fname.name
+                    newpath = subdir + fname.name
                     shutil.copy(original, newpath)
+    print(f'\nTree {tree} written to {path}')
 
 
 class GroupUtils(NodeMixin):
@@ -100,7 +117,7 @@ class GroupUtils(NodeMixin):
             output.append(line)
         return '\n'.join(output)
 
-    def _str_sort(self, items):
+    def _str_sort(self, items: list) -> list:
         return sorted(items, key=lambda item: item.name)
 
     def _digest(self):
@@ -112,7 +129,7 @@ class GroupUtils(NodeMixin):
                 f = DicomFile(f)
             self._add_file(f)
 
-    def _add_file(self, dicomfile: object):
+    def _add_file(self, dicomfile: object) -> None:
         """[adds a file to the file tree]
 
         Args:
@@ -130,6 +147,26 @@ class GroupUtils(NodeMixin):
                             'parent': self,
                             'include_series': self.include_series}
             self._child_type(**child_params)
+
+    @property
+    def dirname(self):
+        if hasattr(self, '_dirname'):
+            return self._dirname
+        return repr(self) + '_' + self.name
+
+    @dirname.setter
+    def dirname(self, name):
+        self._dirname = name
+
+    @property
+    def datename(self):
+        if hasattr(self, '_datename'):
+            return self._datename
+        return self.date + '_' + self.name
+
+    @datename.setter
+    def datename(self, name):
+        self._datename = name
 
     def merge(self, other: NodeMixin) -> None:
         """[merges two groups]
@@ -169,7 +206,7 @@ class GroupUtils(NodeMixin):
             if child.name in childname:
                 child.parent = None
 
-    def flatten(self):
+    def flatten(self) -> None:
         """[flatten results in each parent having one child, except for
             the Modality group. Flattened with specified group as root]
         """
@@ -288,6 +325,7 @@ class Modality(GroupUtils):
 
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
+        self.dirname = name
         self.data = {}
         self.recon = Reconstruction()
         self.decon = Deconstruction()
@@ -310,6 +348,45 @@ class Modality(GroupUtils):
             self.data.update({key: [dicomfile]})
 
 
+@dataclass
+class DicomDateTime:
+    ds: pydicom.Dataset
+
+    def __post_init__(self):
+        prefix = ['Study', 'Series', 'Acquisition', 'Content']
+        suffix = ['Date', 'Time']
+        attrs = [p + s for p in prefix for s in suffix]
+        for name in attrs:
+            if hasattr(self.ds, name):
+                value = getattr(self.ds, name)
+                setattr(self, name, value)
+            else:
+                setattr(self, name, 'None')
+        self.ds = None
+
+    def __setitem__(self, name, value):
+        self.__dict__[name] = value
+
+    def iso_format(self, group):
+        # ISO 8601 formatted date time string
+        if group == 'Study':
+            date, time = (self.StudyDate, self.StudyTime)
+        elif group == 'Series':
+            date, time = (self.SeriesDate, self.SeriesTime)
+        elif group == 'FrameOfRef':
+            date, time = (self.AcquisitionDate, self.AcquisitionTime)
+        else:
+            date, time = (self.ContentDate, self.ContentTime)
+
+        if date is None:
+            date = '19700101'
+        if time is None:
+            time = '000000.000000'
+
+        dateobj = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f')
+        return dateobj.isoformat()
+
+
 class DicomFile(GroupUtils):
     """[Group level for individal Dicom files, pulls releveant header data out]
 
@@ -323,29 +400,30 @@ class DicomFile(GroupUtils):
         self._digest()
 
     def _digest(self):
-        ds = pydicom.dcmread(self._filename)
-        self.PatientID = ds.PatientID
-        self.StudyUID = ds.StudyInstanceUID
-        self.SeriesUID = ds.SeriesInstanceUID
-        self.Modality = ds.Modality
-        self.InstanceUID = ds.SOPInstanceUID
+        with pydicom.dcmread(self._filename, stop_before_pixels=True) as ds:
+            self.PatientID = ds.PatientID
+            self.StudyUID = ds.StudyInstanceUID
+            self.SeriesUID = ds.SeriesInstanceUID
+            self.Modality = ds.Modality
+            self.InstanceUID = ds.SOPInstanceUID
+            self.DateTime = DicomDateTime(ds)
 
-        if hasattr(ds, 'FrameOfReferenceUID'):
-            self.FrameOfRefUID = ds.FrameOfReferenceUID
-        elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
-            ref_seq = ds.ReferencedFrameOfReferenceSequence
-            self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
-        else:
-            self.FrameOfRefUID = None
+            if hasattr(ds, 'FrameOfReferenceUID'):
+                self.FrameOfRefUID = ds.FrameOfReferenceUID
+            elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
+                ref_seq = ds.ReferencedFrameOfReferenceSequence
+                self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
+            else:
+                self.FrameOfRefUID = None
 
-        if hasattr(ds, 'Columns'):
-            self.cols = ds.Columns
-            self.rows = ds.Rows
+            if hasattr(ds, 'Columns'):
+                self.cols = ds.Columns
+                self.rows = ds.Rows
 
-        if hasattr(ds, 'SliceLocation'):
-            self.SliceLocation = float(ds.SliceLocation)
-        elif hasattr(ds, 'ImagePositionPatient'):
-            self.SliceLocation = float(ds.ImagePositionPatient[-1])
+            if hasattr(ds, 'SliceLocation'):
+                self.SliceLocation = float(ds.SliceLocation)
+            elif hasattr(ds, 'ImagePositionPatient'):
+                self.SliceLocation = float(ds.ImagePositionPatient[-1])
 
     def __getitem__(self, name):
         return getattr(self, name)
@@ -368,10 +446,11 @@ class DicomFile(GroupUtils):
 
 if __name__ == '__main__':
     files = glob('/home/eporter/eporter_data/hippo_data/**/*.dcm', recursive=True)
-    cohort = Cohort(name='Cohort1', files=files[:100], include_series=False)
 
-    #for patient in cohort:
-    #    patient.flatten()
+    cohort = Cohort(name='TestFileSave', files=files, include_series=False)
 
-    #print(cohort)
-    save_tree(cohort)
+    for patient in cohort:
+        patient.flatten()
+
+    print(cohort)
+    save_tree(cohort, '/home/eporter/eporter_data/')
