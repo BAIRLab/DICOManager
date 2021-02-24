@@ -1,6 +1,7 @@
 import anytree
 from anytree import Node, RenderTree
 from anytree import NodeMixin
+from anytree.iterators.levelorderiter import LevelOrderIter
 from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
 from dataclasses import dataclass
 import pydicom
@@ -8,6 +9,49 @@ from glob import glob
 import os
 from processing import Reconstruction, Deconstruction
 import warnings
+import shutil
+
+
+# Move to utils.py
+def mod_getter(modtype: str) -> object:
+    """[decorator to yield a property getter for the
+        specified modality type]
+
+    Args:
+        modtype (str): [the specified modality type]
+
+    Returns:
+        object: [a property getter function]
+    """
+    def func(self):
+        modlist = []
+        if modtype in self.data:
+            modlist.append(self.data[modtype])
+        return modlist
+    return func
+
+
+def save_tree(tree: NodeMixin, path: str) -> None:
+    """[saves copy of dicom files to specified location, ordered
+        the same as the tree layout]
+
+    Args:
+        tree (NodeMixin): [tree to save]
+        path (str): [absolute path to write the file tree]
+    """
+    if path[:-1] != '/':
+        path += '/'
+
+    treeiter = LevelOrderIter(tree)
+    for index, node in enumerate(treeiter):
+        subdir = '/'.join([p.name for p in node.path]) + '/'
+        os.mkdir(subdir)
+        if repr(node) == 'Modality':
+            for key in node.data:
+                for fname in node.data[key]:
+                    original = fname._filename
+                    newpath = path + subdir + fname.name
+                    shutil.copy(original, newpath)
 
 
 class GroupUtils(NodeMixin):
@@ -221,24 +265,6 @@ class Series(GroupUtils):
         self._digest()
 
 
-def mod_getter(modtype: str) -> object:
-    """[decorator to yield a property getter for the
-        specified modality type]
-
-    Args:
-        modtype (str): [the specified modality type]
-
-    Returns:
-        object: [a property getter function]
-    """
-    def func(self):
-        modlist = []
-        if modtype in self.data:
-            modlist.append(self.data[modtype])
-        return modlist
-    return func
-
-
 class Modality(GroupUtils):
     """[Group level for Modality, specified by Modality]
 
@@ -282,6 +308,7 @@ class Modality(GroupUtils):
             self.data[key].append(dicomfile)
         else:
             self.data.update({key: [dicomfile]})
+
 
 class DicomFile(GroupUtils):
     """[Group level for individal Dicom files, pulls releveant header data out]
@@ -341,9 +368,10 @@ class DicomFile(GroupUtils):
 
 if __name__ == '__main__':
     files = glob('/home/eporter/eporter_data/hippo_data/**/*.dcm', recursive=True)
-    cohort = Cohort(name='Cohort1', files=files[:], include_series=False)
+    cohort = Cohort(name='Cohort1', files=files[:100], include_series=False)
 
     #for patient in cohort:
     #    patient.flatten()
 
-    print(cohort)
+    #print(cohort)
+    save_tree(cohort)
