@@ -11,6 +11,12 @@ from processing import Reconstruction, Deconstruction
 import warnings
 import shutil
 from datetime import datetime
+from typing import Any, TypeVar
+
+
+# TODO
+# - Make file saving date option functional
+# - Change path declarations to pathlib objects
 
 
 # Move to utils.py
@@ -48,7 +54,10 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
     if path[:-1] == '/':
         path = path[:-1]
 
-    prefix = prefix.lower()
+    try:
+        prefix = prefix.lower()
+    except Exception:
+        pass
 
     treeiter = LevelOrderIter(tree)
     for index, node in enumerate(treeiter):
@@ -65,10 +74,10 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
         if repr(node) == 'Modality':
             for key in node.data:
                 for fname in node.data[key]:
-                    original = fname._filename
+                    original = fname.filepath
                     newpath = subdir + fname.name
                     shutil.copy(original, newpath)
-    print(f'\nTree {tree} written to {path}')
+    print(f'\nTree {tree.name} written to {path}')
 
 
 class GroupUtils(NodeMixin):
@@ -142,6 +151,8 @@ class GroupUtils(NodeMixin):
                 child._add_file(dicomfile)
                 found = True
         if not found:
+            dt = dicomfile.DateTime
+            print(dt)
             child_params = {'name': key,
                             'files': [dicomfile],
                             'parent': self,
@@ -155,14 +166,14 @@ class GroupUtils(NodeMixin):
         return repr(self) + '_' + self.name
 
     @dirname.setter
-    def dirname(self, name):
+    def dirname(self, name: str):
         self._dirname = name
 
     @property
     def datename(self):
         if hasattr(self, '_datename'):
             return self._datename
-        return self.date + '_' + self.name
+        return self.DateTime + '_' + self.name
 
     @datename.setter
     def datename(self, name):
@@ -223,6 +234,65 @@ class GroupUtils(NodeMixin):
                     if i > 0:
                         group[0].steal(child)
                         child.parent.prune(child.name)
+
+
+class DicomFile(GroupUtils):
+    """[Group level for individal Dicom files, pulls releveant header data out]
+
+    Args:
+        filepath (str): absolute file path to the *.dcm file
+    """
+    SelfType = TypeVar('DicomFile')
+
+    def __init__(self, filepath: str, *args, **kwargs):
+        super().__init__(None, *args, **kwargs)
+        self.name = os.path.basename(filepath)
+        self.filepath = filepath
+        self._digest()
+
+    def __getitem__(self, name: str):
+        return getattr(self, name)
+
+    def __lt__(self, other: SelfType):
+        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
+            return self.SliceLocation < other.SliceLocation
+        return self.InstanceUID < other.InstanceUID
+
+    def __gt__(self, other: SelfType):
+        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
+            return self.SliceLocation > other.SliceLocation
+        return self.FrameOfRefUID > other.FrameOfRefUID
+
+    def __eq__(self, other: SelfType):
+        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
+            return self.SliceLocation == other.SliceLocation
+        return self.FrameOfRefUID == other.FrameOfRefUID
+
+    def _digest(self):
+        with pydicom.dcmread(self.filepath, stop_before_pixels=True) as ds:
+            self.PatientID = ds.PatientID
+            self.StudyUID = ds.StudyInstanceUID
+            self.SeriesUID = ds.SeriesInstanceUID
+            self.Modality = ds.Modality
+            self.InstanceUID = ds.SOPInstanceUID
+            self.DateTime = DicomDateTime(ds)
+
+            if hasattr(ds, 'FrameOfReferenceUID'):
+                self.FrameOfRefUID = ds.FrameOfReferenceUID
+            elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
+                ref_seq = ds.ReferencedFrameOfReferenceSequence
+                self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
+            else:
+                self.FrameOfRefUID = None
+
+            if hasattr(ds, 'Columns'):
+                self.cols = ds.Columns
+                self.rows = ds.Rows
+
+            if hasattr(ds, 'SliceLocation'):
+                self.SliceLocation = float(ds.SliceLocation)
+            elif hasattr(ds, 'ImagePositionPatient'):
+                self.SliceLocation = float(ds.ImagePositionPatient[-1])
 
 
 class Cohort(GroupUtils):
@@ -323,7 +393,7 @@ class Modality(GroupUtils):
     dose = property(mod_getter('RTDOSE'))
     struct = property(mod_getter('RTSTRUCT'))
 
-    def __init__(self, name, *args, **kwargs):
+    def __init__(self, name: str, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.dirname = name
         self.data = {}
@@ -340,7 +410,7 @@ class Modality(GroupUtils):
         output = ' [' + ','.join(middle) + ' ]'
         return output
 
-    def _add_file(self, dicomfile):
+    def _add_file(self, dicomfile: DicomFile):
         key = str(dicomfile[self._organize_by])
         if key in self.data.keys():
             self.data[key].append(dicomfile)
@@ -350,10 +420,26 @@ class Modality(GroupUtils):
 
 @dataclass
 class DicomDateTime:
-    ds: pydicom.Dataset
+    """[pulls the relevant date and time info from the DICOM header]
+
+    Attributes:
+        StudyDate: [(0008,0020) DICOM Tag]
+        SeriesDate: [(0008, 0021) DICOM Tag]
+        ContentDate: [(0008, 0023) DICOM Tag]
+        AcquisitionDate: [(0008, 0022) DICOM Tag]
+        StudyTime: [(0008,0030) DICOM Tag]
+        SeriesTime: [(0008, 0031) DICOM Tag]
+        ContentTime: [(0008, 0033) DICOM Tag]
+        AcquisitionTime: [(0008, 0032) DICOM Tag]
+
+    Methods:
+        iso_format (str): [returns ISO 8601 format date time for group type]
+    """
+    ds: pydicom.dataset
 
     def __post_init__(self):
-        prefix = ['Study', 'Series', 'Acquisition', 'Content']
+        prefix = ['Study', 'Series', 'Acquisition', 'Content',
+                  'InstanceCreation', 'StructureSet']
         suffix = ['Date', 'Time']
         attrs = [p + s for p in prefix for s in suffix]
         for name in attrs:
@@ -361,87 +447,52 @@ class DicomDateTime:
                 value = getattr(self.ds, name)
                 setattr(self, name, value)
             else:
-                setattr(self, name, 'None')
-        self.ds = None
+                setattr(self, name, None)
+        self.modality = self.ds.Modality
+        #self.ds = None
 
-    def __setitem__(self, name, value):
+    def __setitem__(self, name: str, value: Any):
         self.__dict__[name] = value
 
-    def iso_format(self, group):
-        # ISO 8601 formatted date time string
-        if group == 'Study':
-            date, time = (self.StudyDate, self.StudyTime)
-        elif group == 'Series':
-            date, time = (self.SeriesDate, self.SeriesTime)
-        elif group == 'FrameOfRef':
-            date, time = (self.AcquisitionDate, self.AcquisitionTime)
-        else:
-            date, time = (self.ContentDate, self.ContentTime)
+    def __str__(self):
+        return self.iso_format('Study')
 
-        if date is None:
-            date = '19700101'
-        if time is None:
-            time = '000000.000000'
+    def iso_format(self, group: str):
+        """[returns ISO 8601 format date time for group type]
+
+        Args:
+            group (str): [string representing group type]
+
+        Returns:
+            [str]: [ISO 8601 formatted date time string with milliseconds]
+        """
+        # ISO 8601 formatted date time string
+        if group == 'Study' and self.StudyDate is not None:
+            date, time = (self.StudyDate, self.StudyTime)
+        elif group == 'Series' and self.SeriesDate is not None:
+            date, time = (self.SeriesDate, self.SeriesTime)
+        elif self.InstanceCreationDate is not None:
+            date, time = (self.InstanceCreationDate, self.InstanceCreationTime)
+        elif self.AcquisitionDate is not None:
+            date, time = (self.AcquisitionDate, self.AcquisitionTime)
+        elif self.ContentDate is not None:
+            date, time = (self.ContentDate, self.ContentTime)
+        else:
+            date, time = ('19700101', '000000.000000')
+
+        #del self.ds[(0x3006, 0x0080)]
+        #del self.ds[(0x3006, 0x0010)]
+        #del self.ds[(0x3006, 0x0020)]
+        #del self.ds[(0x3006, 0x0039)]
+        #print(self.ds)
 
         dateobj = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f')
-        return dateobj.isoformat()
+        dateobj.replace(microsecond=0)
+        str_name = dateobj.isoformat()
+        str_name.replace(':', '.')
+        print(str_name)
+        return str_name
 
-
-class DicomFile(GroupUtils):
-    """[Group level for individal Dicom files, pulls releveant header data out]
-
-    Args:
-        filename (str): absolute file path to the *.dcm file
-    """
-    def __init__(self, filename, *args, **kwargs):
-        super().__init__(None, *args, **kwargs)
-        self.name = os.path.basename(filename)
-        self._filename = filename
-        self._digest()
-
-    def _digest(self):
-        with pydicom.dcmread(self._filename, stop_before_pixels=True) as ds:
-            self.PatientID = ds.PatientID
-            self.StudyUID = ds.StudyInstanceUID
-            self.SeriesUID = ds.SeriesInstanceUID
-            self.Modality = ds.Modality
-            self.InstanceUID = ds.SOPInstanceUID
-            self.DateTime = DicomDateTime(ds)
-
-            if hasattr(ds, 'FrameOfReferenceUID'):
-                self.FrameOfRefUID = ds.FrameOfReferenceUID
-            elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
-                ref_seq = ds.ReferencedFrameOfReferenceSequence
-                self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
-            else:
-                self.FrameOfRefUID = None
-
-            if hasattr(ds, 'Columns'):
-                self.cols = ds.Columns
-                self.rows = ds.Rows
-
-            if hasattr(ds, 'SliceLocation'):
-                self.SliceLocation = float(ds.SliceLocation)
-            elif hasattr(ds, 'ImagePositionPatient'):
-                self.SliceLocation = float(ds.ImagePositionPatient[-1])
-
-    def __getitem__(self, name):
-        return getattr(self, name)
-
-    def __lt__(self, other):
-        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
-            return self.SliceLocation < other.SliceLocation
-        return self.InstanceUID < other.InstanceUID
-
-    def __gt__(self, other):
-        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
-            return self.SliceLocation > other.SliceLocation
-        return self.FrameOfRefUID > other.FrameOfRefUID
-
-    def __eq__(self, other):
-        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
-            return self.SliceLocation == other.SliceLocation
-        return self.FrameOfRefUID == other.FrameOfRefUID
 
 
 if __name__ == '__main__':
@@ -451,6 +502,7 @@ if __name__ == '__main__':
 
     for patient in cohort:
         patient.flatten()
+        #print(patient.datename)
 
-    print(cohort)
-    save_tree(cohort, '/home/eporter/eporter_data/')
+    #print(cohort)
+    #save_tree(cohort, '/home/eporter/eporter_data/', prefix=None)

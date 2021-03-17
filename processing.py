@@ -42,15 +42,59 @@ class StructVolumeSet:
 
 
 @dataclass
-class SeriesVolumeSet:
-    # All reconstuctions for a given series
-    # This is what will be returned by the call
-    # series = Series(files)
-    # volumes = series.reconstruct()
-    modalities: dict
-    series_uid: str
-    study_uid: str
-    patient_id: str
+class VolumeDimensions:
+    dicoms: list
+    origin: list = None
+    rows: int = None
+    cols: int = None
+    slices: int = None
+    dims: list = None
+    dx: float = None
+    dy: float = None
+    dz: float = None
+    flipped: bool = False
+
+    def __post_init__(self):
+        if self.dicoms[0].Modality == 'RTDOSE':
+            ds = pydicom.dcmread(self.dicoms[0].filepath)
+            self.slices = ds.NumberOfFrames
+            self.origin = ds.ImagePatientPosition
+        else:
+            for dcm in self.dicoms:
+                ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
+                ipp = ds.ImagePatientPosition
+                if ds.InstanceNumber == 1:
+                    self._z0 = float(ipp[-1])
+                if ds.InstanceNumber == self.dicoms.nfiles:
+                    self._z1 = float(ipp[-1])
+
+            self.origin = np.array([*ipp[:2], min(self._z0, self._z1)])
+            self._tot_z = max(self._z0, self._z1) - min(self._z0, self._z1)
+            self.slices = self._tot_z / self.dz
+            if self._z1 > self._z0:
+                self.flipped = True
+
+        self.rows = ds.Rows
+        self.cols = ds.Columns
+        self.dx, self.dy = ds.PixelSpacing
+        self.dz = ds.SliceThickness
+
+    @property
+    def shape(self):
+        return (self.rows, self.cols, self.slices)
+
+    def coordrange(self):
+        pts_x = self.origin[0] + np.arange(self.rows) * self.dx
+        pts_y = self.origin[1] + np.arange(self.cols) * self.dy
+        pts_z = self.origin[2] + np.arange(self.slices) * self.dz
+        if self.flipped:
+            pts_z = pts_z[..., ::-1]
+        return (pts_x, pts_y, pts_z)
+
+    def coordgrid(self):
+        pts_x, pts_y, pts_z = self.coordrange()
+        grid = np.array([*np.meshgrid(pts_x, pts_y, pts_z, indexing='ij')])
+        return grid.reshape(3, -1)
 
 
 class Reconstruction:
@@ -58,17 +102,9 @@ class Reconstruction:
     # We can merge series to create combo ones
     # Will iteratively reconstruct each Modality group
     # Return a ImageVolume dataclass
-    def __init__(self):
+    #def __init__(self, series):
         # We want this to inherit from the Series
-        self.temp = None
-        self.dims = None #self._vol_dims()
-
-    def _vol_dims(self, frame_group):
-        # For each should have this be at the group level???????????
-        ct_files = frame_group.ct[0]
-        z_min, z_max = ct_files.SliceRange
-        n_slices = round(1 + (z_max - z_min) / ct_files.SliceThickness)
-        return [n_slices, ct_files.cols, ct_files.rows]
+        #self.dims = None # VolumeDimensions(series)
 
     def _point_to_coords(self, contour_pts, ct_group):
         img_origin = ct_group.origin
@@ -166,69 +202,22 @@ class Reconstruction:
             radiopharm = ds.RadiopharmaceuticalInformationSequence[0]
             total_dose = float(radiopharm.RadionuclideTotalDose)
             pet_vols.append(rescaled * patient_weight / total_dose)
-
         return pet_vols
 
     def dose(self, series):
-        dose_arrays = []
-        for dose_file in series.dose:
-            ct = series.get_associated('ct', dose_file)
-            dose_dcm = pydicom.dcmread(dose_file)
-            ct_dcm = pydicom.dcmread(ct[0])
-
-            img_origin = np.array(
-                [*ct_dcm.ImagePositionPatient[:2], self.SliceRange[0]])
-
-            img_dims = self.img_dims()
-            ix, iy, iz = (*ct.PixelSpacing, ct.SliceThickness)
-
-            dose_iso = np.array(dose_dcm.ImagePositionPatient)
-            dose_dims = np.rollaxis(dose_dcm.pixel_array, 0, 3).shape
-            dx, dy, dz = (*dose_dcm.PixelSpacing, dose_dcm.SliceThickness)
-
-            d_grid_x = dose_iso[1] + dx * np.arange(dose_dims[0])
-            d_grid_y = dose_iso[0] + dy * np.arange(dose_dims[1])
-            d_grid_z = dose_iso[2] + dz * np.arange(dose_dims[2])
-
-            i_grid_x = img_origin[1] + ix * np.arange(img_dims[0])
-            i_grid_y = img_origin[0] + iy * np.arange(img_dims[1])
-            i_grid_z = img_origin[2] + iz * np.arange(img_dims[2])
-
-            grids = [(i_grid_x, d_grid_x), (i_grid_y,
-                                            d_grid_y), (i_grid_z, d_grid_z)]
-            list_of_grids = []
-
-            def nearest(array, value):
-                return np.abs(np.array(array) - value).argmin()
-
-            # Compute the nearest CT coordinate to each dose coordinate
-            for _, (img_grid, dose_grid) in enumerate(grids):
-                temp = list(set([nearest(img_grid, val) for val in dose_grid]))
-                temp.sort()
-                list_of_grids.append(np.array(temp))
-
-            dose_array = np.rollaxis(dose_dcm.pixel_array, 0, 3)
-
-            x_mm, y_mm, z_mm = [[t[0], t[-1]] for t in list_of_grids]
-            total_pts = np.product([[y - x] for x, y in [x_mm, y_mm, z_mm]])
-            grid = np.mgrid[x_mm[0]: x_mm[1],
-                            y_mm[0]: y_mm[1],
-                            z_mm[0]: z_mm[1]].reshape(3, total_pts)
-            interp_pts = np.squeeze(np.array([grid]).T)
-
-            interp = RGI(list_of_grids, dose_array, method='linear')
-            interp_vals = interp(interp_pts)
-            interp_vol = interp_vals.reshape(x_mm[1] - x_mm[0],
-                                             y_mm[1] - y_mm[0],
-                                             z_mm[1] - z_mm[0])
-            full_vol = np.zeros(img_dims)
-
-            full_vol[x_mm[0]: x_mm[1],
-                     y_mm[0]: y_mm[1],
-                     z_mm[0]: z_mm[1]] = interp_vol
-
-            dose_arrays.append(full_vol * float(dose_dcm.DoseGridScaling))
-        return dose_arrays
+        dose_vols = {}
+        ct_dims = VolumeDimensions(series.ct)
+        ct_coords = ct_dims.coordgrid()
+        for dosefile in series.dose:
+            ds = pydicom.dcmread(dosefile.filepath)
+            dose_dims = VolumeDimensions(dosefile)
+            dose_array = np.rollaxis(ds.pixel_array, 0, 3) * ds.DoseGridScaling
+            dose_coords = dose_dims.coordrange()
+            interper = RGI(dose_coords, dose_array,
+                           bounds_error=False, fill_value=0)
+            dose_interp = interper(ct_coords).reshape(ct_dims.shape)
+            dose_vols.update({dosefile: dose_interp})
+        return dose_vols
 
 
 class Deconstruction:
@@ -239,8 +228,11 @@ class Deconstruction:
 class Tools:
     # Tools are used to process reconstructed arrays
     # DicomUtils are for DICOM reconstruction utilities
-    def __init__(self):
-        self.temp = None
+    def dose_max_points(self, dose_array, dose_coords=None):
+        index = np.unravel_index(np.argmax(dose_array), dose_array.shape)
+        if dose_coords:
+            return dose_coords[index]
+        return index
 
 
 # Can reconstruct either via Series.recon.ct()
