@@ -68,6 +68,7 @@ class Reconstruction:
     def __call__(self, frame_of_ref):
         self.define_vol_dims(frame_of_ref)
         utils.colorwarn('Hello!')
+        # we can multithread on this iterable
         for mod in frame_of_ref.iter_modalities:
             # TODO: Make switch statement in python 3.10
             if mod.dirname == 'CT':
@@ -150,14 +151,15 @@ class Reconstruction:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
-            for ct_file in ct_group:
-                ds = pydicom.dcmread(ct_file)
-                z_loc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, z_loc] = ds.pixel_array
+            for ct_file in sorted(ct_group):
+                ds = pydicom.dcmread(ct_file.filepath)
+                zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
+                print(zloc, origin[-1], ds.SliceLocation, self.dims.zlohi)
+                fill_array[:, :, zloc] = ds.pixel_array
 
-            slope = ds.RescaleSlope
-            intercept = ds.RescaleIntercept
             if HU:
+                slope = ds.RescaleSlope
+                intercept = ds.RescaleIntercept
                 ct_vols.append(fill_array * slope + intercept)
             else:
                 ct_vols.append(fill_array)
@@ -171,7 +173,7 @@ class Reconstruction:
             raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
             map_seq = ds.RealWorldValueMappingSequence[0]
             slope = float(map_seq.RealWorldValueSlope)
-            intercept =float(map_seq.RealWorldValueIntercept)
+            intercept = float(map_seq.RealWorldValueIntercept)
             if intercept != 0:
                 utils.colorwarn('NM intercept not zero and may be corrupted.')
             nm_vols.append(raw * slope + intercept)
