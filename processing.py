@@ -53,31 +53,76 @@ class VolumeDimensions:
     dy: float = None
     dz: float = None
     flipped: bool = False
+    multi_thick: bool = False
 
     def __post_init__(self):
-        if self.dicoms[0].Modality == 'RTDOSE':
-            ds = pydicom.dcmread(self.dicoms[0].filepath)
+        if 'RTDOSE' in self.dicoms:
+            filepath = self.dicoms['RTDOSE'][0].filepath
+            ds = pydicom.dcmread(filepath)
             self.slices = ds.NumberOfFrames
-            self.origin = ds.ImagePatientPosition
+            self.origin = ds.ImagePositionPatient
+            self.dz = float(ds.SliceThickness)
         else:
-            for dcm in self.dicoms:
-                ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
-                ipp = ds.ImagePatientPosition
-                if ds.InstanceNumber == 1:
-                    self._z0 = float(ipp[-1])
-                if ds.InstanceNumber == self.dicoms.nfiles:
-                    self._z1 = float(ipp[-1])
+            if 'CT' in self.dicoms:
+                files = self.dicoms['CT']
+            elif 'MR' in self.dicoms:
+                files = self.dicoms['MR']
 
-            self.origin = np.array([*ipp[:2], min(self._z0, self._z1)])
-            self._tot_z = max(self._z0, self._z1) - min(self._z0, self._z1)
-            self.slices = self._tot_z / self.dz
-            if self._z1 > self._z0:
-                self.flipped = True
+            ds = self._calc_n_slices(files)
 
         self.rows = ds.Rows
         self.cols = ds.Columns
-        self.dx, self.dy = ds.PixelSpacing
-        self.dz = ds.SliceThickness
+        self.dx, self.dy = map(float, ds.PixelSpacing)
+        self.dims = [self.rows, self.cols, self.slices]
+        self.position = ds.PatientPosition
+        self.dicoms = None
+
+    def _calc_n_slices(self, files: list):
+        """[calculates the number of volume slices]
+
+        Args:
+            files ([DicomFile]): [A list of DicomFile objects]
+
+        Notes:
+            Creating the volume by the difference in slice location at high and
+            low instances ensures proper registration to rstructs, even if
+            images slices are missing. We can interpolate to the lowest
+            instance if we do not have instance 1, but we cannot extrapolate
+            if higher instances are missing
+        """
+        inst0 = np.inf
+        inst1 = -np.inf
+        slice_thicknesses = []
+
+        for dcm in files:
+            ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
+            ipp = ds.ImagePositionPatient
+            inst = int(ds.InstanceNumber)
+            slice_thicknesses.append(float(ds.SliceThickness))
+            if inst < inst0:  # Low instance
+                inst0 = inst
+                z0 = float(ipp[-1])
+            if inst > inst1:  # High instance
+                inst1 = inst
+                z1 = float(ipp[-1])
+
+        if inst0 > 1:
+            z0 -= ds.SliceThickness * (inst0 - 1)
+            inst0 = 1
+
+        slice_thicknesses = list(set(slice_thicknesses))
+        if len(slice_thicknesses) > 1:
+            self.multi_thick = True
+
+        self.dz = min(slice_thicknesses)
+        self.origin = np.array([*ipp[:2], min(z0, z1)])
+        self.slices = round(max(z0, z1) - min(z0, z1)) / self.dz
+
+        if z1 > z0:
+            # TODO: We can replace thiw with the ImagePositionPatient header
+            self.flipped = True
+
+        return ds
 
     @property
     def shape(self):
@@ -98,13 +143,21 @@ class VolumeDimensions:
 
 
 class Reconstruction:
-    # Reconstruction only works at the Series level
-    # We can merge series to create combo ones
-    # Will iteratively reconstruct each Modality group
-    # Return a ImageVolume dataclass
-    #def __init__(self, series):
-        # We want this to inherit from the Series
-        #self.dims = None # VolumeDimensions(series)
+    def __call__(self, frame_of_ref):
+        self._create_dims(frame_of_ref)
+        for mod in frame_of_ref.iter_modalities:
+            print(len(mod.dicoms))
+        print(self.dims)
+        print()
+
+    def _create_dims(self, frame_of_ref):
+        if not hasattr(self, 'dims'):
+            for mod in frame_of_ref.iter_modalities:
+                if mod.name in ['CT', 'MR']:
+                    self.dims = VolumeDimensions(mod.data)
+                    break
+            if not hasattr(self, 'dims'):
+                raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
     def _point_to_coords(self, contour_pts, ct_group):
         img_origin = ct_group.origin

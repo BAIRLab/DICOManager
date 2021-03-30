@@ -1,83 +1,15 @@
-import anytree
-from anytree import Node, RenderTree
+from anytree import RenderTree
 from anytree import NodeMixin
-from anytree.iterators.levelorderiter import LevelOrderIter
 from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
 from dataclasses import dataclass
 import pydicom
 from glob import glob
 import os
 from processing import Reconstruction, Deconstruction
-import warnings
-import shutil
 from datetime import datetime
 from typing import Any, TypeVar
-
-
-# TODO
-# - Make file saving date option functional
-# - Change path declarations to pathlib objects
-
-
-# Move to utils.py
-def mod_getter(modtype: str) -> object:
-    """[decorator to yield a property getter for the
-        specified modality type]
-
-    Args:
-        modtype (str): [the specified modality type]
-
-    Returns:
-        object: [a property getter function]
-    """
-    def func(self):
-        modlist = []
-        if modtype in self.data:
-            modlist.append(self.data[modtype])
-        return sorted(modlist)
-    return func
-
-
-def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
-    """[saves copy of dicom files to specified location, ordered
-        the same as the tree layout]
-
-    Args:
-        tree (NodeMixin): [tree to save]
-        path (str): [absolute path to write the file tree]
-        prefix (str, optional): [Specifies directory prefix as
-            'group', 'date' or None]. Default to 'group'.
-
-    Notes:
-        prefix = 'date' not functional
-    """
-    if path[:-1] == '/':
-        path = path[:-1]
-
-    try:
-        prefix = prefix.lower()
-    except Exception:
-        pass
-
-    treeiter = LevelOrderIter(tree)
-    for index, node in enumerate(treeiter):
-        if prefix == 'group':
-            names = [p.dirname for p in node.path]
-        elif prefix == 'date':
-            names = [p.datename for p in node.path]
-        else:
-            names = [p.name for p in node.path]
-
-        subdir = path + '/'.join(names) + '/'
-        if not os.path.isdir(subdir):
-            os.mkdir(subdir)
-        if repr(node) == 'Modality':
-            for key in node.data:
-                for fname in node.data[key]:
-                    original = fname.filepath
-                    newpath = subdir + fname.name
-                    shutil.copy(original, newpath)
-    print(f'\nTree {tree.name} written to {path}')
+import utils
+import pathlib
 
 
 class GroupUtils(NodeMixin):
@@ -102,12 +34,13 @@ class GroupUtils(NodeMixin):
         flatten (None): flattens tree to one child per parent
     """
     def __init__(self, name=None, files=None, parent=None, children=None,
-                 include_series=False):
+                 include_series=False, isodatetime=None):
         super().__init__()
         self.name = name
         self.files = files
         self.parent = parent
         self.include_series = include_series
+        self.isodatetime = isodatetime
         if children:
             self.children = children
 
@@ -151,12 +84,12 @@ class GroupUtils(NodeMixin):
                 child._add_file(dicomfile)
                 found = True
         if not found:
-            dt = dicomfile.DateTime
-            print(dt)
+            dt = dicomfile.DateTime.isoformat(self._child_type)
             child_params = {'name': key,
                             'files': [dicomfile],
                             'parent': self,
-                            'include_series': self.include_series}
+                            'include_series': self.include_series,
+                            'isodatetime': dt}
             self._child_type(**child_params)
 
     @property
@@ -173,7 +106,9 @@ class GroupUtils(NodeMixin):
     def datename(self):
         if hasattr(self, '_datename'):
             return self._datename
-        return self.DateTime + '_' + self.name
+        if not self.isodatetime:
+            return '_'.join([self.name, repr(self), 'NoDateTime_'])
+        return '_'.join([repr(self), self.name, self.isodatetime])
 
     @datename.setter
     def datename(self, name):
@@ -234,6 +169,17 @@ class GroupUtils(NodeMixin):
                     if i > 0:
                         group[0].steal(child)
                         child.parent.prune(child.name)
+
+    def save_tree(self, path: str, prefix: str = 'group') -> None:
+        """[saves a copy of the dicom files to a specified location, ordered
+            the same as the tree layout]
+
+        Args:
+            path (str): [absolute path to write to file tree]
+            prefix (str, optional): [Specifies directory prefix as 'group',
+                'date' or None]. Defaults to 'group'.
+        """
+        utils.save_tree(self, path, prefix)
 
 
 class DicomFile(GroupUtils):
@@ -308,6 +254,7 @@ class Cohort(GroupUtils):
         self._child_type = Patient
         self._organize_by = 'PatientID'
         self._digest()
+        self.isodatetime = utils.current_datetime()
 
 
 class Patient(GroupUtils):
@@ -350,6 +297,8 @@ class FrameOfRef(GroupUtils):
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
+        self._reconstruct = Reconstruction()
+        self._deconstruct = Deconstruction()
         if self.include_series:
             self._child_type = Series
             self._organize_by = 'SeriesUID'
@@ -357,6 +306,20 @@ class FrameOfRef(GroupUtils):
             self._child_type = Modality
             self._organize_by = 'Modality'
         self._digest()
+
+    @property
+    def iter_modalities(self):
+        if self.include_series:
+            grandchildren = list(LevelOrderGroupIter(self))[2]
+            return grandchildren
+        else:
+            return iter(self.children)
+
+    def recon(self):
+        self._reconstruct(self)
+
+    def decon(self):
+        self._deconstruct(self)
 
 
 class Series(GroupUtils):
@@ -386,19 +349,17 @@ class Modality(GroupUtils):
         dose: [dose files within group]
         struct: [structf files within group]
     """
-    ct = property(mod_getter('CT'))
-    nm = property(mod_getter('NM'))
-    mr = property(mod_getter('MR'))
-    pet = property(mod_getter('PET'))
-    dose = property(mod_getter('RTDOSE'))
-    struct = property(mod_getter('RTSTRUCT'))
+    ct = property(utils.mod_getter('CT'))
+    nm = property(utils.mod_getter('NM'))
+    mr = property(utils.mod_getter('MR'))
+    pet = property(utils.mod_getter('PET'))
+    dose = property(utils.mod_getter('RTDOSE'))
+    struct = property(utils.mod_getter('RTSTRUCT'))
 
     def __init__(self, name: str, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.dirname = name
         self.data = {}
-        self.recon = Reconstruction()
-        self.decon = Deconstruction()
         self._child_type = DicomFile
         self._organize_by = 'Modality'
         self._digest()
@@ -416,6 +377,10 @@ class Modality(GroupUtils):
             self.data[key].append(dicomfile)
         else:
             self.data.update({key: [dicomfile]})
+
+    @property
+    def dicoms(self):
+        return self.data[self.dirname]
 
 
 @dataclass
@@ -449,15 +414,11 @@ class DicomDateTime:
             else:
                 setattr(self, name, None)
         self.modality = self.ds.Modality
-        #self.ds = None
 
     def __setitem__(self, name: str, value: Any):
         self.__dict__[name] = value
 
-    def __str__(self):
-        return self.iso_format('Study')
-
-    def iso_format(self, group: str):
+    def isoformat(self, group: str):
         """[returns ISO 8601 format date time for group type]
 
         Args:
@@ -480,29 +441,21 @@ class DicomDateTime:
         else:
             date, time = ('19700101', '000000.000000')
 
-        #del self.ds[(0x3006, 0x0080)]
-        #del self.ds[(0x3006, 0x0010)]
-        #del self.ds[(0x3006, 0x0020)]
-        #del self.ds[(0x3006, 0x0039)]
-        #print(self.ds)
-
         dateobj = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f')
-        dateobj.replace(microsecond=0)
-        str_name = dateobj.isoformat()
-        str_name.replace(':', '.')
-        print(str_name)
+        dateobj = dateobj.replace(microsecond=0)
+        str_name = dateobj.isoformat().replace(':', '.')
         return str_name
 
 
-
 if __name__ == '__main__':
-    files = glob('/home/eporter/eporter_data/hippo_data/**/*.dcm', recursive=True)
-
-    cohort = Cohort(name='TestFileSave', files=files, include_series=False)
+    files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True)
+    cohort = Cohort(name='TestFileSave', files=files, include_series=True)
+    print(cohort)
 
     for patient in cohort:
-        patient.flatten()
+        for study in patient:
+            for ref in study:
+                test = ref.recon()
         #print(patient.datename)
 
-    #print(cohort)
-    #save_tree(cohort, '/home/eporter/eporter_data/', prefix=None)
+    #cohort.save_tree('/home/eporter/eporter_data/', prefix='date')
