@@ -1,111 +1,10 @@
 import cv2
 import numpy as np
 import pydicom
+import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
 from dataclasses import dataclass, field, fields
-
-
-@dataclass
-class VolumeDimensions:
-    dicoms: list
-    origin: list = None
-    rows: int = None
-    cols: int = None
-    slices: int = None
-    dims: list = None
-    dx: float = None
-    dy: float = None
-    dz: float = None
-    vox_size: list = None
-    flipped: bool = False
-    multi_thick: bool = False
-
-    def __post_init__(self):
-        if 'RTDOSE' in self.dicoms:
-            filepath = self.dicoms['RTDOSE'][0].filepath
-            ds = pydicom.dcmread(filepath)
-            self.slices = ds.NumberOfFrames
-            self.origin = ds.ImagePositionPatient
-            self.dz = float(ds.SliceThickness)
-        else:
-            if 'CT' in self.dicoms:
-                files = self.dicoms['CT']
-            elif 'MR' in self.dicoms:
-                files = self.dicoms['MR']
-
-            ds = self._calc_n_slices(files)
-
-        self.rows = ds.Rows
-        self.cols = ds.Columns
-        self.dx, self.dy = map(float, ds.PixelSpacing)
-        self.dims = [self.rows, self.cols, self.slices]
-        self.position = ds.PatientPosition
-        self.vox_size = [self.dx, self.dy, self.dz]
-        self.dicoms = None
-
-    def _calc_n_slices(self, files: list):
-        """[calculates the number of volume slices]
-
-        Args:
-            files ([DicomFile]): [A list of DicomFile objects]
-
-        Notes:
-            Creating the volume by the difference in slice location at high and
-            low instances ensures proper registration to rstructs, even if
-            images slices are missing. We can interpolate to the lowest
-            instance if we do not have instance 1, but we cannot extrapolate
-            if higher instances are missing
-        """
-        inst0 = np.inf
-        inst1 = -np.inf
-        slice_thicknesses = []
-
-        for dcm in files:
-            ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
-            ipp = ds.ImagePositionPatient
-            inst = int(ds.InstanceNumber)
-            slice_thicknesses.append(float(ds.SliceThickness))
-            if inst < inst0:  # Low instance
-                inst0 = inst
-                z0 = float(ipp[-1])
-            if inst > inst1:  # High instance
-                inst1 = inst
-                z1 = float(ipp[-1])
-
-        if inst0 > 1:
-            z0 -= ds.SliceThickness * (inst0 - 1)
-            inst0 = 1
-
-        slice_thicknesses = list(set(slice_thicknesses))
-        if len(slice_thicknesses) > 1:
-            self.multi_thick = True
-
-        self.dz = min(slice_thicknesses)
-        self.origin = np.array([*ipp[:2], min(z0, z1)])
-        self.slices = round((max(z0, z1) - min(z0, z1)) / self.dz)
-
-        if z1 > z0:
-            # TODO: We can replace thiw with the ImagePositionPatient header
-            self.flipped = True
-
-        return ds
-
-    @property
-    def shape(self):
-        return (self.rows, self.cols, self.slices)
-
-    def coordrange(self):
-        pts_x = self.origin[0] + np.arange(self.rows) * self.dx
-        pts_y = self.origin[1] + np.arange(self.cols) * self.dy
-        pts_z = self.origin[2] + np.arange(self.slices) * self.dz
-        if self.flipped:
-            pts_z = pts_z[..., ::-1]
-        return (pts_x, pts_y, pts_z)
-
-    def coordgrid(self):
-        pts_x, pts_y, pts_z = self.coordrange()
-        grid = np.array([*np.meshgrid(pts_x, pts_y, pts_z, indexing='ij')])
-        return grid.reshape(3, -1)
+from utils import VolumeDimensions, check_dims
 
 
 @dataclass
@@ -168,11 +67,13 @@ class ImageVolume:
 class Reconstruction:
     def __call__(self, frame_of_ref):
         self.define_vol_dims(frame_of_ref)
+        utils.colorwarn('Hello!')
         for mod in frame_of_ref.iter_modalities:
             # TODO: Make switch statement in python 3.10
-            """
             if mod.dirname == 'CT':
+                print('in ct recon')
                 vol = self.ct(mod)
+            """
             elif mod.dirname == 'MR':
                 vol = self.mr(mod)
             elif mod.dirname == 'PET':
@@ -215,16 +116,6 @@ class Reconstruction:
             fill_array[:, :, zloc] += poly2D
         fill_array = fill_array % 2
         return fill_array
-
-    def check_dims(self):
-        def _check_dims(func):
-            def wrapped(self, modality, *args, **kwargs):
-                if not hasattr(self, 'dims'):
-                    if modality.name in ['CT', 'MR']:
-                        self.dims = VolumeDimensions(modality.data)
-                func(*args, **kwargs)
-            return wrapped
-        return _check_dims
 
     def define_vol_dims(self, frame_of_ref):
         if not hasattr(self, 'dims'):
@@ -279,8 +170,10 @@ class Reconstruction:
             ds = pydicom.dcmread(nm_group[0])
             raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
             map_seq = ds.RealWorldValueMappingSequence[0]
-            slope = map_seq.RealWorldValueSlope
-            intercept = map_seq.RealWorldValueIntercept
+            slope = float(map_seq.RealWorldValueSlope)
+            intercept =float(map_seq.RealWorldValueIntercept)
+            if intercept != 0:
+                utils.colorwarn('NM intercept not zero and may be corrupted.')
             nm_vols.append(raw * slope + intercept)
         return nm_vols
 
