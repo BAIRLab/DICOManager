@@ -67,25 +67,23 @@ class ImageVolume:
 class Reconstruction:
     def __call__(self, frame_of_ref):
         self.define_vol_dims(frame_of_ref)
-        utils.colorwarn('Hello!')
         # we can multithread on this iterable
         for mod in frame_of_ref.iter_modalities:
             # TODO: Make switch statement in python 3.10
-            if mod.dirname == 'CT':
-                print('in ct recon')
-                vol = self.ct(mod)
-            """
-            elif mod.dirname == 'MR':
-                vol = self.mr(mod)
-            elif mod.dirname == 'PET':
-                vol = self.pet(mod)
-            elif mod.dirname == 'DOSE':
-                vol = self.dose(mod)
-            """
-            if mod.dirname == 'RTSTRUCT':
+            if mod.name == 'CT':
+                vols = self.ct(mod)
+            elif mod.name == 'RTSTRUCT':
                 vols = self.struct(mod)
-                for vol in vols:
-                    print(vol.shape, vol.names)
+            elif mod.name == 'MR':
+                vols = self.mr(mod)
+            # These might not work yet
+            elif mod.name == 'NM':
+                vols = self.nm(mod)
+            elif mod.name == 'PET':
+                vols = self.pet(mod)
+            elif mod.name == 'DOSE':
+                vols = self.dose(mod)
+        return vols
 
     def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.array, int):
         """[converts a dicom contour slice into image coordinates]
@@ -154,7 +152,6 @@ class Reconstruction:
             for ct_file in sorted(ct_group):
                 ds = pydicom.dcmread(ct_file.filepath)
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                print(zloc, origin[-1], ds.SliceLocation, self.dims.zlohi)
                 fill_array[:, :, zloc] = ds.pixel_array
 
             if HU:
@@ -183,13 +180,13 @@ class Reconstruction:
     def mr(self, modality):
         mr_vols = []
         for mr_group in modality.mr:
-            fill_array = np.zeros(mr_group.dims)
-            origin = mr_group.origin
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
+            origin = self.dims.origin
 
-            for mr_file in mr_group:
-                ds = pydicom.dcmread(mr_file)
-                z_loc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, z_loc] = ds.pixel_array
+            for mr_file in sorted(mr_group):
+                ds = pydicom.dcmread(mr_file.filepath)
+                zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
+                fill_array[:, :, zloc] = ds.pixel_array
             mr_vols.append(fill_array)
         return mr_vols
 

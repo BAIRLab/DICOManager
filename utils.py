@@ -34,7 +34,6 @@ def colorwarn(message: str):
     def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
         relative = '/'.join(Path(filename).parts[-2:])
         return f'{relative}: line {lineno}: {category.__name__}: {message} \n'
-        #return '%s:%s: %s: %s\n' % (filename, lineno, category.__name__, message)
 
     warnings.formatwarning = warning_on_one_line
     warnings.warn(bcolors.WARNING + message + bcolors.ENDC)

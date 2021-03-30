@@ -44,6 +44,9 @@ class GroupUtils(NodeMixin):
         if children:
             self.children = children
 
+    def __len__(self):
+        return len(self.children)
+
     def __iter__(self):
         return iter(self.children)
 
