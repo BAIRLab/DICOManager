@@ -5,7 +5,11 @@ import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
 from dataclasses import dataclass, field, fields
 from utils import VolumeDimensions, check_dims
+from __future__ import annotations
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from groupings import FrameOfRef, Modality
 
 @dataclass
 class StructVolumeSet:
@@ -17,7 +21,7 @@ class StructVolumeSet:
     def __getitem__(self, name: str):
         return self.volumes[name]
 
-    def __setitem__(self, name: str, volume: np.array):
+    def __setitem__(self, name: str, volume: np.ndarray):
         if name in self.volumes:
             name = self._rename(name)
         self.volumes.update({name: volume})
@@ -51,6 +55,67 @@ class StructVolumeSet:
 
 
 @dataclass
+class ImgAugmentations:
+    # Window level augmentation metadata
+    window_level: bool = False
+    window: float = None
+    level: float = None
+    wl_original_range: tuple = None
+
+    # normalization augmentation metadata
+    normalized: bool = False
+    norm_original_range: tuple = None
+
+    # standardization augmetnation metadata
+    standardized: bool = False
+    std: float = None
+    mean: float = None
+
+    # cropping augmetnation metata
+    cropped: bool = False
+    img_coords: np.ndarray = None
+    patient_coords: np.ndarray = None
+
+    # resampling augmentation metadata
+    resampled: bool = False
+    pixelspacing_original: np.ndarray = None
+
+    # interpolation
+    interpolated: bool = False
+    interpolated_slices: list = None
+
+    def wl_update(self, window: int, level: int, imgmin: float, imgmax: float) -> None:
+        self.window_level = True
+        self.window = window
+        self.level = level
+        self.wl_original_range = (imgmin, imgmax)
+
+    def norm_update(self, imgmin: float, imgmax: float) -> None:
+        self.normalized = True
+        self.norm_original_range = (imgmin, imgmax)
+
+    def std_update(self, std: float, mean: float) -> None:
+        self.standardized = True
+        self.std = std
+        self.mean = mean
+
+    def crop_update(self, img_coors: np.ndarray, patient_coords: np.ndarray) -> None:
+        self.cropped = True
+        self.img_coords = img_coords
+        self.patient_coords = patient_coords
+
+    def resampled_update(self, pixelspacing_original: np.ndarray, ratio: int) -> None:
+        self.resampled = True
+        self.pixelspacing_original = pixelspacing_original
+        self.ratio = ratio
+
+    def interpolated_update(self, interpolated_slices: list) -> None:
+        self.interpolated = True
+        self.interpolated_slices = interpolated_slices
+
+
+
+@dataclass
 class ImageVolume:
     # A single volume, single modality reconstruction
     # This would be returned in the following:
@@ -60,16 +125,32 @@ class ImageVolume:
     dims: VolumeDimensions
     array: np.array
     dicom_header: pydicom.dataset.Dataset
-    interpolated: bool = False
-    missing_slices: list = None
+    augmentations: ImgAugmentations = field(default_factory=ImgAugmentations)
 
 
 class Reconstruction:
-    def __call__(self, frame_of_ref):
-        self.define_vol_dims(frame_of_ref)
-        # we can multithread on this iterable
+    def __call__(self, frame_of_ref: FrameOfRef):
+        if not hasattr(self, 'dims'):
+            self.define_vol_dims(frame_of_ref)
+        """
+        # Match statement in python 3.10
+        match mod.name:
+            case 'CT':
+                vols = self.ct(mod)
+            case 'MR':
+                vols = self.mr(mod)
+            case 'NM':
+                vols = self.nm(mod)
+            case 'PET':
+                vols = self.pet(mod)
+            case 'DOSE':
+                vols = self.dose(mod)
+            case 'RTSTRUCT':
+                vols = self.struct(mod)
+            case _:
+                raise TypeError(f'Reconstruction of {mod.name} not supported')
+        """
         for mod in frame_of_ref.iter_modalities:
-            # TODO: Make switch statement in python 3.10
             if mod.name == 'CT':
                 vols = self.ct(mod)
             elif mod.name == 'RTSTRUCT':
@@ -85,14 +166,14 @@ class Reconstruction:
                 vols = self.dose(mod)
         return vols
 
-    def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.array, int):
+    def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
         """[converts a dicom contour slice into image coordinates]
 
         Args:
             contour_slice (pydicom.dataset.Dataset): [(3006, 0016): Contour Image Sequence]
 
         Returns:
-            [np.array]: [2D numpy array of contour points in image coordinates]
+            [np.ndarray]: [2D numpy array of contour points in image coordinates]
             [int]: [The z location of the rtstruct slice location]
         """
         contour_pts = np.array(contour_slice.ContourData).reshape(-1, 3)
@@ -104,7 +185,7 @@ class Reconstruction:
             raise ValueError('RTSTRUCT not registered to rectilinear coordinates')
         return (coords, zloc[0])
 
-    def _build_contour(self, contour_data):
+    def _build_contour(self, contour_data: np.ndarray) -> np.ndarray:
         fill_array = np.zeros(self.dims.shape)
         for contour_slice in contour_data:
             coords, zloc = self._slice_coords(contour_slice)
@@ -116,7 +197,7 @@ class Reconstruction:
         fill_array = fill_array % 2
         return fill_array
 
-    def define_vol_dims(self, frame_of_ref):
+    def define_vol_dims(self, frame_of_ref: FrameOfRef) -> None:
         if not hasattr(self, 'dims'):
             for mod in frame_of_ref.iter_modalities:
                 if mod.name in ['CT', 'MR']:
@@ -125,7 +206,7 @@ class Reconstruction:
             if not hasattr(self, 'dims'):
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
-    def struct(self, modality):
+    def struct(self, modality: Modality):
         if not hasattr(self, 'dims'):
             raise LookupError('Must define volume dimensions first')
         # Return as a struct volume type
@@ -143,7 +224,7 @@ class Reconstruction:
         return struct_sets
 
     @check_dims
-    def ct(self, modality, HU=True):
+    def ct(self, modality: Modality, HU=True) -> list:  # Should be a dict or tree in the future...
         ct_vols = []
         for ct_group in modality.ct:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
@@ -163,7 +244,7 @@ class Reconstruction:
         return ct_vols
 
     @check_dims
-    def nm(self, modality):
+    def nm(self, modality: Modality) -> list:
         nm_vols = []
         for nm_group in modality.nm:
             ds = pydicom.dcmread(nm_group[0])
@@ -177,7 +258,7 @@ class Reconstruction:
         return nm_vols
 
     @check_dims
-    def mr(self, modality):
+    def mr(self, modality: Modality) -> list:
         mr_vols = []
         for mr_group in modality.mr:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
@@ -191,7 +272,7 @@ class Reconstruction:
         return mr_vols
 
     @check_dims
-    def pet(self, modality):
+    def pet(self, modality: Modality) -> list:
         pet_vols = []
         for pet_group in modality.pet:
             fill_array = np.zeros(pet_group.dims)
@@ -210,7 +291,7 @@ class Reconstruction:
         return pet_vols
 
     @check_dims
-    def dose(self, modality):
+    def dose(self, modality: Modality) -> list:
         dose_vols = {}
         ct_coords = self.dims.coordgrid()
         for dosefile in modality.dose:
@@ -233,11 +314,61 @@ class Deconstruction:
 class Tools:
     # Tools are used to process reconstructed arrays
     # DicomUtils are for DICOM reconstruction utilities
-    def dose_max_points(self, dose_array, dose_coords=None):
+    def dose_max_points(self, dose_array: np.ndarray, dose_coords: np.ndarray = None):
         index = np.unravel_index(np.argmax(dose_array), dose_array.shape)
         if dose_coords:
             return dose_coords[index]
         return index
+
+    def window_level(self, img: ImageVolume, window: int, level: int) -> ImageVolume:
+        imgmin, imgmax = (img.min(), img.max())
+        img.augmetnations.wl_update(window, level, imgmin, imgmax)
+
+        ctlo = level - window / 2
+        cthi = ctlo + window
+
+        temp = np.copy(img.array)
+        temp[temp < ctlo] = ctlo
+        temp[temp > cthi] = cthi
+        img.array = temp
+        return img
+
+    def normalize(self, img: ImageVolume) -> ImageVolume:
+        imgmin, imgmax = (img.min(), img.max())
+        img.augmentations.norm_update(imgmin, imgmax)
+
+        temp = (np.copy(img.array) - imgmin) / (imgmax - imgmin)
+        img.array = temp
+        return img
+
+    def crop(self, img: ImageVolume, centroid: np.ndarray,
+             crop_size: np.ndarray) -> ImageVolume:
+        # Need to update the VolumeDimensions header and dicom header too
+        imgshape = img.array.shape()
+        img_coords = np.zeros((2, len(imgshape)))
+        patient_coords = np.zeros((2, len(imgshape)))
+
+        for i, (point, size) in enumerate(zip(centroid, crop_size)):
+            low = min(0, point - size // 2)
+            high = low + size
+            if high > (imgshape[i] - 1):
+                high = (imgshape[i] - 1)
+                low = high - size
+            img_coords[0, i] = low
+            img_coords[1, i] = high
+
+        coordrange = img.dims.coordrange()
+        for i, (low, high) in enumerate(img_coords.T):
+            patient_coords[0, i] = coordrange[i, low]
+            patient_coords[1, i] = coordrange[i, high]
+
+        xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
+        temp = np.copy(img.array)
+        img.array = temp[xlo: xhi, ylo: yhi, zlo: zhi]
+
+        #img.crop_update()
+        img.augmentations.crop_update(img_coords, patient_coords)
+        return img
 
 
 # Can reconstruct either via Series.recon.ct()
