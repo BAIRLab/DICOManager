@@ -1,11 +1,12 @@
+from __future__ import annotations
 import cv2
 import numpy as np
 import pydicom
 import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
+from skimage.transform import rescale
 from dataclasses import dataclass, field, fields
 from utils import VolumeDimensions, check_dims
-from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -99,7 +100,7 @@ class ImgAugmentations:
         self.std = std
         self.mean = mean
 
-    def crop_update(self, img_coors: np.ndarray, patient_coords: np.ndarray) -> None:
+    def crop_update(self, img_coords: np.ndarray, patient_coords: np.ndarray) -> None:
         self.cropped = True
         self.img_coords = img_coords
         self.patient_coords = patient_coords
@@ -108,6 +109,7 @@ class ImgAugmentations:
         self.resampled = True
         self.pixelspacing_original = pixelspacing_original
         self.ratio = ratio
+        self.func = func
 
     def interpolated_update(self, interpolated_slices: list) -> None:
         self.interpolated = True
@@ -314,13 +316,35 @@ class Deconstruction:
 class Tools:
     # Tools are used to process reconstructed arrays
     # DicomUtils are for DICOM reconstruction utilities
-    def dose_max_points(self, dose_array: np.ndarray, dose_coords: np.ndarray = None):
+    # Should probably unnest from the class and move to a seperate file
+    def dose_max_points(self, dose_array: np.ndarray,
+                        dose_coords: np.ndarray = None) -> np.ndarray:
+        """[Calculates the dose maximum point in an array, returns index or coordinates]
+
+        Args:
+            dose_array (np.ndarray): [A reconstructed dose array]
+            dose_coords (np.ndarray, optional): [Associated patient coordinates]. Defaults to None.
+
+        Returns:
+            np.ndarray: [The dose max index, or patient coordinates, if given]
+        """
         index = np.unravel_index(np.argmax(dose_array), dose_array.shape)
         if dose_coords:
             return dose_coords[index]
         return index
 
     def window_level(self, img: ImageVolume, window: int, level: int) -> ImageVolume:
+        """[Applies a window and level to the given object. Works for either HU or CT number,
+            whichever was specified during reconstruction of the array]
+
+        Args:
+            img (ImageVolume): [Image volume object to window and level]
+            window (int): [window in either HU or CT number]
+            level (int): [level in either HU or CT number]
+
+        Returns:
+            ImageVolume: [Image volume with window and level applied]
+        """
         imgmin, imgmax = (img.min(), img.max())
         img.augmetnations.wl_update(window, level, imgmin, imgmax)
 
@@ -334,15 +358,57 @@ class Tools:
         return img
 
     def normalize(self, img: ImageVolume) -> ImageVolume:
-        imgmin, imgmax = (img.min(), img.max())
+        """[Normalizes an image volume ojbect]
+
+        Args:
+            img (ImageVolume): [The image volume object to normalize]
+
+        Returns:
+            ImageVolume: [Normalized image volume object]
+        """
+        imgmin, imgmax = (img.array.min(), img.array.max())
         img.augmentations.norm_update(imgmin, imgmax)
 
         temp = (np.copy(img.array) - imgmin) / (imgmax - imgmin)
         img.array = temp
         return img
 
+    def standardize(self, img: ImageVolume) -> ImageVolume:
+        """[Standardizes an image volume object]
+
+        Args:
+            img (ImageVolume): [The image volume object to standardize]
+
+        Returns:
+            ImageVolume: [Standardized image volume object]
+        """
+        imgmean = np.mean(img.array)
+        imgstd = np.std(img.array)
+        img.augmentation.std_update(imgmean, imgstd)
+
+        temp = (np.copy(img.array) - imgmean) / imgstd
+        img.array = temp
+        return img
+
     def crop(self, img: ImageVolume, centroid: np.ndarray,
              crop_size: np.ndarray) -> ImageVolume:
+        """[Crops an image volume and updates headers accordingly]
+
+        Args:
+            img (ImageVolume): [Image volume object to crop]
+            centroid (np.ndarray): [central cropping value]
+            crop_size (np.ndarray): [dimensions of final cropped array]
+
+        Returns:
+            ImageVolume: [description]
+
+        Notes:
+            Centroid will not be observed if the cropped volume will be
+                smaller than the crop_size. Will shift centroid to maintain
+                the specific crop size
+            This function currently does not update the ImageVolume header
+                or ImageVolume.dicom_header to reflect the new dimensions
+        """
         # Need to update the VolumeDimensions header and dicom header too
         imgshape = img.array.shape()
         img_coords = np.zeros((2, len(imgshape)))
@@ -368,6 +434,24 @@ class Tools:
 
         #img.crop_update()
         img.augmentations.crop_update(img_coords, patient_coords)
+        return img
+
+    def resample(self, img: ImageVolume, ratio: float) -> ImageVolume:
+        """[Downsample an image by a specified ratio]
+
+        Args:
+            img (ImageVolume): [Image to resample]
+            ratio (float): [Ratio to downsample]
+
+        Returns:
+            ImageVolume: [Downsampled image array]
+
+        Notes:
+            TODO: Does not update voxel spacing yet
+        """
+        temp = np.copy(img.array)
+        img.array = rescale(temp, ratio)
+        img.augmentations.resample_update(None, round(ratio))
         return img
 
 
