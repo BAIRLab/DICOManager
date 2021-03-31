@@ -3,14 +3,16 @@ import cv2
 import numpy as np
 import pydicom
 import utils
+import SimpleITK as sitk
 from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from utils import VolumeDimensions, check_dims
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from groupings import FrameOfRef, Modality
+
 
 @dataclass
 class StructVolumeSet:
@@ -85,6 +87,9 @@ class ImgAugmentations:
     interpolated: bool = False
     interpolated_slices: list = None
 
+    # biase field correction
+    bias_corrected: bool = True
+
     def wl_update(self, window: int, level: int, imgmin: float, imgmax: float) -> None:
         self.window_level = True
         self.window = window
@@ -109,7 +114,6 @@ class ImgAugmentations:
         self.resampled = True
         self.pixelspacing_original = pixelspacing_original
         self.ratio = ratio
-        self.func = func
 
     def interpolated_update(self, interpolated_slices: list) -> None:
         self.interpolated = True
@@ -249,7 +253,7 @@ class Reconstruction:
     def nm(self, modality: Modality) -> list:
         nm_vols = []
         for nm_group in modality.nm:
-            ds = pydicom.dcmread(nm_group[0])
+            ds = pydicom.dcmread(nm_group.filepath)
             raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
             map_seq = ds.RealWorldValueMappingSequence[0]
             slope = float(map_seq.RealWorldValueSlope)
@@ -277,13 +281,13 @@ class Reconstruction:
     def pet(self, modality: Modality) -> list:
         pet_vols = []
         for pet_group in modality.pet:
-            fill_array = np.zeros(pet_group.dims)
-            origin = pet_group.origin
+            fill_array = np.zeros(self.dims.shape)
+            origin = self.dims.origin
 
-            for pet_file in pet_group:
-                ds = pydicom.dcmread(pet_file)
-                z_loc = int(round(abs((origin[-1]))))
-                fill_array[:, :, z_loc] = ds.pixel_array
+            for pet_file in sorted(pet_group):
+                ds = pydicom.dcmread(pet_file.filepath)
+                zloc = int(round(abs((origin[-1]))))
+                fill_array[:, :, zloc] = ds.pixel_array
 
             rescaled = fill_array * ds.RescaleSlope + ds.RescaleIntercept
             patient_weight = 1000 * float(ds.PatientWeight)
@@ -454,7 +458,21 @@ class Tools:
         img.augmentations.resample_update(None, round(ratio))
         return img
 
+    def bias_field_correction(self, img: ImageVolume) -> ImageVolume:
+        """[MRI Bias Field Correction]
 
-# Can reconstruct either via Series.recon.ct()
-# or processing.recon.ct()
-# This will require us to design the file structure accordingly
+        Args:
+            img (ImageVolume): [MRI Image Volume to be N4 bias corrected]
+
+        Returns:
+            ImageVolume: [N4 bias corrected image]
+        """
+        img.augmentations.bias_corrected = True
+
+        sitk_image = sitk.GetImageFromArray(img.array)
+        sitk_mask = sitk.OtsuThreshold(sitk_image, 0, 1, 200)
+        corrector = sitk.N4BiasFieldCorrectionImageFilter()
+        output = corrector.Execute(sitk_image, sitk_mask)
+        img.array = sitk.GetArrayFromImage(output)
+
+        return img
