@@ -134,6 +134,7 @@ class VolumeDimensions:
     dx: float = None
     dy: float = None
     dz: float = None
+    ipp: list = None
     vox_size: list = None
     flipped: bool = False
     multi_thick: bool = False
@@ -180,7 +181,8 @@ class VolumeDimensions:
 
         for dcm in files:
             ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
-            ipp = ds.ImagePositionPatient
+            self.ipp = ds.ImagePositionPatient
+            self.iop = ds.ImageOrientationPatient
             inst = int(ds.InstanceNumber)
             slice_thicknesses.append(float(ds.SliceThickness))
             if inst < inst0:  # Low instance
@@ -225,6 +227,39 @@ class VolumeDimensions:
         pts_x, pts_y, pts_z = self.coordrange()
         grid = np.array([*np.meshgrid(pts_x, pts_y, pts_z, indexing='ij')])
         return grid.reshape(3, -1)
+
+    def Mgrid(self):
+        """
+        Function
+        ----------
+        Given a DICOM CT image slice, returns an array of pixel coordinates
+
+        Returns
+        ----------
+        numpy.ndarray
+            A numpy array of shape Mx2 where M is the dcm.Rows x dcm.Cols,
+            the number of (x, y) pairs representing coordinates of each pixel
+
+        Notes
+        ----------
+        Computes M via DICOM Standard Equation C.7.6.2.1-1
+            https://dicom.innolitics.com/ciods/ct-image/image-plane/00200037
+        """
+        # Unpacking arrays is poor form, but I'm feeling rebellious...
+        X_x, X_y, X_z = np.array(self.iop[:3]).T
+        Y_x, Y_y, Y_z = np.array(self.iop[3:]).T
+        S_x, S_y, S_z = np.array(self.ipp)
+        D_i, D_j = self.dx, self.dy
+        i, j = np.indices((self.rows, self.cols))
+
+        M = np.array([[X_x*D_i, Y_x*D_j, 0, S_x],
+                      [X_y*D_i, Y_y*D_j, 0, S_y],
+                      [X_z*D_i, Y_z*D_j, 0, S_z],
+                      [0, 0, 0, 1]])
+
+        C = np.array([i, j, 0, 1])
+
+        return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
 
 def check_dims(func):

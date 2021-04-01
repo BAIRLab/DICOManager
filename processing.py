@@ -8,10 +8,11 @@ from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
 from dataclasses import dataclass, field
 from utils import VolumeDimensions, check_dims
+from new_deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from groupings import FrameOfRef, Modality
+    from groupings import Cohort, FrameOfRef, Modality
 
 
 @dataclass
@@ -163,7 +164,6 @@ class Reconstruction:
                 vols = self.struct(mod)
             elif mod.name == 'MR':
                 vols = self.mr(mod)
-            # These might not work yet
             elif mod.name == 'NM':
                 vols = self.nm(mod)
             elif mod.name == 'PET':
@@ -313,8 +313,100 @@ class Reconstruction:
 
 
 class Deconstruction:
-    def __init__(self):
-        self.temp = None
+    def to_rt(self, source_rt: Modality, masks: np.ndarray,
+              roi_names: list = None, mim: bool = True) -> pydicom.dataset.Dataset:
+        """[Appends masks to a given RTSTRUCT modality object]
+
+        Args:
+            source_rt (Modality): [description]
+            masks (np.ndarray): [description]
+            roi_names (list, optional): [description]. Defaults to None.
+            mim (bool, optional): [description]. Defaults to True.
+
+        Returns:
+            pydicom.dataset.Dataset: [description]
+        """
+        return self.from_rt(source_rt, masks, roi_names, mim, False, True)
+
+    def from_rt(self, source_rt: Modality, masks: np.ndarray,
+                roi_names: list = None, mim: bool = True, empty: bool = True,
+                update: bool = True) -> pydicom.dataset.Dataset:
+        parent = source_rt.parent
+        while not type(parent) is FrameOfRef:
+            parent = parent.parent
+            assert type(parent) != Cohort, 'Tree must contain FrameOfRef'
+        frame_of_ref = parent
+
+        if roi_names:
+            warning = 'No names, or a name for each mask must be given'
+            assert masks.shape[0] == len(roi_names), warning
+        if type(source_rt) is str:
+            source_rt = pydicom.dcmread(source_rt)
+
+        new_rt = RTStructConstructor(frame_of_ref, rt_dcm=source_rt, mim=mim)
+        if update:
+            new_rt.update_header()
+        if empty:
+            new_rt.empty()
+
+        new_rt.append_masks(masks, roi_names)
+        return new_rt.to_pydicom()
+
+    def from_ct(self, frame_of_ref: FrameOfRef, masks: np.ndarray,
+                roi_names: list = None, mim: bool = True) -> pydicom.dataset.Dataset:
+        if roi_names:
+            warning = 'No names, or a name for each mask must be given'
+            assert masks.shape[0] == len(roi_names), warning
+
+        new_rt = RTStructConstructor(frame_of_ref, mim=mim)
+        new_rt.initialize()
+        new_rt.append_masks(masks, roi_names)
+        return new_rt.to_pydicom()
+
+    def save_rt(self, source_rt: pydicom.dataset.Dataset, filename: str = None) -> None:
+        """[Save created RTSTRUCT to specified filepath]
+
+        Args:
+            source_rt (pydicom.dataset.Dataset): [RTSTRUCT to save]
+            filename (str, optional): [Default name is ./SOPInstanceUID]. Defaults to None.
+
+        Raises:
+            TypeError: [Occurs if source_rt is not a complete pydicom.dataset object]
+        """
+        if not filename:
+            try:
+                filename = source_rt.SOPInstanceUID + '.dcm'
+            except Exception:
+                raise TypeError('source_rt must be a pydicom.dataset object')
+
+        if type(source_rt) is pydicom.dataset.FileDataset:
+            source_rt.save_as(filename)
+        elif type(source_rt) is pydicom.dataset.Dataset:
+            # P.10.C.7.1 DICOM File Meta Information
+            file_meta = pydicom.dataset.FileMetaDataset()
+            file_meta.FileMetaInformationGroupLength = 222  # Check
+            file_meta.FileMetaInformationVersion = b'\x00\x01'
+            file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
+            file_meta.MediaStorageSOPInstanceUID = source_rt.SOPInstanceUID
+            file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
+            file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
+            file_meta.ImplementationVersionName = 'OFFIS_DCMTK_362'
+            file_meta.SourceApplicationEntityTitle = 'RO_AE_MIM'
+
+            # Input dict to convert pydicom Datastet to FileDataset
+            inputs = {'filename_or_obj': filename,
+                      'dataset': source_rt,
+                      'file_meta': file_meta,
+                      'preamble': b'\x00'*128}
+            output_ds = pydicom.dataset.FileDataset(**inputs)
+            output_ds.save_as(filename)
+        else:
+            raise TypeError('source_rt must be a pydicom.dataset object')
+
+    def sort_rt(self, source_rt, tree):
+        # sort the rt into a tree
+        # basic two optiosn will be this or saving
+        pass
 
 
 class Tools:
