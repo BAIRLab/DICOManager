@@ -121,7 +121,6 @@ class ImgAugmentations:
         self.interpolated_slices = interpolated_slices
 
 
-
 @dataclass
 class ImageVolume:
     # A single volume, single modality reconstruction
@@ -577,7 +576,7 @@ class Tools:
         temp = np.copy(img.array)
         img.array = temp[xlo: xhi, ylo: yhi, zlo: zhi]
 
-        #img.crop_update()
+        # img.crop_update()
         img.augmentations.crop_update(img_coords, patient_coords)
         return img
 

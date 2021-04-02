@@ -7,20 +7,14 @@ from dataclasses import dataclass
 from matplotlib import cm
 import numpy as np
 import hashlib
-import numpy as np
 import os
-import glob
-import pydicom
 import random
 import uuid
 import scipy
-import matplotlib.pyplot as plt
-from pathlib import Path
 from scipy.ndimage.morphology import binary_erosion
 from scipy.ndimage.morphology import binary_dilation
 from scipy import spatial
 from skimage import measure as skm
-from datetime import datetime
 from utils import VolumeDimensions
 
 
@@ -443,7 +437,6 @@ class RTStructConstructor:
         # Get referenced SOP UIDs and Polygon surface points
         ref_uid = self._ref_sop_uids[z_index].ref_uid
         ctcoord = self.dims.Mgrid(self._ct_series_hdrs[z_index])[..., :3]
-        #ctcoord = utils.prepare_coordinate_mapping(self._ct_series_hdrs[z_index])[..., :3]
         coords = utils.poly_to_coords_2D(polygon, ctcoord=ctcoord, mim=self.mim)
         # Fill the Contour Sequence
         contour_seq = pydicom.dataset.Dataset()
@@ -630,7 +623,7 @@ def from_rt(frame_of_ref, source_rt, masks, roi_names=None,
     if type(source_rt) is str:
         source_rt = pydicom.dcmread(source_rt)
 
-    new_rt = RTStruct(frame_of_ref, rt_dcm=source_rt, mim=mim)
+    new_rt = RTStructConstructor(frame_of_ref, rt_dcm=source_rt, mim=mim)
     if update:
         new_rt.update_header()
     if empty:
@@ -676,7 +669,7 @@ def from_ct(frame_of_ref, masks, roi_names=None, mim=True):
         warning = 'No names, or a name for each mask must be given'
         assert masks.shape[0] == len(roi_names), warning
 
-    new_rt = RTStruct(frame_of_ref, mim=mim)
+    new_rt = RTStructConstructor(frame_of_ref, mim=mim)
     new_rt.initialize()
     new_rt.append_masks(masks, roi_names)
     return new_rt.to_pydicom()
@@ -1240,4 +1233,3 @@ def generate_instance_uid() -> str:
     # Format all the SOP Instance UID stops properly
     terms = hv[:6], hv[6], hv[7:15], hv[15:26], hv[26:35], hv[35:38], hv[38:41]
     return '2.16.840.1.' + '.'.join(terms)
-

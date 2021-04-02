@@ -9,7 +9,6 @@ from processing import Reconstruction, Deconstruction
 from datetime import datetime
 from typing import Any, TypeVar
 import utils
-import pathlib
 
 
 class GroupUtils(NodeMixin):
@@ -80,7 +79,7 @@ class GroupUtils(NodeMixin):
         if self.filter_list:
             if self._organize_by == 'PatientID':
                 mrn = self.dicomfile.PatientID
-                return (not mrn in self.filter_list['PatientID'])
+                return (mrn not in self.filter_list['PatientID'])
             if self._organize_by == 'StudyUID':
                 datestr = str(dicomfile.DateTime.StudyDate)
                 datenum = int(datestr)
@@ -91,10 +90,9 @@ class GroupUtils(NodeMixin):
                 datestr = str(dicomfile.DateTime.SeriesDate)
                 datenum = int(datestr)
                 cond0 = datestr in self.filter_list['StudyDate']
-                cond1 = datestr in self.filter_list['StudyDate']
+                cond1 = datenum in self.filter_list['StudyDate']
                 return not (cond0 or cond1)
         return True
-
 
     def _add_file(self, dicomfile: object) -> None:
         """[adds a file to the file tree]
@@ -488,6 +486,5 @@ if __name__ == '__main__':
         for study in patient:
             for ref in study:
                 test = ref.recon()
-        #print(patient.datename)
 
-    #cohort.save_tree('/home/eporter/eporter_data/', prefix='date')
+    # cohort.save_tree('/home/eporter/eporter_data/', prefix='date')
