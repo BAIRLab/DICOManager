@@ -34,13 +34,14 @@ class GroupUtils(NodeMixin):
         flatten (None): flattens tree to one child per parent
     """
     def __init__(self, name=None, files=None, parent=None, children=None,
-                 include_series=False, isodatetime=None):
+                 include_series=False, isodatetime=None, filter_list=None):
         super().__init__()
         self.name = name
         self.files = files
         self.parent = parent
         self.include_series = include_series
         self.isodatetime = isodatetime
+        self.filter_list = filter_list
         if children:
             self.children = children
 
@@ -74,26 +75,49 @@ class GroupUtils(NodeMixin):
                 f = DicomFile(f)
             self._add_file(f)
 
+    def _filter_check(self, dicomfile: object) -> bool:
+        # We want to return true if its good to add
+        if self.filter_list:
+            if self._organize_by == 'PatientID':
+                mrn = self.dicomfile.PatientID
+                return (not mrn in self.filter_list['PatientID'])
+            if self._organize_by == 'StudyUID':
+                datestr = str(dicomfile.DateTime.StudyDate)
+                datenum = int(datestr)
+                cond0 = datestr in self.filter_list['StudyDate']
+                cond1 = datestr in self.filter_list['StudyDate']
+                return not (cond0 or cond1)
+            if self._organize_by == 'SeriesUID':
+                datestr = str(dicomfile.DateTime.SeriesDate)
+                datenum = int(datestr)
+                cond0 = datestr in self.filter_list['StudyDate']
+                cond1 = datestr in self.filter_list['StudyDate']
+                return not (cond0 or cond1)
+        return True
+
+
     def _add_file(self, dicomfile: object) -> None:
         """[adds a file to the file tree]
 
         Args:
             dicomfile (DicomFile): [a DicomFile object]
         """
-        key = str(dicomfile[self._organize_by])
-        found = False
-        for child in self.children:
-            if key == child.name:
-                child._add_file(dicomfile)
-                found = True
-        if not found:
-            dt = dicomfile.DateTime.isoformat(self._child_type)
-            child_params = {'name': key,
-                            'files': [dicomfile],
-                            'parent': self,
-                            'include_series': self.include_series,
-                            'isodatetime': dt}
-            self._child_type(**child_params)
+        if self._filter_check(dicomfile):
+            key = str(dicomfile[self._organize_by])
+            found = False
+            for child in self.children:
+                if key == child.name:
+                    child._add_file(dicomfile)
+                    found = True
+
+            if not found:
+                dt = dicomfile.DateTime.isoformat(self._child_type)
+                child_params = {'name': key,
+                                'files': [dicomfile],
+                                'parent': self,
+                                'include_series': self.include_series,
+                                'isodatetime': dt}
+                self._child_type(**child_params)
 
     @property
     def dirname(self):
@@ -300,8 +324,13 @@ class FrameOfRef(GroupUtils):
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
-        self._reconstruct = Reconstruction()
         self._deconstruct = Deconstruction()
+        if self.filter_list:
+            structs = self.filter_list['StructName']
+            self._recontruct = Reconstruction(filter_structs=structs)
+        else:
+            self._reconstruct = Reconstruction()
+
         if self.include_series:
             self._child_type = Series
             self._organize_by = 'SeriesUID'
@@ -318,11 +347,11 @@ class FrameOfRef(GroupUtils):
         else:
             return iter(self.children)
 
-    def recon(self):
-        self._reconstruct(self)
+    def recon(self, in_place=False):
+        return self._reconstruct(self)
 
-    def decon(self):
-        self._deconstruct(self)
+    def decon(self, in_place=False):
+        return self._deconstruct(self)
 
 
 class Series(GroupUtils):

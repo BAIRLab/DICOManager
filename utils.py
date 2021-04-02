@@ -187,10 +187,10 @@ class VolumeDimensions:
             slice_thicknesses.append(float(ds.SliceThickness))
             if inst < inst0:  # Low instance
                 inst0 = inst
-                z0 = float(ipp[-1])
+                z0 = float(self.ipp[-1])
             if inst > inst1:  # High instance
                 inst1 = inst
-                z1 = float(ipp[-1])
+                z1 = float(self.ipp[-1])
             self.zlohi = (z0, z1)
 
         if inst0 > 1:
@@ -202,7 +202,7 @@ class VolumeDimensions:
             self.multi_thick = True
 
         self.dz = min(slice_thicknesses)
-        self.origin = np.array([*ipp[:2], min(z0, z1)])
+        self.origin = np.array([*self.ipp[:2], min(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
 
         if z1 > z0:
@@ -267,5 +267,5 @@ def check_dims(func):
         if not hasattr(cls, 'dims'):
             if modality.name in ['CT', 'MR']:
                 cls.dims = VolumeDimensions(modality.data)
-        func(cls, modality, *args, **kwargs)
+        return func(cls, modality, *args, **kwargs)
     return wrapped

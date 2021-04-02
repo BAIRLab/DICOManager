@@ -9,9 +9,16 @@ cohort = Cohort(name='TestFileSave', files=files, include_series=True)
 for patient in cohort:
     for study in patient:
         for ref in study:
-            print(type(ref))
-            print(type(ref.parent))
-            print(type(ref.parent.parent))
+            vol = ref.recon()
+            print(vol)
     #print(patient.datename)
 
 #cohort.save_tree('/home/eporter/eporter_data/', prefix='date')
+
+# Read from a json
+filter_list = {'PatientID': [...],
+               'StudyDate': [...],
+               'SeriesDate': [...],
+               'StructName': [...]}
+
+# Pass filter list into cohort, keep passing it downward

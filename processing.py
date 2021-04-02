@@ -6,10 +6,10 @@ import utils
 import SimpleITK as sitk
 from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from utils import VolumeDimensions, check_dims
 from new_deconstruction import RTStructConstructor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality
@@ -134,9 +134,40 @@ class ImageVolume:
     dicom_header: pydicom.dataset.Dataset
     augmentations: ImgAugmentations = field(default_factory=ImgAugmentations)
 
+    @property
+    def shape(self):
+        return self.dims.shape
+
+
+@dataclass
+class ModalityVolumes:
+    ct: ImageVolume = None
+    nm: ImageVolume = None
+    mr: ImageVolume = None
+    pet: ImageVolume = None
+    dose: ImageVolume = None
+    struct: StructVolumeSet = None
+
+    def __iter__(self):
+        return iter([f.name for f in fields(self)])
+
+    def __getitem__(self, name):
+        return self.__dict__[name]
+
+    def __str__(self):
+        output = []
+        for name in self:
+            value = self[name]
+            if value:
+                line = '[' + ','.join([str(x.shape) for x in value]) + ']'
+                output.append(name + ': ' + line + '; ')
+        return ''.join(output)
+
 
 class Reconstruction:
-    def __call__(self, frame_of_ref: FrameOfRef):
+    def __call__(self, frame_of_ref: FrameOfRef,
+                 filter_structs: Union(list, dict) = None) -> ModalityVolumes:
+        self.filter_structs = filter_structs
         if not hasattr(self, 'dims'):
             self.define_vol_dims(frame_of_ref)
         """
@@ -157,20 +188,21 @@ class Reconstruction:
             case _:
                 raise TypeError(f'Reconstruction of {mod.name} not supported')
         """
+        mod_data = ModalityVolumes()
         for mod in frame_of_ref.iter_modalities:
             if mod.name == 'CT':
-                vols = self.ct(mod)
+                mod_data.ct = self.ct(mod)
             elif mod.name == 'RTSTRUCT':
-                vols = self.struct(mod)
+                mod_data.struct = self.struct(mod)
             elif mod.name == 'MR':
-                vols = self.mr(mod)
+                mod_data.mr = self.mr(mod)
             elif mod.name == 'NM':
-                vols = self.nm(mod)
+                mod_data.nm = self.nm(mod)
             elif mod.name == 'PET':
-                vols = self.pet(mod)
+                mod_data.pet = self.pet(mod)
             elif mod.name == 'DOSE':
-                vols = self.dose(mod)
-        return vols
+                mod_data.dose = self.dose(mod)
+        return mod_data
 
     def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
         """[converts a dicom contour slice into image coordinates]
@@ -212,6 +244,23 @@ class Reconstruction:
             if not hasattr(self, 'dims'):
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
+    def _struct_filter_check(self, name):
+        if self.filter_strucst is None:
+            return True
+        elif type(self.filter_structs) is list:
+            return name in self.filter_structs
+        elif type(self.filter_structs) is dict:
+            if name in self.filter_structs:
+                return True
+            found = False
+            for value in self.filter_structs.values():
+                if name in value:
+                    found = True
+                    break
+            return found
+        else:
+            raise TypeError('filter_structs must be dict or list')
+
     def struct(self, modality: Modality):
         if not hasattr(self, 'dims'):
             raise LookupError('Must define volume dimensions first')
@@ -223,9 +272,10 @@ class Reconstruction:
                 ds = pydicom.dcmread(struct.filepath)
                 for index, contour in enumerate(ds.StructureSetROISequence):
                     name = contour.ROIName.lower()
-                    contour_data = ds.ROIContourSequence[index].ContourSequence
-                    built = self._build_contour(contour_data)
-                    struct_set[name] = built
+                    if self._struct_filter_check(name):
+                        contour_data = ds.ROIContourSequence[index].ContourSequence
+                        built = self._build_contour(contour_data)
+                        struct_set[name] = built
             struct_sets.append(struct_set)
         return struct_sets
 
@@ -240,7 +290,6 @@ class Reconstruction:
                 ds = pydicom.dcmread(ct_file.filepath)
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
                 fill_array[:, :, zloc] = ds.pixel_array
-
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept
