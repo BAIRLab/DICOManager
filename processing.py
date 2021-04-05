@@ -244,7 +244,7 @@ class Reconstruction:
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
     def _struct_filter_check(self, name):
-        if self.filter_strucst is None:
+        if self.filter_structs is None:
             return True
         elif type(self.filter_structs) is list:
             return name in self.filter_structs
@@ -361,8 +361,12 @@ class Reconstruction:
 
 
 class Deconstruction:
+    def __init__(self, tree):
+        self.tree = tree
+
     def to_rt(self, source_rt: Modality, masks: np.ndarray,
-              roi_names: list = None, mim: bool = True) -> pydicom.dataset.Dataset:
+              roi_names: list = None, mim: bool = True,
+              sort: bool = True) -> pydicom.dataset.Dataset:
         """[Appends masks to a given RTSTRUCT modality object]
 
         Args:
@@ -374,11 +378,15 @@ class Deconstruction:
         Returns:
             pydicom.dataset.Dataset: [description]
         """
-        return self.from_rt(source_rt, masks, roi_names, mim, False, True)
+        if not sort:
+            return self.from_rt(source_rt, masks, roi_names, mim, False, True)
+        temp = self.from_rt(source_rt, masks, roi_names, mim, False, True)
+        self.tree._add_file(temp)
+        return None
 
     def from_rt(self, source_rt: Modality, masks: np.ndarray,
                 roi_names: list = None, mim: bool = True, empty: bool = True,
-                update: bool = True) -> pydicom.dataset.Dataset:
+                update: bool = True, sort: bool = True) -> pydicom.dataset.Dataset:
         parent = source_rt.parent
         while not type(parent) is FrameOfRef:
             parent = parent.parent
@@ -398,18 +406,31 @@ class Deconstruction:
             new_rt.empty()
 
         new_rt.append_masks(masks, roi_names)
-        return new_rt.to_pydicom()
 
-    def from_ct(self, frame_of_ref: FrameOfRef, masks: np.ndarray,
-                roi_names: list = None, mim: bool = True) -> pydicom.dataset.Dataset:
+        if not sort:
+            return new_rt.to_pydicom()
+        temp = new_rt.to_pydicom()
+        self.tree._add_file(temp)
+        return None
+
+    def from_ct(self, masks: np.ndarray,
+                roi_names: list = None, mim: bool = True,
+                sort: bool = True, save: bool = False) -> pydicom.dataset.Dataset:
         if roi_names:
             warning = 'No names, or a name for each mask must be given'
             assert masks.shape[0] == len(roi_names), warning
 
-        new_rt = RTStructConstructor(frame_of_ref, mim=mim)
+        new_rt = RTStructConstructor(self.tree, mim=mim)
         new_rt.initialize()
+        print('initialized')
         new_rt.append_masks(masks, roi_names)
-        return new_rt.to_pydicom()
+        print('masks added')
+
+        if not sort:
+            return new_rt.to_pydicom()
+        temp = new_rt.to_pydicom()
+        self.tree._add_file(temp)
+        return None
 
     def save_rt(self, source_rt: pydicom.dataset.Dataset, filename: str = None) -> None:
         """[Save created RTSTRUCT to specified filepath]
@@ -451,10 +472,8 @@ class Deconstruction:
         else:
             raise TypeError('source_rt must be a pydicom.dataset object')
 
-    def sort_rt(self, source_rt, tree):
-        # sort the rt into a tree
-        # basic two optiosn will be this or saving
-        pass
+    def sort_rt(self, source_rt):
+        self.tree._add_file(source_rt)
 
 
 class Tools:

@@ -75,23 +75,22 @@ class GroupUtils(NodeMixin):
             self._add_file(f)
 
     def _filter_check(self, dicomfile: object) -> bool:
+        def date_check(date, dtype):
+            cond0 = str(date) in self.filter_list[dtype]
+            cond1 = int(date) in self.filter_list[dtype]
+            return not (cond0 or cond1)
+
         # We want to return true if its good to add
         if self.filter_list:
             if self._organize_by == 'PatientID':
                 mrn = self.dicomfile.PatientID
                 return (mrn not in self.filter_list['PatientID'])
             if self._organize_by == 'StudyUID':
-                datestr = str(dicomfile.DateTime.StudyDate)
-                datenum = int(datestr)
-                cond0 = datestr in self.filter_list['StudyDate']
-                cond1 = datestr in self.filter_list['StudyDate']
-                return not (cond0 or cond1)
+                date = dicomfile.DateTime.StudyDate
+                return date_check(date, 'StudyDate')
             if self._organize_by == 'SeriesUID':
-                datestr = str(dicomfile.DateTime.SeriesDate)
-                datenum = int(datestr)
-                cond0 = datestr in self.filter_list['StudyDate']
-                cond1 = datenum in self.filter_list['StudyDate']
-                return not (cond0 or cond1)
+                date = dicomfile.DateTime.SeriesDate
+                return date_check(date, 'SeriesDate')
         return True
 
     def _add_file(self, dicomfile: object) -> None:
@@ -100,6 +99,9 @@ class GroupUtils(NodeMixin):
         Args:
             dicomfile (DicomFile): [a DicomFile object]
         """
+        if not type(dicomfile) is DicomFile:
+            dicomfile = DicomFile(dicomfile.SOPInstanceUID, dcm_obj=dicomfile)
+            print(dicomfile)
         if self._filter_check(dicomfile):
             key = str(dicomfile[self._organize_by])
             found = False
@@ -215,10 +217,12 @@ class DicomFile(GroupUtils):
     """
     SelfType = TypeVar('DicomFile')
 
-    def __init__(self, filepath: str, *args, **kwargs):
+    def __init__(self, filepath: str,
+                 dcm_obj: pydicom.dataset.Dataset = None, *args, **kwargs):
         super().__init__(None, *args, **kwargs)
         self.name = os.path.basename(filepath)
         self.filepath = filepath
+        self.dcm_obj = dcm_obj
         self._digest()
 
     def __getitem__(self, name: str):
@@ -239,31 +243,37 @@ class DicomFile(GroupUtils):
             return self.SliceLocation == other.SliceLocation
         return self.FrameOfRefUID == other.FrameOfRefUID
 
+    def _pull_info(self, ds):
+        self.PatientID = ds.PatientID
+        self.StudyUID = ds.StudyInstanceUID
+        self.SeriesUID = ds.SeriesInstanceUID
+        self.Modality = ds.Modality
+        self.InstanceUID = ds.SOPInstanceUID
+        self.DateTime = DicomDateTime(ds)
+
+        if hasattr(ds, 'FrameOfReferenceUID'):
+            self.FrameOfRefUID = ds.FrameOfReferenceUID
+        elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
+            ref_seq = ds.ReferencedFrameOfReferenceSequence
+            self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
+        else:
+            self.FrameOfRefUID = None
+
+        if hasattr(ds, 'Columns'):
+            self.cols = ds.Columns
+            self.rows = ds.Rows
+
+        if hasattr(ds, 'SliceLocation'):
+            self.SliceLocation = float(ds.SliceLocation)
+        elif hasattr(ds, 'ImagePositionPatient'):
+            self.SliceLocation = float(ds.ImagePositionPatient[-1])
+
     def _digest(self):
-        with pydicom.dcmread(self.filepath, stop_before_pixels=True) as ds:
-            self.PatientID = ds.PatientID
-            self.StudyUID = ds.StudyInstanceUID
-            self.SeriesUID = ds.SeriesInstanceUID
-            self.Modality = ds.Modality
-            self.InstanceUID = ds.SOPInstanceUID
-            self.DateTime = DicomDateTime(ds)
-
-            if hasattr(ds, 'FrameOfReferenceUID'):
-                self.FrameOfRefUID = ds.FrameOfReferenceUID
-            elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
-                ref_seq = ds.ReferencedFrameOfReferenceSequence
-                self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
-            else:
-                self.FrameOfRefUID = None
-
-            if hasattr(ds, 'Columns'):
-                self.cols = ds.Columns
-                self.rows = ds.Rows
-
-            if hasattr(ds, 'SliceLocation'):
-                self.SliceLocation = float(ds.SliceLocation)
-            elif hasattr(ds, 'ImagePositionPatient'):
-                self.SliceLocation = float(ds.ImagePositionPatient[-1])
+        if self.dcm_obj is not None:
+            self._pull_info(self.dcm_obj)
+        else:
+            ds = pydicom.dcmread(self.filepath, stop_before_pixels=True)
+            self._pull_info(ds)
 
 
 class Cohort(GroupUtils):
@@ -322,7 +332,7 @@ class FrameOfRef(GroupUtils):
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
-        self._deconstruct = Deconstruction()
+        self.decon = Deconstruction(tree=self)
         if self.filter_list:
             structs = self.filter_list['StructName']
             self._recontruct = Reconstruction(filter_structs=structs)
@@ -347,9 +357,6 @@ class FrameOfRef(GroupUtils):
 
     def recon(self, in_place=False):
         return self._reconstruct(self)
-
-    def decon(self, in_place=False):
-        return self._deconstruct(self)
 
 
 class Series(GroupUtils):

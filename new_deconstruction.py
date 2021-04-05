@@ -61,18 +61,20 @@ class RTStructConstructor:
         self.frame_of_ref = frame_of_ref
         self.new_rt = copy.deepcopy(rt_dcm)
         self.mim = mim
+        self._define_vol_dims()
         self._ref_sop_uids = {}
         self._ct_series_hdrs = {}
         self._unpack_ct_hdrs()
 
-    def define_vol_dims(self, frame_of_ref):
-        for mod in frame_of_ref.iter_modalities:
+    def _define_vol_dims(self):
+        for mod in self.frame_of_ref.iter_modalities:
+            print(mod, mod.name)
             if mod.name == 'CT':
                 self.dims = VolumeDimensions(mod.data)
-                self.ct_series = mod.ct
+                self.ct_series = [f.filepath for f in mod.ct[0]]
                 break
-            if not hasattr(self, 'dims'):
-                raise TypeError('Volume dimensions not created, no CT in Frame Of Reference')
+        if not hasattr(self, 'dims'):
+            raise TypeError('Volume dimensions not created, no CT in Frame Of Reference')
 
     def initialize(self):
         """
@@ -106,7 +108,7 @@ class RTStructConstructor:
 
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-        instance_uid = utils.generate_instance_uid()
+        instance_uid = generate_instance_uid()
 
         # P.3.C.7.1.1 Patient Module
         if hasattr(ct_dcm, 'PatientName'):
@@ -277,7 +279,7 @@ class RTStructConstructor:
 
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-        instance_uid = utils.generate_instance_uid()
+        instance_uid = generate_instance_uid()
 
         # P.3.C.7.5.1 General Equipment Module
         self.new_rt.Manufacturer = 'Beaumont Health'
@@ -397,7 +399,7 @@ class RTStructConstructor:
         # For RTSTRURCTs, a contour sequence item is a unconnected 2D z-axis polygon
         for z_index in range(mask.shape[-1]):
             z_slice = mask[:, :, z_index]
-            each_polygon = utils.separate_polygons(z_slice, mim=self.mim)
+            each_polygon = separate_polygons(z_slice, mim=self.mim)
             for polygon in each_polygon:
                 contour_seq = self._contour_seq(polygon, z_index)
                 roi_contour_seq.ContourSequence.append(contour_seq)
@@ -437,7 +439,7 @@ class RTStructConstructor:
         # Get referenced SOP UIDs and Polygon surface points
         ref_uid = self._ref_sop_uids[z_index].ref_uid
         ctcoord = self.dims.Mgrid(self._ct_series_hdrs[z_index])[..., :3]
-        coords = utils.poly_to_coords_2D(polygon, ctcoord=ctcoord, mim=self.mim)
+        coords = poly_to_coords_2D(polygon, ctcoord=ctcoord)
         # Fill the Contour Sequence
         contour_seq = pydicom.dataset.Dataset()
         contour_seq.ContourImageSequence = pydicom.sequence.Sequence([ref_uid])

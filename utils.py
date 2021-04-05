@@ -228,7 +228,7 @@ class VolumeDimensions:
         grid = np.array([*np.meshgrid(pts_x, pts_y, pts_z, indexing='ij')])
         return grid.reshape(3, -1)
 
-    def Mgrid(self):
+    def Mgrid(self, dcm_hdr):
         """
         Function
         ----------
@@ -245,10 +245,12 @@ class VolumeDimensions:
         Computes M via DICOM Standard Equation C.7.6.2.1-1
             https://dicom.innolitics.com/ciods/ct-image/image-plane/00200037
         """
+        IOP = dcm_hdr.ImageOrientationPatient
+        IPP = dcm_hdr.ImagePositionPatient
         # Unpacking arrays is poor form, but I'm feeling rebellious...
-        X_x, X_y, X_z = np.array(self.iop[:3]).T
-        Y_x, Y_y, Y_z = np.array(self.iop[3:]).T
-        S_x, S_y, S_z = np.array(self.ipp)
+        X_x, X_y, X_z = np.array(IOP[:3]).T
+        Y_x, Y_y, Y_z = np.array(IOP[3:]).T
+        S_x, S_y, S_z = np.array(IPP)
         D_i, D_j = self.dx, self.dy
         i, j = np.indices((self.rows, self.cols))
 
