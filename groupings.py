@@ -101,7 +101,6 @@ class GroupUtils(NodeMixin):
         """
         if not type(dicomfile) is DicomFile:
             dicomfile = DicomFile(dicomfile.SOPInstanceUID, dcm_obj=dicomfile)
-            print(dicomfile)
         if self._filter_check(dicomfile):
             key = str(dicomfile[self._organize_by])
             found = False
@@ -335,9 +334,9 @@ class FrameOfRef(GroupUtils):
         self.decon = Deconstruction(tree=self)
         if self.filter_list:
             structs = self.filter_list['StructName']
-            self._recontruct = Reconstruction(filter_structs=structs)
+            self._recontruct = Reconstruction(tree=self, filter_structs=structs)
         else:
-            self._reconstruct = Reconstruction()
+            self._reconstruct = Reconstruction(tree=self)
 
         if self.include_series:
             self._child_type = Series

@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import pydicom
 import utils
+from copy import deepcopy
 import SimpleITK as sitk
 from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
@@ -11,8 +12,19 @@ from utils import VolumeDimensions, check_dims
 from new_deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING, Union
 
+from anytree import NodeMixin
+
 if TYPE_CHECKING:
-    from groupings import Cohort, FrameOfRef, Modality
+    from groupings import Cohort, FrameOfRef, Modality, DicomFile
+
+
+class TestNode(NodeMixin):
+    def __init__(self, name=None, files=None, parent=None, children=None):
+        super().__init__()
+        self.name = name
+        self.parent = parent
+        if children:
+            self.children = children
 
 
 @dataclass
@@ -164,6 +176,9 @@ class ModalityVolumes:
 
 
 class Reconstruction:
+    def __init__(self, tree):
+        self.tree = tree
+
     def __call__(self, frame_of_ref: FrameOfRef,
                  filter_structs: Union(list, dict) = None) -> ModalityVolumes:
         self.filter_structs = filter_structs
@@ -234,15 +249,6 @@ class Reconstruction:
         fill_array = fill_array % 2
         return fill_array
 
-    def define_vol_dims(self, frame_of_ref: FrameOfRef) -> None:
-        if not hasattr(self, 'dims'):
-            for mod in frame_of_ref.iter_modalities:
-                if mod.name in ['CT', 'MR']:
-                    self.dims = VolumeDimensions(mod.data)
-                    break
-            if not hasattr(self, 'dims'):
-                raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
-
     def _struct_filter_check(self, name):
         if self.filter_structs is None:
             return True
@@ -259,6 +265,15 @@ class Reconstruction:
             return found
         else:
             raise TypeError('filter_structs must be dict or list')
+
+    def define_vol_dims(self, frame_of_ref: FrameOfRef) -> None:
+        if not hasattr(self, 'dims'):
+            for mod in frame_of_ref.iter_modalities:
+                if mod.name in ['CT', 'MR']:
+                    self.dims = VolumeDimensions(mod.data)
+                    break
+            if not hasattr(self, 'dims'):
+                raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
     def struct(self, modality: Modality):
         if not hasattr(self, 'dims'):
@@ -280,6 +295,7 @@ class Reconstruction:
 
     @check_dims
     def ct(self, modality: Modality, HU=True) -> list:  # Should be a dict or tree in the future...
+        TestNode('testing', ['test0'], self.tree)
         ct_vols = []
         for ct_group in modality.ct:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
