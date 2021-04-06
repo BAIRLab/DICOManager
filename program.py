@@ -1,6 +1,7 @@
 from groupings import Cohort
 from glob import glob
 import numpy as np
+import utils
 
 '''
 filter_list = {'PatientID': [...],
@@ -17,15 +18,25 @@ for patient in cohort:
         for ref in study:
             vol = ref.recon()
             print(vol)
+            try:
+                rts = vol.struct[0].volumes['hippocampus_l_ep']
+                utils.three_axis_plot(vol.ct[0], 'ct0', rts)
+                utils.three_axis_plot(vol.mr[0], 'mr0', rts)
+                print('done plotting')
+            except Exception:
+                pass
             temp = np.zeros((1, *vol.ct[0].shape))
             temp[0, 100:150, 100:150, 50:75] = 1
             temp[0, 110:120, 110:120, 51:74] = 0
             print(temp.shape)
             print(ref)
             print('here')
-            ref.decon.from_ct(temp)
-            print(ref)
-            raise TypeError
+            try:
+                ref.decon.from_ct(temp)
+            except Exception:
+                pass
+            else:
+                print(ref)
 
 
 # cohort.save_tree('/home/eporter/eporter_data/', prefix='date')

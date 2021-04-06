@@ -289,6 +289,7 @@ class Reconstruction:
                 ds = pydicom.dcmread(ct_file.filepath)
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
                 fill_array[:, :, zloc] = ds.pixel_array
+
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept

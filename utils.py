@@ -179,6 +179,7 @@ class VolumeDimensions:
         inst1 = -np.inf
         slice_thicknesses = []
 
+        z0, z1 = (0, 0)
         for dcm in files:
             ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
             self.ipp = ds.ImagePositionPatient
@@ -191,7 +192,7 @@ class VolumeDimensions:
             if inst > inst1:  # High instance
                 inst1 = inst
                 z1 = float(self.ipp[-1])
-            self.zlohi = (z0, z1)
+        self.zlohi = (z0, z1)
 
         if inst0 > 1:
             z0 -= ds.SliceThickness * (inst0 - 1)
@@ -202,10 +203,10 @@ class VolumeDimensions:
             self.multi_thick = True
 
         self.dz = min(slice_thicknesses)
-        self.origin = np.array([*self.ipp[:2], min(z0, z1)])
+        self.origin = np.array([*self.ipp[:2], max(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
 
-        if z1 > z0:
+        if z1 < z0:
             # TODO: We can replace thiw with the ImagePositionPatient header
             self.flipped = True
 
@@ -258,8 +259,7 @@ class VolumeDimensions:
                       [X_y*D_i, Y_y*D_j, 0, S_y],
                       [X_z*D_i, Y_z*D_j, 0, S_z],
                       [0, 0, 0, 1]])
-
-        C = np.array([i, j, 0, 1])
+        C = np.array([i, j, np.zeros_like(i), np.ones_like(i)])
 
         return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
@@ -271,3 +271,48 @@ def check_dims(func):
                 cls.dims = VolumeDimensions(modality.data)
         return func(cls, modality, *args, **kwargs)
     return wrapped
+
+
+def three_axis_plot(array: np.ndarray, name: str, mask: np.ndarray = None) -> None:
+    import matplotlib.pyplot as plt
+
+    shape = array.shape
+    coronal = array[shape[0]//2, :, :]
+    sagittal = array[:, shape[1]//2, :]
+    axial = array[:, :, shape[2]//2]
+
+    ax0 = plt.subplot(3, 1, 1)
+    ax0.imshow(sagittal.T, cmap='binary_r')
+    ax0.set_xticks([])
+    ax0.set_yticks([])
+
+    ax1 = plt.subplot(3, 1, 2)
+    ax1.imshow(coronal.T, cmap='binary_r')
+    ax1.set_xticks([])
+    ax1.set_yticks([])
+
+    ax2 = plt.subplot(3, 1, 3)
+    ax2.imshow(axial, cmap='binary_r')
+    ax2.set_xticks([])
+    ax2.set_yticks([])
+
+    if not mask is None:
+        ma_arr = np.ma.masked_where(mask == 0, mask)
+        ma_cor = ma_arr[shape[0]//2, :, :]
+        ma_sag = ma_arr[:, shape[1]//2, :]
+        ma_ax = ma_arr[:, :, shape[2]//2]
+        print('masked arrays created')
+
+        ax0.imshow(ma_sag.T, cmap='bwr', alpha=0.8)
+        ax0.set_xticks([])
+        ax0.set_yticks([])
+
+        ax1.imshow(ma_cor.T, cmap='bwr', alpha=0.8)
+        ax1.set_xticks([])
+        ax1.set_yticks([])
+
+        ax2.imshow(ma_ax, cmap='bwr', alpha=0.8)
+        ax2.set_xticks([])
+        ax2.set_yticks([])
+
+    plt.savefig(name+'.png', format='png', dpi=300, bbox_inches='tight')
