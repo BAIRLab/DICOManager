@@ -28,49 +28,6 @@ class TestNode(NodeMixin):
 
 
 @dataclass
-class StructVolumeSet:
-    dims: VolumeDimensions
-    volumes: dict = field(default_factory=dict)  # Named as the structures and the volumes
-    interpoltaed: bool = False
-    missing_slices: list = None
-
-    def __getitem__(self, name: str):
-        return self.volumes[name]
-
-    def __setitem__(self, name: str, volume: np.ndarray):
-        if name in self.volumes:
-            name = self._rename(name)
-        self.volumes.update({name: volume})
-
-    def _rename(self, name: str):
-        """[DICOM RTSTRUCTs can have non-unique names, so we need to rename
-            these functions to be dictionary compatiable]
-
-        Args:
-            name (str): [Name of the found RTSTRUCT]
-
-        Returns:
-            [str]: [Name + # where number is the unique occurance]
-        """
-        i = 0
-        while True:
-            temp = name + i
-            if temp not in self.volumes:
-                break
-            i += 1
-        return temp
-
-    @property
-    def shape(self):
-        return (len(self.volumes), *self.dims.shape)
-
-    @property
-    def names(self):
-        self.volumes = dict(sorted(self.volumes.items()))
-        return list(self.volumes.keys())
-
-
-@dataclass
 class ImgAugmentations:
     # Window level augmentation metadata
     window_level: bool = False
@@ -134,45 +91,94 @@ class ImgAugmentations:
 
 
 @dataclass
-class ImageVolume:
-    # A single volume, single modality reconstruction
-    # This would be returned in the following:
-    # series = Series(files)
-    # ct_vol = series.reconstruct.ct()
-    # struct = series.reconstruct.struct()
+class StructVolumeSet:
     dims: VolumeDimensions
-    array: np.array
-    dicom_header: pydicom.dataset.Dataset
-    augmentations: ImgAugmentations = field(default_factory=ImgAugmentations)
+    # Named as the structures and the volumes
+    volumes: dict = field(default_factory=dict)
+    interpoltaed: bool = False
+    missing_slices: list = None
+
+    def __getitem__(self, name: str):
+        return self.volumes[name]
+
+    def __setitem__(self, name: str, volume: np.ndarray):
+        if name in self.volumes:
+            name = self._rename(name)
+        self.volumes.update({name: volume})
+
+    def _rename(self, name: str):
+        """[DICOM RTSTRUCTs can have non-unique names, so we need to rename
+            these functions to be dictionary compatiable]
+
+        Args:
+            name (str): [Name of the found RTSTRUCT]
+
+        Returns:
+            [str]: [Name + # where number is the unique occurance]
+        """
+        i = 0
+        while True:
+            temp = name + i
+            if temp not in self.volumes:
+                break
+            i += 1
+        return temp
+
+    @property
+    def shape(self):
+        return (len(self.volumes), *self.dims.shape)
+
+    @property
+    def names(self):
+        self.volumes = dict(sorted(self.volumes.items()))
+        return list(self.volumes.keys())
+
+
+class ReconstructedVolume(NodeMixin):  # Alternative to Modality
+    def __init__(self, modality: str, SeriesUID: str, dims: VolumeDimensions, *args, **kwargs):
+        super().__init__()
+        self.modality = modality
+        self.SeriesUID = SeriesUID
+        self.dims = dims
+        self.data = {}
+        self.ImgAugmentations = ImgAugmentations()
+
+    def __getitem__(self, name: str):
+        return self.volumes[name]
+
+    def __setitem__(self, name: str, volume: np.ndarray):
+        if name in self.data:
+            name = self._rename(name)
+        self.data.update({name: volume})
+
+    def __str__(self):
+        middle = []
+        for index, key in enumerate(self.data):
+            middle.append(f' {len(self.data[key])} files')
+        output = ' [' + ','.join(middle) + ' ]'
+        return output
+
+    def _rename(self, name: str):
+        """[DICOM RTSTRUCTs can have non-unique names, so we need to rename
+            these functions to be dictionary compatiable]
+
+        Args:
+            name (str): [Name of the found RTSTRUCT]
+
+        Returns:
+            [str]: [Name + # where number is the unique occurance]
+        """
+        i = 0
+        while True:
+            temp = name + i
+            if temp not in self.data:
+                break
+            i += 1
+        return temp
 
     @property
     def shape(self):
         return self.dims.shape
-
-
-@dataclass
-class ModalityVolumes:
-    ct: ImageVolume = None
-    nm: ImageVolume = None
-    mr: ImageVolume = None
-    pet: ImageVolume = None
-    dose: ImageVolume = None
-    struct: StructVolumeSet = None
-
-    def __iter__(self):
-        return iter([f.name for f in fields(self)])
-
-    def __getitem__(self, name):
-        return self.__dict__[name]
-
-    def __str__(self):
-        output = []
-        for name in self:
-            value = self[name]
-            if value:
-                line = '[' + ','.join([str(x.shape) for x in value]) + ']'
-                output.append(name + ': ' + line + '; ')
-        return ''.join(output)
 
 
 class Reconstruction:
@@ -180,7 +186,7 @@ class Reconstruction:
         self.tree = tree
 
     def __call__(self, frame_of_ref: FrameOfRef,
-                 filter_structs: Union(list, dict) = None) -> ModalityVolumes:
+                 filter_structs: Union[list, dict] = None) -> None:
         self.filter_structs = filter_structs
         if not hasattr(self, 'dims'):
             self.define_vol_dims(frame_of_ref)
@@ -202,21 +208,47 @@ class Reconstruction:
             case _:
                 raise TypeError(f'Reconstruction of {mod.name} not supported')
         """
-        mod_data = ModalityVolumes()
         for mod in frame_of_ref.iter_modalities:
+            mod_data = self._new_mod(mod)
+            print(self.tree)
+
+            # We need each reconstruction to return a ReconstructionVolume object
             if mod.name == 'CT':
+                print('ct')
                 mod_data.ct = self.ct(mod)
             elif mod.name == 'RTSTRUCT':
-                mod_data.struct = self.struct(mod)
+                print('struct')
+                temp = self.struct(mod)
+                print(temp[0].shape)
+                mod_data.struct = temp
+                print(temp[0].shape)
+                new = ReconstructedVolume(modality='RTSTRUCT', SeriesUID=mod.name, dims=None)
+                print(type(new))
             elif mod.name == 'MR':
+                print('mr')
                 mod_data.mr = self.mr(mod)
             elif mod.name == 'NM':
+                print('nm')
                 mod_data.nm = self.nm(mod)
             elif mod.name == 'PET':
+                print('pet')
                 mod_data.pet = self.pet(mod)
             elif mod.name == 'DOSE':
+                print('dose')
                 mod_data.dose = self.dose(mod)
-        return mod_data
+            print('here i am:', type(mod_data))
+            self.tree._add_file(mod_data)
+        #return self.tree
+
+    def _new_mod(self, mod):
+        new_mod = deepcopy(mod)
+        new_mod.parent = self.tree
+        new_mod.name = 'Reconstructed_' + mod.name
+        new_mod.data = {}
+        new_mod._child_type = ReconstructedVolume
+        new_mod._organize_by = 'SeriesUID'
+        print(type(new_mod))
+        return new_mod
 
     def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
         """[converts a dicom contour slice into image coordinates]
@@ -513,17 +545,17 @@ class Tools:
             return dose_coords[index]
         return index
 
-    def window_level(self, img: ImageVolume, window: int, level: int) -> ImageVolume:
+    def window_level(self, img: ReconstructedVolume, window: int, level: int) -> ReconstructedVolume:
         """[Applies a window and level to the given object. Works for either HU or CT number,
             whichever was specified during reconstruction of the array]
 
         Args:
-            img (ImageVolume): [Image volume object to window and level]
+            img (ReconstructedVolume): [Image volume object to window and level]
             window (int): [window in either HU or CT number]
             level (int): [level in either HU or CT number]
 
         Returns:
-            ImageVolume: [Image volume with window and level applied]
+            ReconstructedVolume: [Image volume with window and level applied]
         """
         imgmin, imgmax = (img.min(), img.max())
         img.augmetnations.wl_update(window, level, imgmin, imgmax)
@@ -537,14 +569,14 @@ class Tools:
         img.array = temp
         return img
 
-    def normalize(self, img: ImageVolume) -> ImageVolume:
+    def normalize(self, img: ReconstructedVolume) -> ReconstructedVolume:
         """[Normalizes an image volume ojbect]
 
         Args:
-            img (ImageVolume): [The image volume object to normalize]
+            img (ReconstructedVolume): [The image volume object to normalize]
 
         Returns:
-            ImageVolume: [Normalized image volume object]
+            ReconstructedVolume: [Normalized image volume object]
         """
         imgmin, imgmax = (img.array.min(), img.array.max())
         img.augmentations.norm_update(imgmin, imgmax)
@@ -553,14 +585,14 @@ class Tools:
         img.array = temp
         return img
 
-    def standardize(self, img: ImageVolume) -> ImageVolume:
+    def standardize(self, img: ReconstructedVolume) -> ReconstructedVolume:
         """[Standardizes an image volume object]
 
         Args:
-            img (ImageVolume): [The image volume object to standardize]
+            img (ReconstructedVolume): [The image volume object to standardize]
 
         Returns:
-            ImageVolume: [Standardized image volume object]
+            ReconstructedVolume: [Standardized image volume object]
         """
         imgmean = np.mean(img.array)
         imgstd = np.std(img.array)
@@ -570,24 +602,24 @@ class Tools:
         img.array = temp
         return img
 
-    def crop(self, img: ImageVolume, centroid: np.ndarray,
-             crop_size: np.ndarray) -> ImageVolume:
+    def crop(self, img: ReconstructedVolume, centroid: np.ndarray,
+             crop_size: np.ndarray) -> ReconstructedVolume:
         """[Crops an image volume and updates headers accordingly]
 
         Args:
-            img (ImageVolume): [Image volume object to crop]
+            img (ReconstructedVolume): [Image volume object to crop]
             centroid (np.ndarray): [central cropping value]
             crop_size (np.ndarray): [dimensions of final cropped array]
 
         Returns:
-            ImageVolume: [description]
+            ReconstructedVolume: [description]
 
         Notes:
             Centroid will not be observed if the cropped volume will be
                 smaller than the crop_size. Will shift centroid to maintain
                 the specific crop size
-            This function currently does not update the ImageVolume header
-                or ImageVolume.dicom_header to reflect the new dimensions
+            This function currently does not update the ReconstructedVolume header
+                or ReconstructedVolume.dicom_header to reflect the new dimensions
         """
         # Need to update the VolumeDimensions header and dicom header too
         imgshape = img.array.shape()
@@ -616,15 +648,15 @@ class Tools:
         img.augmentations.crop_update(img_coords, patient_coords)
         return img
 
-    def resample(self, img: ImageVolume, ratio: float) -> ImageVolume:
+    def resample(self, img: ReconstructedVolume, ratio: float) -> ReconstructedVolume:
         """[Downsample an image by a specified ratio]
 
         Args:
-            img (ImageVolume): [Image to resample]
+            img (ReconstructedVolume): [Image to resample]
             ratio (float): [Ratio to downsample]
 
         Returns:
-            ImageVolume: [Downsampled image array]
+            ReconstructedVolume: [Downsampled image array]
 
         Notes:
             TODO: Does not update voxel spacing yet
@@ -634,14 +666,14 @@ class Tools:
         img.augmentations.resample_update(None, round(ratio))
         return img
 
-    def bias_field_correction(self, img: ImageVolume) -> ImageVolume:
+    def bias_field_correction(self, img: ReconstructedVolume) -> ReconstructedVolume:
         """[MRI Bias Field Correction]
 
         Args:
-            img (ImageVolume): [MRI Image Volume to be N4 bias corrected]
+            img (ReconstructedVolume): [MRI Image Volume to be N4 bias corrected]
 
         Returns:
-            ImageVolume: [N4 bias corrected image]
+            ReconstructedVolume: [N4 bias corrected image]
         """
         img.augmentations.bias_corrected = True
 

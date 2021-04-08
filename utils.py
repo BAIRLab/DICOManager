@@ -106,6 +106,15 @@ def mod_getter(modtype: str) -> object:
     return func
 
 
+def mod_setter(modtype: str) -> object:
+    def func(self, item: object):
+        if modtype not in self.data:
+            self.data.update({modtype: {}})
+        else:
+            self.data[modtype].update({item.SeriesUID: item})
+    return func
+
+
 # Move to tools
 def print_rts(rts):
     """[Simplified printing of DICOM RTSTRUCT without referenced UIDs]
