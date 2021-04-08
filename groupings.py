@@ -5,10 +5,13 @@ from dataclasses import dataclass
 import pydicom
 from glob import glob
 import os
-from processing import Reconstruction, Deconstruction
 from datetime import datetime
 from typing import Any, TypeVar
 import utils
+import numpy as np
+from utils import VolumeDimensions
+from processing import Reconstruction, Deconstruction, ImgAugmentations
+from typing import TYPE_CHECKING, Union
 
 
 class GroupUtils(NodeMixin):
@@ -93,14 +96,15 @@ class GroupUtils(NodeMixin):
                 return date_check(date, 'SeriesDate')
         return True
 
-    def _add_file(self, dicomfile: object) -> None:
+    def _add_file(self, dicomfile: object, volumes: bool = False) -> None:
         """[adds a file to the file tree]
 
         Args:
             dicomfile (DicomFile): [a DicomFile object]
         """
-        if not type(dicomfile) is DicomFile:
+        if type(dicomfile) is pydicom.dataset.Dataset:
             dicomfile = DicomFile(dicomfile.SOPInstanceUID, dcm_obj=dicomfile)
+
         if self._filter_check(dicomfile):
             key = str(dicomfile[self._organize_by])
             found = False
@@ -207,6 +211,145 @@ class GroupUtils(NodeMixin):
         """
         utils.save_tree(self, path, prefix)
 
+    def save_dicoms(self, path: str, prefix: str) -> None:
+        dicoms = self.only_dicoms()
+        dicoms.save_tree(path, prefix)
+    
+    def save_volumes(self, path: str, prefix: str) -> None:
+        volumes = self.only_volumes()
+        volumes.save_tree(path, prefix)
+
+    def only_dicoms(self) -> object:
+        hasvols = bool(next(self.iter_volumes, False))
+        return not hasvols
+
+    def only_volumes(self) -> object:
+        hasdcms = bool(next(self.iter_dicoms, False))
+        return not hasdcms
+
+    def iter_modalities(self) -> object:
+        def filtermod(node):
+            return type(node) is Modality
+        iterer = LevelOrderGroupIter(self, filter_=filtermod)
+        mods = [t for t in iterer if t]
+        return iter(*mods)
+
+    def iter_frames(self) -> object:
+        def filterframe(node):
+            return type(node) is FrameOfRef
+        iterer = LevelOrderGroupIter(self, filter_=filterframe)
+        frames = [t for t in iterer if t]
+        return iter(*frames)
+
+    def iter_dicoms(self) -> object:
+        for mod in self.iter_modalities:
+            if mod.dicoms_data:
+                yield mod.dicoms_data
+
+    def iter_volumes(self) -> object:
+        for mod in self.iter_modalities:
+            if mod.volume_data:
+                yield mod.volume_data
+
+    def iter_volume_frames(self) -> object:
+        for frame in self.iter_frames:
+            vols = []
+            for vol in frame.iter_volumes:
+                vols.append(vol)
+            yield vols
+
+    def clear_dicoms(self) -> None:
+        for mod in self.iter_modalities:
+            mod.dicom_data = None
+
+    def clear_volumes(self) -> None:
+        for mod in self.iter_volumes:
+            mod.volume_data = None
+
+    def split_trees(self) -> tuple:
+        tree1 = deepcopy(self)
+        tree2 = deepcopy(self)
+        tree1.clear_volumes()
+        tree2.clear_dicoms()
+        return (tree1, tree2)
+
+    def split_dicoms(self) -> object:
+        dicomtree = deepcopy(self)
+        dicomtree.clear_volumes()
+        return dicomtree
+
+    def split_volumes(self) -> object:
+        voltree = deepcopy(self)
+        voltree.clear_dicoms()
+        return voltree
+
+
+class ReconstructedVolume(GroupUtils):  # Alternative to Modality
+    def __init__(self, dcm_header: pydicom.dataset.Dataset,
+                 dims: VolumeDimensions, *args, **kwargs):
+        super().__init__()
+        self.dcm_header = dcm_header
+        self.dims = dims
+        self.data = {}
+        self.ImgAugmentations = ImgAugmentations()
+        self._digest()
+
+    def __getitem__(self, name: str):
+        return self.volumes[name]
+
+    def __setitem__(self, name: str, volume: np.ndarray):
+        if name in self.data:
+            name = self._rename(name)
+        self.data.update({name: volume})
+
+    def __str__(self):
+        middle = []
+        for index, key in enumerate(self.data):
+            middle.append(f' {len(self.data[key])} files')
+        output = ' [' + ','.join(middle) + ' ]'
+        return output
+
+    def _rename(self, name: str):
+        """[DICOM RTSTRUCTs can have non-unique names, so we need to rename
+            these functions to be dictionary compatiable]
+
+        Args:
+            name (str): [Name of the found RTSTRUCT]
+
+        Returns:
+            [str]: [Name + # where number is the unique occurance]
+        """
+        i = 0
+        while True:
+            temp = name + i
+            if temp not in self.data:
+                break
+            i += 1
+        return temp
+
+    def _digest(self):
+        ds = self.dcm_header
+        self.PatientID = ds.PatientID
+        self.StudyUID = ds.StudyInstanceUID
+        self.SeriesUID = ds.SeriesInstanceUID
+        self.Modality = ds.Modality
+        self.InstanceUID = ds.SOPInstanceUID
+        self.DateTime = DicomDateTime(ds)
+
+        if hasattr(ds, 'FrameOfReferenceUID'):
+            self.FrameOfRefUID = ds.FrameOfReferenceUID
+        elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
+            ref_seq = ds.ReferencedFrameOfReferenceSequence
+            self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
+        else:
+            self.FrameOfRefUID = None
+
+        self.dcm_header = None
+
+    @property
+    def shape(self):
+        return self.dims.shape
+
 
 class DicomFile(GroupUtils):
     """[Group level for individal Dicom files, pulls releveant header data out]
@@ -266,6 +409,7 @@ class DicomFile(GroupUtils):
             self.SliceLocation = float(ds.SliceLocation)
         elif hasattr(ds, 'ImagePositionPatient'):
             self.SliceLocation = float(ds.ImagePositionPatient[-1])
+        self.dcm_obj = None
 
     def _digest(self):
         if self.dcm_obj is not None:
@@ -385,37 +529,50 @@ class Modality(GroupUtils):
         dose: [dose files within group]
         struct: [structf files within group]
     """
-    ct = property(utils.mod_getter('CT'))
-    nm = property(utils.mod_getter('NM'))
-    mr = property(utils.mod_getter('MR'))
-    pet = property(utils.mod_getter('PET'))
-    dose = property(utils.mod_getter('RTDOSE'))
-    struct = property(utils.mod_getter('RTSTRUCT'))
+    ct = property(utils.mod_getter('CT'), utils.mod_setter('CT'))
+    nm = property(utils.mod_getter('NM'), utils.mod_setter('NM'))
+    mr = property(utils.mod_getter('MR'), utils.mod_setter('MR'))
+    pet = property(utils.mod_getter('PET'), utils.mod_setter('PET'))
+    dose = property(utils.mod_getter('RTDOSE'), utils.mod_setter('RTDOSE'))
+    struct = property(utils.mod_getter('RTSTRUCT'), utils.mod_setter('RTSTRUCT'))
 
     def __init__(self, name: str, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.dirname = name
-        self.data = {}
-        self._child_type = DicomFile
+        self.dicom_data = {}
+        self.volume_data = {}
+        self._child_type = [DicomFile, ReconstructedVolume]
         self._organize_by = 'Modality'
         self._digest()
 
-    def __str__(self):
+    def __str__(self) -> str:
         middle = []
-        for index, key in enumerate(self.data):
-            middle.append(f' {len(self.data[key])} files')
+        if self.dicom_data:
+            for index, key in enumerate(self.dicom_data):
+                middle.append(f' {len(self.dicom_data[key])} files')
+        if self.volume_data:
+            for index, key in enumerate(self.volume_data):
+                middle.append(f' {len(self.volume_data[key])} volumes')
         output = ' [' + ','.join(middle) + ' ]'
         return output
 
-    def _add_file(self, dicomfile: DicomFile):
-        key = str(dicomfile[self._organize_by])
-        if key in self.data.keys():
-            self.data[key].append(dicomfile)
+    def _add_file(self, item: object) -> None:
+        # item is dicomfile or ReconstructionVolume
+        key = str(item[self._organize_by])
+        if type(item) is DicomFile:
+            data = self.dicom_data
+        elif type(item) is ReconstructedVolume:
+            data = self.volume_data
         else:
-            self.data.update({key: [dicomfile]})
+            raise TypeError('Added item must be DicomFile or ReconstructedVolume')
+
+        if key in data.keys():
+            data[key].append(item)
+        else:
+            data.update({key: [item]})
 
     @property
-    def dicoms(self):
+    def dicoms(self) -> list:
         return self.data[self.dirname]
 
 
@@ -488,6 +645,20 @@ if __name__ == '__main__':
     cohort = Cohort(name='TestFileSave', files=files, include_series=True)
     print(cohort)
 
+    def filterfunc(node):
+        return type(node) is Study
+
+    import anytree
+    def iter_modalities(tree):
+        def filtermod(node):
+            return type(node) is Modality
+        mods = [t for t in list(LevelOrderGroupIter(tree, filter_=filtermod)) if t]
+        return iter(*mods)
+
+
+    mods = iter_modalities(cohort)
+    print(list(mods))
+    
     for patient in cohort:
         for study in patient:
             for ref in study:
