@@ -310,7 +310,7 @@ def three_axis_plot(array: np.ndarray, name: str, mask: np.ndarray = None) -> No
     ax2.set_xticks([])
     ax2.set_yticks([])
 
-    if not mask is None:
+    if mask is not None:
         ma_arr = np.ma.masked_where(mask == 0, mask)
         ma_cor = ma_arr[shape[0]//2, :, :]
         ma_sag = ma_arr[:, shape[1]//2, :]

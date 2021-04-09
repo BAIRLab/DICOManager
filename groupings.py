@@ -460,7 +460,7 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
             self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
         else:
             self.FrameOfRefUID = None
-        print('In ReVol:', self.Modality)
+
         self.dcm_header = None
 
     def add_vol(self, name: str, volume: np.ndarray):
@@ -640,6 +640,9 @@ class Series(GroupUtils):
         self._organize_by = 'Modality'
         self._digest()
 
+    def recon(self):
+        raise NotImplementedError('Cannot reconstruct from Modality')
+
 
 class Modality(GroupUtils):
     """[Group level for Modality, specified by Modality]
@@ -684,8 +687,6 @@ class Modality(GroupUtils):
 
     def _add_file(self, item: object) -> None:
         # item is dicomfile or ReconstructionVolume
-        if type(item) is ReconstructedVolume:
-            print(item.Modality)
         key = str(item[self._organize_by])
         if type(item) is DicomFile:
             data = self.dicoms_data
