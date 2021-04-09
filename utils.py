@@ -40,8 +40,8 @@ def colorwarn(message: str):
 
 
 def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
-    """[saves copy of dicom files to a specified location, ordered
-        the same as the tree layout]
+    """[saves copy of dicom files (and volumes, if present) to a specified
+        location, ordered the same as the tree layout]
 
     Args:
         tree (NodeMixin): [tree to save]
@@ -73,11 +73,16 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
         if not os.path.isdir(subdir):
             os.mkdir(subdir)
         if repr(node) == 'Modality':
-            for key in node.data:
+            for key in node.dicoms_data:
                 for fname in node.data[key]:
                     original = fname.filepath
                     newpath = subdir + fname.name
                     shutil.copy(original, newpath)
+            for key in node.volumes_data:
+                for fname in node.volumes_data[key]:
+                    volume = node.volumes_data[key]
+                    newpath = subdir + 'Volume_' + fname.name
+                    np.save(newpath, volume)
     print(f'\nTree {tree.name} written to {path}')
 
 
