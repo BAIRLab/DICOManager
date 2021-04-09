@@ -18,15 +18,6 @@ if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality, DicomFile, ReconstructedVolume
 
 
-class TestNode(NodeMixin):
-    def __init__(self, name=None, files=None, parent=None, children=None):
-        super().__init__()
-        self.name = name
-        self.parent = parent
-        if children:
-            self.children = children
-
-
 @dataclass
 class ImgAugmentations:
     # Window level augmentation metadata
@@ -88,50 +79,6 @@ class ImgAugmentations:
     def interpolated_update(self, interpolated_slices: list) -> None:
         self.interpolated = True
         self.interpolated_slices = interpolated_slices
-
-
-@dataclass
-class StructVolumeSet:
-    dims: VolumeDimensions
-    # Named as the structures and the volumes
-    volumes: dict = field(default_factory=dict)
-    interpoltaed: bool = False
-    missing_slices: list = None
-
-    def __getitem__(self, name: str):
-        return self.volumes[name]
-
-    def __setitem__(self, name: str, volume: np.ndarray):
-        if name in self.volumes:
-            name = self._rename(name)
-        self.volumes.update({name: volume})
-
-    def _rename(self, name: str):
-        """[DICOM RTSTRUCTs can have non-unique names, so we need to rename
-            these functions to be dictionary compatiable]
-
-        Args:
-            name (str): [Name of the found RTSTRUCT]
-
-        Returns:
-            [str]: [Name + # where number is the unique occurance]
-        """
-        i = 0
-        while True:
-            temp = name + i
-            if temp not in self.volumes:
-                break
-            i += 1
-        return temp
-
-    @property
-    def shape(self):
-        return (len(self.volumes), *self.dims.shape)
-
-    @property
-    def names(self):
-        self.volumes = dict(sorted(self.volumes.items()))
-        return list(self.volumes.keys())
 
 
 class Reconstruction:
@@ -225,6 +172,14 @@ class Reconstruction:
             raise TypeError('filter_structs must be dict or list')
 
     def define_vol_dims(self, frame_of_ref: FrameOfRef) -> None:
+        """[Defines the volume dimensions from a FrameOfRef for RTSTRUCT construction]
+
+        Args:
+            frame_of_ref (FrameOfRef): [Frame of Ref with CT or MR DICOMs]
+
+        Raises:
+            TypeError: [Raised if CT or MR are not within FrameOfRef]
+        """
         if not hasattr(self, 'dims'):
             for mod in frame_of_ref.iter_modalities:
                 if mod.name in ['CT', 'MR']:
@@ -233,7 +188,16 @@ class Reconstruction:
             if not hasattr(self, 'dims'):
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
-    def struct(self, modality: Modality):
+    def struct(self, modality: Modality, in_place: bool = True) -> None:
+        """[RTSTRUCT reconstruction from a modality with RTSTRUCT DicomFiles]
+
+        Args:
+            modality (Modality): [Modality with RTSTRUCT DicomFiles]
+            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+
+        Raises:
+            LookupError: [Must set volume dimensions with 'define_vol_dims' first]
+        """
         if not hasattr(self, 'dims'):
             raise LookupError('Must define volume dimensions first')
         # Return as a struct volume type
@@ -248,12 +212,19 @@ class Reconstruction:
                         built = self._build_contour(contour_data)
                         structs.update({name: built})
 
-            struct_set = groupings.ReconstructedVolume(ds, self.dims)
-            struct_set.add_structs(structs)
-            modality._add_file(struct_set)
+            if in_place:
+                struct_set = groupings.ReconstructedVolume(ds, self.dims)
+                struct_set.add_structs(structs)
+                modality._add_file(struct_set)
 
     @check_dims
-    def ct(self, modality: Modality, HU=True) -> list:  # Should be a dict or tree in the future...
+    def ct(self, modality: Modality, HU: bool = True, in_place: bool = True) -> None:
+        """[Reconstruct CT Volume from DICOMs within Modality object]
+
+        Args:
+            modality (Modality): [Modality object containing CT DICOMs]
+            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+        """
         for ct_group in modality.ct:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
@@ -268,13 +239,19 @@ class Reconstruction:
                 intercept = ds.RescaleIntercept
                 fill_array = fill_array * slope + intercept
 
-            ct_set = groupings.ReconstructedVolume(ds, self.dims)
-            ct_set.add_vol(ds.SOPInstanceUID, fill_array)
-            modality._add_file(ct_set)
+            if in_place:
+                ct_set = groupings.ReconstructedVolume(ds, self.dims)
+                ct_set.add_vol(ds.SOPInstanceUID, fill_array)
+                modality._add_file(ct_set)
 
     @check_dims
-    def nm(self, modality: Modality) -> list:
-        nm_vols = []
+    def nm(self, modality: Modality, in_place: bool = True) -> None:
+        """[Reconstruct NM DICOMs within Modality object]
+
+        Args:
+            modality (Modality): [Modality object containing NM DICOM]
+            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+        """
         for nm_group in modality.nm:
             ds = pydicom.dcmread(nm_group.filepath)
             raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
@@ -283,11 +260,21 @@ class Reconstruction:
             intercept = float(map_seq.RealWorldValueIntercept)
             if intercept != 0:
                 utils.colorwarn('NM intercept not zero and may be corrupted.')
-            nm_vols.append(raw * slope + intercept)
-        return nm_vols
+            fill_array = raw * slope + intercept
+
+            if in_place:
+                nm_set = groupings.ReconstructedVolume(ds, self.dims)
+                nm_set.add_vol(ds.SOPInstanceUID, fill_array)
+                modality._add_file(nm_set)
 
     @check_dims
-    def mr(self, modality: Modality) -> list:
+    def mr(self, modality: Modality, in_place: bool = True) -> None:
+        """[Reconstruct MR Volume from DICOMs within Modality object]
+
+        Args:
+            modality (Modality): [Modality object containing MR DICOMs]
+            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+        """
         for mr_group in modality.mr:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
@@ -297,13 +284,19 @@ class Reconstruction:
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
                 fill_array[:, :, zloc] = ds.pixel_array
 
-            mr_set = groupings.ReconstructedVolume(ds, self.dims)
-            mr_set.add_vol(ds.SOPInstanceUID, fill_array)
-            modality._add_file(mr_set)
+            if in_place:
+                mr_set = groupings.ReconstructedVolume(ds, self.dims)
+                mr_set.add_vol(ds.SOPInstanceUID, fill_array)
+                modality._add_file(mr_set)
 
     @check_dims
-    def pet(self, modality: Modality) -> list:
-        pet_vols = []
+    def pet(self, modality: Modality, in_place: bool = True) -> None:
+        """[Reconstruct PET DICOMs within Modality object]
+
+        Args:
+            modality (Modality): [Modality object containing PET DICOM]
+            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+        """
         for pet_group in modality.pet:
             fill_array = np.zeros(self.dims.shape)
             origin = self.dims.origin
@@ -317,12 +310,21 @@ class Reconstruction:
             patient_weight = 1000 * float(ds.PatientWeight)
             radiopharm = ds.RadiopharmaceuticalInformationSequence[0]
             total_dose = float(radiopharm.RadionuclideTotalDose)
-            pet_vols.append(rescaled * patient_weight / total_dose)
-        return pet_vols
+            suv_values = rescaled * patient_weight / total_dose
+
+            if in_place:
+                pet_set = groupings.ReconstructedVolume(ds, self.dims)
+                pet_set.add_vol(ds.SOPInstanceUID, suv_values)
+                modality._add_file(pet_set)
 
     @check_dims
-    def dose(self, modality: Modality) -> list:
-        dose_vols = {}
+    def dose(self, modality: Modality, in_place: bool = True) -> None:
+        """[Reconstructs RTDOSE from Modality object]
+
+        Args:
+            modality (Modality): [Modality object containing RTDOSE]
+            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+        """
         ct_coords = self.dims.coordgrid()
         for dosefile in modality.dose:
             ds = pydicom.dcmread(dosefile.filepath)
@@ -332,8 +334,11 @@ class Reconstruction:
             interper = RGI(dose_coords, dose_array,
                            bounds_error=False, fill_value=0)
             dose_interp = interper(ct_coords).reshape(self.dims.shape)
-            dose_vols.update({dosefile: dose_interp})
-        return dose_vols
+
+            if in_place:
+                dose_set = groupings.ReconstructedVolume(ds, self.dims)
+                dose_set.add_vol(ds.SOPInstanceUID, dose_interp)
+                modality._add_file(dose_set)
 
 
 class Deconstruction:
