@@ -254,11 +254,11 @@ class GroupUtils(NodeMixin):
         hasdcms = bool(next(self.iter_dicoms, False))
         return not hasdcms
 
-    def iter_modalities(self) -> Modality:
+    def iter_modalities(self) -> object:
         """[Iterates through each Modality]
 
         Returns:
-            Modality: [Modality objects]
+            object: [Modality object iterator]
         """
         def filtermod(node):
             return type(node) is Modality
@@ -266,11 +266,11 @@ class GroupUtils(NodeMixin):
         mods = [t for t in iterer if t]
         return iter(*mods)
 
-    def iter_frames(self) -> FrameOfRef:
+    def iter_frames(self) -> object:
         """[Iterates through each FrameOfRef]
 
         Returns:
-            FrameOfRef: [FrameOfRef objects]
+            object: [FrameOfRef object iterator]
         """
         def filterframe(node):
             return type(node) is FrameOfRef
@@ -301,8 +301,8 @@ class GroupUtils(NodeMixin):
             Iterator[dict]: [returns dict of ReconstructedVolume]
         """
         for mod in self.iter_modalities:
-            if mod.volume_data:
-                yield mod.volume_data
+            if mod.volumes_data:
+                yield mod.volumes_data
 
     def iter_volume_frames(self) -> list:
         """[Iterates through the frame of references]
@@ -326,13 +326,13 @@ class GroupUtils(NodeMixin):
         """[Clears the dicoms from the tree]
         """
         for mod in self.iter_modalities:
-            mod.dicom_data = None
+            mod.dicoms = None
 
     def clear_volumes(self) -> None:
         """[Clears the volumes from the tree]
         """
         for mod in self.iter_volumes:
-            mod.volume_data = None
+            mod.volumes_data = None
 
     def split_trees(self) -> tuple:
         """[Split the dicom and volume trees]
@@ -367,7 +367,7 @@ class GroupUtils(NodeMixin):
 
         Returns:
             object: [Returns a tree with only volumes at the leaves]
-        
+
         Notes:
             Inefficient to copy twice, fix in the future
         """
@@ -377,27 +377,32 @@ class GroupUtils(NodeMixin):
 
 
 class ReconstructedVolume(GroupUtils):  # Alternative to Modality
+    ct = property(utils.mod_getter('CT'), utils.mod_setter('CT'))
+    nm = property(utils.mod_getter('NM'), utils.mod_setter('NM'))
+    mr = property(utils.mod_getter('MR'), utils.mod_setter('MR'))
+    pet = property(utils.mod_getter('PET'), utils.mod_setter('PET'))
+    dose = property(utils.mod_getter('RTDOSE'), utils.mod_setter('RTDOSE'))
+    struct = property(utils.mod_getter('RTSTRUCT'), utils.mod_setter('RTSTRUCT'))
+
     def __init__(self, dcm_header: pydicom.dataset.Dataset,
                  dims: VolumeDimensions, *args, **kwargs):
         super().__init__()
         self.dcm_header = dcm_header
         self.dims = dims
-        self.data = {}
+        self.volumes = {}
         self.ImgAugmentations = ImgAugmentations()
         self._digest()
 
     def __getitem__(self, name: str):
-        return self.volumes[name]
+        return getattr(self, name)
 
-    def __setitem__(self, name: str, volume: np.ndarray):
-        if name in self.data:
-            name = self._rename(name)
-        self.data.update({name: volume})
+    def __setitem__(self, name: str, value):
+        setattr(self, name, value)
 
     def __str__(self):
         middle = []
-        for index, key in enumerate(self.data):
-            middle.append(f' {len(self.data[key])} files')
+        for index, key in enumerate(self.volumes):
+            middle.append(f' {len(self.volumes[key])} files')
         output = ' [' + ','.join(middle) + ' ]'
         return output
 
@@ -435,8 +440,17 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
             self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
         else:
             self.FrameOfRefUID = None
-
+        print('In ReVol:', self.Modality)
         self.dcm_header = None
+
+    def add_vol(self, name: str, volume: np.ndarray):
+        if name in self.volumes:
+            name = self._rename(name)
+        self.volumes.update({name: volume})
+
+    def add_structs(self, structdict: dict):
+        for name, volume in structdict.items():
+            self.add_vol(name, volume)
 
     @property
     def shape(self):
@@ -631,30 +645,32 @@ class Modality(GroupUtils):
     def __init__(self, name: str, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.dirname = name
-        self.dicom_data = {}
-        self.volume_data = {}
+        self.dicoms_data = {}
+        self.volumes_data = {}
         self._child_type = [DicomFile, ReconstructedVolume]
         self._organize_by = 'Modality'
         self._digest()
 
     def __str__(self) -> str:
         middle = []
-        if self.dicom_data:
-            for index, key in enumerate(self.dicom_data):
-                middle.append(f' {len(self.dicom_data[key])} files')
-        if self.volume_data:
-            for index, key in enumerate(self.volume_data):
-                middle.append(f' {len(self.volume_data[key])} volumes')
+        if self.dicoms_data:
+            for index, key in enumerate(self.dicoms_data):
+                middle.append(f' {len(self.dicoms_data[key])} files')
+        if self.volumes_data:
+            for index, key in enumerate(self.volumes_data):
+                middle.append(f' {len(self.volumes_data[key])} volumes')
         output = ' [' + ','.join(middle) + ' ]'
         return output
 
     def _add_file(self, item: object) -> None:
         # item is dicomfile or ReconstructionVolume
+        if type(item) is ReconstructedVolume:
+            print(item.Modality)
         key = str(item[self._organize_by])
         if type(item) is DicomFile:
-            data = self.dicom_data
+            data = self.dicoms_data
         elif type(item) is ReconstructedVolume:
-            data = self.volume_data
+            data = self.volumes_data
         else:
             raise TypeError('Added item must be DicomFile or ReconstructedVolume')
 
@@ -665,7 +681,11 @@ class Modality(GroupUtils):
 
     @property
     def dicoms(self) -> list:
-        return self.data[self.dirname]
+        return self.dicoms_data[self.dirname]
+
+    @property
+    def volumes(self) -> list:
+        return self.volumes_data[self.dirname]
 
 
 @dataclass

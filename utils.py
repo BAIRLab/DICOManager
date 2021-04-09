@@ -100,18 +100,18 @@ def mod_getter(modtype: str) -> object:
     """
     def func(self):
         modlist = []
-        if modtype in self.data:
-            modlist.append(self.data[modtype])
+        if modtype in self.dicoms_data:
+            modlist.append(self.dicoms_data[modtype])
         return sorted(modlist)
     return func
 
 
 def mod_setter(modtype: str) -> object:
     def func(self, item: object):
-        if modtype not in self.data:
-            self.data.update({modtype: {}})
+        if modtype not in self.dicoms_data:
+            self.dicoms_data.update({modtype: {}})
         else:
-            self.data[modtype].update({item.SeriesUID: item})
+            self.dicoms_data[modtype].update({item.SeriesUID: item})
     return func
 
 
