@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pydicom
 from glob import glob
 import os
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, TypeVar
 import utils
@@ -201,7 +202,7 @@ class GroupUtils(NodeMixin):
                         child.parent.prune(child.name)
 
     def save_tree(self, path: str, prefix: str = 'group') -> None:
-        """[saves a copy of the dicom files to a specified location, ordered
+        """[saves a copy of the tree to a specified location, ordered
             the same as the tree layout]
 
         Args:
@@ -211,47 +212,110 @@ class GroupUtils(NodeMixin):
         """
         utils.save_tree(self, path, prefix)
 
-    def save_dicoms(self, path: str, prefix: str) -> None:
-        dicoms = self.only_dicoms()
+    def save_dicoms(self, path: str, prefix: str = 'group') -> None:
+        """[Saves a copy of the dicom tree to a specified location,
+            orderd the same as the tree layout]
+
+        Args:
+            path (str): [absolute path to write to the file tree]
+            prefix (str, optional): [Specifies directory prefix as 'group'.
+                'date' or None]. Defaults to 'group'.
+        """
+        dicoms = self.split_dicoms()
         dicoms.save_tree(path, prefix)
-    
-    def save_volumes(self, path: str, prefix: str) -> None:
-        volumes = self.only_volumes()
+
+    def save_volumes(self, path: str, prefix: str = 'group') -> None:
+        """[Saves a copy of the volume tree to a specified location,
+            orderd the same as the tree layout]
+
+        Args:
+            path (str): [absolute path to write to the file tree]
+            prefix (str, optional): [Specifies directory prefix as 'group'.
+                'date' or None]. Defaults to 'group'.
+        """
+        volumes = self.split_volumes()
         volumes.save_tree(path, prefix)
 
-    def only_dicoms(self) -> object:
+    def only_dicoms(self) -> bool:
+        """[True if tree only contains dicom leaves]
+
+        Returns:
+            bool: [True if tree only contains dicom leaves]
+        """
         hasvols = bool(next(self.iter_volumes, False))
         return not hasvols
 
-    def only_volumes(self) -> object:
+    def only_volumes(self) -> bool:
+        """[True if tree only contains volume leaves]
+
+        Returns:
+            bool: [True if tree only contains volume leaves]
+        """
         hasdcms = bool(next(self.iter_dicoms, False))
         return not hasdcms
 
-    def iter_modalities(self) -> object:
+    def iter_modalities(self) -> Modality:
+        """[Iterates through each Modality]
+
+        Returns:
+            Modality: [Modality objects]
+        """
         def filtermod(node):
             return type(node) is Modality
         iterer = LevelOrderGroupIter(self, filter_=filtermod)
         mods = [t for t in iterer if t]
         return iter(*mods)
 
-    def iter_frames(self) -> object:
+    def iter_frames(self) -> FrameOfRef:
+        """[Iterates through each FrameOfRef]
+
+        Returns:
+            FrameOfRef: [FrameOfRef objects]
+        """
         def filterframe(node):
             return type(node) is FrameOfRef
         iterer = LevelOrderGroupIter(self, filter_=filterframe)
         frames = [t for t in iterer if t]
         return iter(*frames)
 
-    def iter_dicoms(self) -> object:
+    def iter_dicoms(self) -> dict:
+        """[Iterates over dicom groups]
+
+        Returns:
+            dict: [dicom data dict from each modality]
+
+        Yields:
+            Iterator[dict]: [iterator for each modality]
+        """
         for mod in self.iter_modalities:
             if mod.dicoms_data:
                 yield mod.dicoms_data
 
-    def iter_volumes(self) -> object:
+    def iter_volumes(self) -> dict:
+        """[Iterates over the reconstructed volumes]
+
+        Returns:
+            dict: [dict of volume data from each modality]
+
+        Yields:
+            Iterator[dict]: [returns dict of ReconstructedVolume]
+        """
         for mod in self.iter_modalities:
             if mod.volume_data:
                 yield mod.volume_data
 
-    def iter_volume_frames(self) -> object:
+    def iter_volume_frames(self) -> list:
+        """[Iterates through the frame of references]
+
+        Returns:
+            list: [list of all volumes in a FrameOfRef]
+
+        Yields:
+            Iterator[list]: [returns a list of all volumes]
+
+        Notes:
+            TODO: Decide if a different data structure is better
+        """
         for frame in self.iter_frames:
             vols = []
             for vol in frame.iter_volumes:
@@ -259,14 +323,26 @@ class GroupUtils(NodeMixin):
             yield vols
 
     def clear_dicoms(self) -> None:
+        """[Clears the dicoms from the tree]
+        """
         for mod in self.iter_modalities:
             mod.dicom_data = None
 
     def clear_volumes(self) -> None:
+        """[Clears the volumes from the tree]
+        """
         for mod in self.iter_volumes:
             mod.volume_data = None
 
     def split_trees(self) -> tuple:
+        """[Split the dicom and volume trees]
+
+        Returns:
+            tuple: [(dicom_tree, volume_tree)]
+
+        Notes:
+            Inefficient to copy twice, fix in the future
+        """
         tree1 = deepcopy(self)
         tree2 = deepcopy(self)
         tree1.clear_volumes()
@@ -274,11 +350,27 @@ class GroupUtils(NodeMixin):
         return (tree1, tree2)
 
     def split_dicoms(self) -> object:
+        """[Split the dicom tree from the volume tree]
+
+        Returns:
+            object: [Returns a tree with only dicoms at the leaves]
+
+        Notes:
+            Inefficient to copy twice, fix in the future
+        """
         dicomtree = deepcopy(self)
         dicomtree.clear_volumes()
         return dicomtree
 
     def split_volumes(self) -> object:
+        """[Split the volume tree from the dicom tree]
+
+        Returns:
+            object: [Returns a tree with only volumes at the leaves]
+        
+        Notes:
+            Inefficient to copy twice, fix in the future
+        """
         voltree = deepcopy(self)
         voltree.clear_dicoms()
         return voltree
@@ -658,7 +750,7 @@ if __name__ == '__main__':
 
     mods = iter_modalities(cohort)
     print(list(mods))
-    
+
     for patient in cohort:
         for study in patient:
             for ref in study:
