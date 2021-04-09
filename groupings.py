@@ -13,6 +13,7 @@ import numpy as np
 from utils import VolumeDimensions
 from processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import TYPE_CHECKING, Union
+from pathos.multiprocessing import ProcessPool
 
 
 class GroupUtils(NodeMixin):
@@ -375,6 +376,25 @@ class GroupUtils(NodeMixin):
         voltree.clear_dicoms()
         return voltree
 
+    def recon(self, save_during=False) -> None:
+        # This is single threaded
+        if save_during:
+            # W will have the save during be multithreaded
+            raise TypeError('Not implemented')
+
+            def fn(obj):
+                name, vol = obj.recon(in_place=False)
+                return (name, vol)
+
+            with ProcessPool() as P:
+                namevols = list(P.map(fn, self.iter_frames))
+
+            for name, vol in namevols:
+                np.save(name, vol)
+        else:
+            for frame in self.iter_frames():
+                frame.recon()
+
 
 class ReconstructedVolume(GroupUtils):  # Alternative to Modality
     ct = property(utils.mod_getter('CT'), utils.mod_setter('CT'))
@@ -678,6 +698,9 @@ class Modality(GroupUtils):
             data[key].append(item)
         else:
             data.update({key: [item]})
+
+    def recon(self):
+        raise NotImplementedError('Cannot reconstruct from Modality')
 
     @property
     def dicoms(self) -> list:
