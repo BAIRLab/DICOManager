@@ -512,13 +512,43 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
         if include_dims:
             export_dict.update({'dims': self.dims.as_dict()})
         if include_header:
-            fields = ['PatientID', 'StudyUID', 'SeriesUID', 'Modality',
-                      'InstanceUID', 'DateTime', 'FrameOfRefUID']
-            header = {}
-            for field in fields:
-                header.update({field, self[field]})
-            export_dict.update({'header': header})
+            export_dict.update({'header': self._pull_header()})
         return export_dict
+
+    def _pull_header(self):
+        fields = ['PatientID', 'StudyUID', 'SeriesUID', 'Modality',
+                    'InstanceUID', 'DateTime', 'FrameOfRefUID']
+        header = {}
+        for field in fields:
+            header.update({field, self[field]})
+        return header
+
+    def _generate_filepath(self):
+        parents = []
+        temp = self
+        while hasattr(temp, 'parent'):
+            parents.append(self.parent)
+            temp = self.parent
+        names = [x.name for x in parents]
+        return '/'.join(names)
+
+    def convert_to_pointer(self, filepath=None):
+        if not filepath:
+            filepath = self._generate_filepath()
+        populate = {'dims': self.dims,
+                    'header': self._pull_header(),
+                    'augmentations': self.ImgAugmentations}
+        parent = self.parent
+        self.save_file(filepath)
+        self.volumes = None
+        self.__class__ = ReconstructedFile
+        self.__init__(filepath, populate)
+        self.parent = parent
+
+    def save_file(self, filepath=None):
+        if not filepath:
+            filepath = self._generate_filepath()
+        np.save(filepath, self.export())
 
 
 class ReconstructedFile(GroupUtils):
@@ -544,23 +574,26 @@ class ReconstructedFile(GroupUtils):
         if self.populate:
             self.dims = self.populate['dims']
             self.ImgAugmentations = self.populate['augmentations']
-            for name, value in self.populate['header']:
-                self[name] = value
+            self.header = self.populate['header']
         else:
             ds = np.load(self.filepath, allow_pickle=True, mmap_mode='r').item()
             self.dims = ds['dims']
             self.ImgAugmentations = ds['augmentations']
             self.header = ds['header']
+        for name, value in self.populate['he`ader']:
+            self[name] = value
 
     def __str__(self):
         return ' [ 1 pointer to volume ]'
 
     def load_array(self):
         ds = np.load(self.filepath, allow_pickle=True).item()
+        parent = self.parent
         self.__class__ = ReconstructedVolume
         self.__init__(self.header, self.dims)
         self.volumes = ds['volumes']
         self.ImgAugmentations = ds['augmentations']
+        self.parent = parent
 
 
 class DicomFile(GroupUtils):
