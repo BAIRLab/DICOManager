@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 from dataclasses import dataclass
 import warnings
+from copy import copy
 
 
 class bcolors:
@@ -22,7 +23,7 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-def colorwarn(message: str):
+def colorwarn(message: str, source: str = None):
     """[Fancy warning in color]
 
     Args:
@@ -32,14 +33,19 @@ def colorwarn(message: str):
         https://stackoverflow.com/questions/26430861/make-pythons-warnings-warn-not-mention-itself
     """
     def warning_on_one_line(message, category, filename, lineno, file=None, line=None):
-        relative = '/'.join(Path(filename).parts[-2:])
-        return f'{relative}: line {lineno}: {category.__name__}: {message} \n'
+        if source:
+            relative = source
+            return f'{relative}: {category.__name__}: {message} \n'
+        else:
+            relative = '/'.join(Path(filename).parts[-2:])
+            return f'{relative}: line {lineno}: {category.__name__}: {message} \n'
 
     warnings.formatwarning = warning_on_one_line
     warnings.warn(bcolors.WARNING + message + bcolors.ENDC)
 
 
-def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
+def save_tree(tree: NodeMixin, path: str, prefix: str = 'group',
+              separate_volume_dir: bool = True) -> None:
     """[saves copy of dicom files (and volumes, if present) to a specified
         location, ordered the same as the tree layout]
 
@@ -48,6 +54,8 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
         path (str): [absolute path to write the file tree]
         prefix (str, optional): [Specifies directory prefix as
             'group', 'date' or None]. Default to 'group'.
+        separate_volume_dir (bool, optional): [Seperates volumes and dicoms
+            at the modality level]. Default to 'True'.
 
     Notes:
         prefix = 'date' not functional
@@ -61,6 +69,10 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
         pass
 
     treeiter = LevelOrderIter(tree)
+
+    has_volumes = tree.has_volumes()
+    has_dicoms = tree.has_dicoms()
+
     for index, node in enumerate(treeiter):
         if prefix == 'group':
             names = [p.dirname for p in node.path]
@@ -69,20 +81,36 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group') -> None:
         else:
             names = [p.name for p in node.path]
 
-        subdir = path + '/'.join(names) + '/'
-        if not os.path.isdir(subdir):
-            os.mkdir(subdir)
+        if separate_volume_dir and repr(node) == 'Cohort':
+            volpath = path + '/'.join(names) + '_volumes/'
+            dcmpath = path + '/'.join(names) + '_dicoms/'
+        elif separate_volume_dir:
+            vnames = copy(names)
+            dnames = copy(names)
+            vnames[0] += '_volumes'
+            dnames[0] += '_dicoms'
+            volpath = path + '/'.join(vnames) + '/'
+            dcmpath = path + '/'.join(dnames) + '/'
+        else:
+            volpath = path + '/'.join(names) + '/'
+            dcmpath = path + '/'.join(names) + '/'
+
+        if not os.path.isdir(volpath) and has_volumes:
+            os.mkdir(volpath)
+        if not os.path.isdir(dcmpath) and has_dicoms:
+            os.mkdir(dcmpath)
+
         if repr(node) == 'Modality':
-            for key in node.dicoms_data:
-                for fname in node.data[key]:
-                    original = fname.filepath
-                    newpath = subdir + fname.name
-                    shutil.copy(original, newpath)
             for key in node.volumes_data:
                 for fname in node.volumes_data[key]:
-                    volume = node.volumes_data[key]
-                    newpath = subdir + 'Volume_' + fname.name
-                    np.save(newpath, volume)
+                    for volume in node.volumes_data[key]:
+                        newpath = volpath + fname.SeriesUID
+                        np.save(newpath, volume.export())
+            for key in node.dicoms_data:
+                for fname in node.dicoms_data[key]:
+                    original = fname.filepath
+                    newpath = dcmpath + fname.name
+                    shutil.copy(original, newpath)
     print(f'\nTree {tree.name} written to {path}')
 
 
@@ -229,6 +257,12 @@ class VolumeDimensions:
     @property
     def shape(self):
         return (self.rows, self.cols, self.slices)
+
+    def as_dict(self):
+        temp = vars(self)
+        if 'dicoms' in temp.keys():
+            del temp['dicoms']
+        return temp
 
     def coordrange(self):
         pts_x = self.origin[0] + np.arange(self.rows) * self.dx

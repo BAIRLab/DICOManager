@@ -12,11 +12,11 @@ filter_list = {'PatientID': [...],
 '''
 
 files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True)
-cohort = Cohort(name='TestFileSave', files=files, include_series=True)
+cohort = Cohort(name='TestFileSave', files=files, include_series=False)
 
-start = time.time()
 cohort.recon()
-print(time.time() - start)
+cohort.clear_dicoms()
+cohort.save_tree('/home/eporter/eporter_data/')
 
 """
 for patient in cohort:
@@ -44,6 +44,18 @@ for patient in cohort:
                 print(ref)
             """
 
-print(cohort)
 
-# cohort.save_tree('/home/eporter/eporter_data/', prefix='date')
+
+'''
+TODO:
+- Check (ensure works properly)
+    - associated multi-leaf functionality
+    - save volumes and dicoms functions
+- Integrate (adapt to current code)
+    - tools for modifications
+- Design
+    - Generators (pytorch and tensorflow)
+    - Nifti conversion and saving
+    - Loading saved volumes
+    - Multithreaded save on reconstruction
+'''

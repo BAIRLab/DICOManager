@@ -1,3 +1,4 @@
+import anytree
 from anytree import RenderTree
 from anytree import NodeMixin
 from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
@@ -5,7 +6,7 @@ from dataclasses import dataclass
 import pydicom
 from glob import glob
 import os
-from copy import deepcopy
+from copy import deepcopy, copy
 from datetime import datetime
 from typing import Any, TypeVar
 import utils
@@ -243,8 +244,7 @@ class GroupUtils(NodeMixin):
         Returns:
             bool: [True if tree only contains dicom leaves]
         """
-        hasvols = bool(next(self.iter_volumes, False))
-        return not hasvols
+        return not self.has_volumes()
 
     def only_volumes(self) -> bool:
         """[True if tree only contains volume leaves]
@@ -252,8 +252,23 @@ class GroupUtils(NodeMixin):
         Returns:
             bool: [True if tree only contains volume leaves]
         """
-        hasdcms = bool(next(self.iter_dicoms, False))
-        return not hasdcms
+        return not self.has_dicoms()
+
+    def has_dicoms(self):
+        """[Determines if tree contains dicoms]
+
+        Returns:
+            [bool]: [True if tree contains dicoms]
+        """
+        return bool(next(self.iter_dicoms(), False))
+
+    def has_volumes(self):
+        """[Determines if tree contains volumes]
+
+        Returns:
+            [bool]: [True if tree contains volumes]
+        """
+        return bool(next(self.iter_volumes(), False))
 
     def iter_modalities(self) -> object:
         """[Iterates through each Modality]
@@ -267,8 +282,11 @@ class GroupUtils(NodeMixin):
         mods = [t for t in iterer if t]
         return iter(*mods)
 
-    def iter_frames(self) -> object:
+    def iter_frames(self, return_count=False) -> object:
         """[Iterates through each FrameOfRef]
+
+        Args:
+            return_count (bool, optional): [Returns number of frames]. Defaults to False.
 
         Returns:
             object: [FrameOfRef object iterator]
@@ -277,6 +295,8 @@ class GroupUtils(NodeMixin):
             return type(node) is FrameOfRef
         iterer = LevelOrderGroupIter(self, filter_=filterframe)
         frames = [t for t in iterer if t]
+        if return_count:
+            return (len(*frames), iter(*frames))
         return iter(*frames)
 
     def iter_dicoms(self) -> dict:
@@ -288,7 +308,7 @@ class GroupUtils(NodeMixin):
         Yields:
             Iterator[dict]: [iterator for each modality]
         """
-        for mod in self.iter_modalities:
+        for mod in self.iter_modalities():
             if mod.dicoms_data:
                 yield mod.dicoms_data
 
@@ -301,7 +321,7 @@ class GroupUtils(NodeMixin):
         Yields:
             Iterator[dict]: [returns dict of ReconstructedVolume]
         """
-        for mod in self.iter_modalities:
+        for mod in self.iter_modalities():
             if mod.volumes_data:
                 yield mod.volumes_data
 
@@ -317,23 +337,23 @@ class GroupUtils(NodeMixin):
         Notes:
             TODO: Decide if a different data structure is better
         """
-        for frame in self.iter_frames:
+        for frame in self.iter_frames():
             vols = []
-            for vol in frame.iter_volumes:
+            for vol in frame.iter_volumes():
                 vols.append(vol)
             yield vols
 
     def clear_dicoms(self) -> None:
         """[Clears the dicoms from the tree]
         """
-        for mod in self.iter_modalities:
-            mod.dicoms = None
+        for mod in self.iter_modalities():
+            mod.clear_dicoms()
 
     def clear_volumes(self) -> None:
         """[Clears the volumes from the tree]
         """
-        for mod in self.iter_volumes:
-            mod.volumes_data = None
+        for mod in self.iter_modalities():
+            mod.clear_volumes()
 
     def split_trees(self) -> tuple:
         """[Split the dicom and volume trees]
@@ -345,8 +365,8 @@ class GroupUtils(NodeMixin):
             Inefficient to copy twice, fix in the future
         """
         tree1 = deepcopy(self)
-        tree2 = deepcopy(self)
         tree1.clear_volumes()
+        tree2 = deepcopy(self)
         tree2.clear_dicoms()
         return (tree1, tree2)
 
@@ -361,6 +381,7 @@ class GroupUtils(NodeMixin):
         """
         dicomtree = deepcopy(self)
         dicomtree.clear_volumes()
+        self.clear_dicoms()
         return dicomtree
 
     def split_volumes(self) -> object:
@@ -373,6 +394,7 @@ class GroupUtils(NodeMixin):
             Inefficient to copy twice, fix in the future
         """
         voltree = deepcopy(self)
+        self.clear_volumes()
         voltree.clear_dicoms()
         return voltree
 
@@ -392,7 +414,12 @@ class GroupUtils(NodeMixin):
             for name, vol in namevols:
                 np.save(name, vol)
         else:
-            for frame in self.iter_frames():
+            total_frames, iterator = self.iter_frames(return_count=True)
+            if total_frames > 10:
+                source = 'DICOManager/groupings.py'
+                message = 'save_during=True recommended for reconstructing large datasets'
+                utils.colorwarn(message, source)
+            for frame in iterator:
                 frame.recon()
 
 
@@ -475,6 +502,15 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
     @property
     def shape(self):
         return self.dims.shape
+
+    def export(self, include_augmentations: bool = True, include_dims: bool = True) -> dict:
+        export_dict = {}
+        export_dict.update({'volumes': self.volumes})
+        if include_augmentations:
+            export_dict.update({'augmentations': self.ImgAugmentations.as_dict()})
+        if include_dims:
+            export_dict.update({'dims': self.dims.as_dict()})
+        return export_dict
 
 
 class DicomFile(GroupUtils):
@@ -707,9 +743,15 @@ class Modality(GroupUtils):
     def dicoms(self) -> list:
         return self.dicoms_data[self.dirname]
 
+    def clear_dicoms(self) -> None:
+        self.dicoms_data = {}
+
     @property
     def volumes(self) -> list:
         return self.volumes_data[self.dirname]
+
+    def clear_volumes(self) -> None:
+        self.volumes_data = {}
 
 
 @dataclass

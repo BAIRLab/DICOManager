@@ -49,7 +49,7 @@ class ImgAugmentations:
     interpolated_slices: list = None
 
     # biase field correction
-    bias_corrected: bool = True
+    bias_corrected: bool = False
 
     def wl_update(self, window: int, level: int, imgmin: float, imgmax: float) -> None:
         self.window_level = True
@@ -79,6 +79,9 @@ class ImgAugmentations:
     def interpolated_update(self, interpolated_slices: list) -> None:
         self.interpolated = True
         self.interpolated_slices = interpolated_slices
+
+    def as_dict(self):
+        return vars(self)
 
 
 class Reconstruction:
@@ -209,7 +212,7 @@ class Reconstruction:
                     name = contour.ROIName.lower()
                     if self._struct_filter_check(name):
                         contour_data = ds.ROIContourSequence[index].ContourSequence
-                        built = self._build_contour(contour_data)
+                        built = np.array(self._build_contour(contour_data), dtype='bool')
                         structs.update({name: built})
 
             if in_place:
@@ -232,12 +235,12 @@ class Reconstruction:
             for ct_file in sorted(ct_group):
                 ds = pydicom.dcmread(ct_file.filepath)
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, zloc] = ds.pixel_array
+                fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float16')
 
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept
-                fill_array = fill_array * slope + intercept
+                fill_array = np.array(fill_array * slope + intercept, dtype='float32')
 
             if in_place:
                 ct_set = groupings.ReconstructedVolume(ds, self.dims)
@@ -260,7 +263,7 @@ class Reconstruction:
             intercept = float(map_seq.RealWorldValueIntercept)
             if intercept != 0:
                 utils.colorwarn('NM intercept not zero and may be corrupted.')
-            fill_array = raw * slope + intercept
+            fill_array = np.array(raw * slope + intercept, dtype='float32')
 
             if in_place:
                 nm_set = groupings.ReconstructedVolume(ds, self.dims)
@@ -298,7 +301,7 @@ class Reconstruction:
             in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
         """
         for pet_group in modality.pet:
-            fill_array = np.zeros(self.dims.shape)
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
             for pet_file in sorted(pet_group):
