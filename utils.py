@@ -364,3 +364,13 @@ def three_axis_plot(array: np.ndarray, name: str, mask: np.ndarray = None) -> No
         ax2.set_yticks([])
 
     plt.savefig(name+'.png', format='png', dpi=300, bbox_inches='tight')
+
+
+def dict_to_dataclass(d, name='d_dataclass'):
+    @dataclass
+    class Wrapped:
+        __annotations__ = {k: type(v) for k, v in d.items()}
+
+    Wrapped.__qualname__ = Wrapped.__name__ = name
+
+    return Wrapped

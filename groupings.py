@@ -503,14 +503,64 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
     def shape(self):
         return self.dims.shape
 
-    def export(self, include_augmentations: bool = True, include_dims: bool = True) -> dict:
+    def export(self, include_augmentations: bool = True, include_dims: bool = True,
+               include_header: bool = True) -> dict:
         export_dict = {}
         export_dict.update({'volumes': self.volumes})
         if include_augmentations:
             export_dict.update({'augmentations': self.ImgAugmentations.as_dict()})
         if include_dims:
             export_dict.update({'dims': self.dims.as_dict()})
+        if include_header:
+            fields = ['PatientID', 'StudyUID', 'SeriesUID', 'Modality',
+                      'InstanceUID', 'DateTime', 'FrameOfRefUID']
+            header = {}
+            for field in fields:
+                header.update({field, self[field]})
+            export_dict.update({'header': header})
         return export_dict
+
+
+class ReconstructedFile(GroupUtils):
+    """[A pointer to the saved file, as opposed to the file in memory (ReconstructedVolume)]
+
+        When reconstructing and saving to disk, we will generate the file, write to disk and
+        add this leaf type within the tree. If we want to load that into memory, we will simply
+        replace this node type with the type of ReconstructedVolume
+    """
+    def __init__(self, filepath: str, populate: dict = None, *args, **kwargs):
+        super.__init__(None, *args, **kwargs)
+        self.filepath = filepath
+        self.header = None
+        self._digest()
+
+    def __getitem__(self, name: str):
+        return getattr(self, name)
+
+    def __setitem__(self, name: str, value):
+        setattr(self, name, value)
+
+    def _digest(self):
+        if self.populate:
+            self.dims = self.populate['dims']
+            self.ImgAugmentations = self.populate['augmentations']
+            for name, value in self.populate['header']:
+                self[name] = value
+        else:
+            ds = np.load(self.filepath, allow_pickle=True, mmap_mode='r').item()
+            self.dims = ds['dims']
+            self.ImgAugmentations = ds['augmentations']
+            self.header = ds['header']
+
+    def __str__(self):
+        return ' [ 1 pointer to volume ]'
+
+    def load_array(self):
+        ds = np.load(self.filepath, allow_pickle=True).item()
+        self.__class__ = ReconstructedVolume
+        self.__init__(self.header, self.dims)
+        self.volumes = ds['volumes']
+        self.ImgAugmentations = ds['augmentations']
 
 
 class DicomFile(GroupUtils):
