@@ -3,7 +3,8 @@ from glob import glob
 import numpy as np
 import utils
 import time
-
+import os
+import psutil
 '''
 filter_list = {'PatientID': [...],
                'StudyDate': [...],
@@ -15,13 +16,20 @@ files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True
 cohort = Cohort(name='TestFileSave', files=files, include_series=False)
 
 cohort.recon()
-iterer = cohort.iter_volumes(flat=True)
-first = next(iterer)
-first.convert_to_pointer()
+process = psutil.Process(os.getpid())
 print(cohort)
-first.load_array()
+print('All:', process.memory_info().rss * 10e-9)
+
+
+cohort.volumes_to_pointers()
+process = psutil.Process(os.getpid())
 print(cohort)
-#cohort.clear_dicoms()
+print('Pointers:', process.memory_info().rss * 10e-9)
+
+cohort.pointers_to_volumes()
+process = psutil.Process(os.getpid())
+print(cohort)
+print('Loaded:', process.memory_info().rss * 10e-9)
 #cohort.save_tree('/home/eporter/eporter_data/')
 
 """

@@ -16,6 +16,7 @@ from processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import TYPE_CHECKING, Union
 from pathos.multiprocessing import ProcessPool
 from pathlib import Path
+import pathlib
 
 
 class GroupUtils(NodeMixin):
@@ -407,6 +408,23 @@ class GroupUtils(NodeMixin):
         voltree.clear_dicoms()
         return voltree
 
+    def volumes_to_pointers(self) -> None:
+        """[Converts all volumes to pointers]
+        """
+        for vol in self.iter_volumes(flat=True):
+            if type(vol) is ReconstructedVolume:
+                vol.convert_to_pointer()
+
+    def pointers_to_volumes(self) -> None:
+        """[Converts all pointers to volumes]
+
+        Notes:
+            This may require a large amount of memory
+        """
+        for vol in self.iter_volumes(flat=True):
+            if type(vol) is ReconstructedFile:
+                vol.load_array()
+
     def recon(self, save_during=False) -> None:
         # This is single threaded
         if save_during:
@@ -482,6 +500,8 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
         return temp
 
     def _digest(self):
+        """[Pulls relevant information into the class]
+        """
         ds = self.dcm_header
         self.PatientID = ds.PatientID
         self.StudyInstanceUID = ds.StudyInstanceUID
@@ -504,7 +524,12 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
 
         self.dcm_header = None
 
-    def _pull_header(self):
+    def _pull_header(self) -> dict:
+        """[Pulls header information from the data structure to export]
+
+        Returns:
+            [dict]: [dictionary of associated header information]
+        """
         fields = ['PatientID', 'StudyInstanceUID', 'SeriesInstanceUID',
                   'Modality', 'SOPInstanceUID', 'FrameOfRefUID']
         header = {}
@@ -512,7 +537,16 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
             header.update({field: self[field]})
         return header
 
-    def _generate_filepath(self, prefix='group'):
+    def _generate_filepath(self, prefix: str = 'group') -> str:
+        """[Generates a filepath, in tree heirarchy to save the file]
+
+        Args:
+            prefix (str, optional): [Directory naming convention, similar to
+                save_tree()]. Defaults to 'group'.
+
+        Returns:
+            [str]: [the generated filepath]
+        """
         parents = [self._parent]
         temp = self._parent
         while hasattr(temp.parent, 'parent'):
@@ -531,11 +565,23 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
         return '/'.join(names) + '/'
 
     def add_vol(self, name: str, volume: np.ndarray):
+        """[Add a volume array to the data structure]
+
+        Args:
+            name (str): [Name of the volume array]
+            volume (np.ndarray): [Array]
+        """
         if name in self.volumes:
             name = self._rename(name)
         self.volumes.update({name: volume})
 
     def add_structs(self, structdict: dict):
+        """[Add a RTSTRUCT array to the data structure]
+
+        Args:
+            structdict (dict): [A dictionary of structure names and
+                their corresponding volume arrays]
+        """
         for name, volume in structdict.items():
             self.add_vol(name, volume)
 
@@ -545,6 +591,17 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
 
     def export(self, include_augmentations: bool = True, include_dims: bool = True,
                include_header: bool = True, include_datetime: bool = True) -> dict:
+        """[Export the ReconstructedVolume array]
+
+        Args:
+            include_augmentations (bool, optional): [Include augmentations]. Defaults to True.
+            include_dims (bool, optional): [Include dict of volume dimensions]. Defaults to True.
+            include_header (bool, optional): [Include dict of UID values]. Defaults to True.
+            include_datetime (bool, optional): [Include dict of dates and times]. Defaults to True.
+
+        Returns:
+            dict: [A dictionary of volumes and specified additional information]
+        """
         export_dict = {}
         export_dict.update({'volumes': self.volumes})
         if include_augmentations:
@@ -557,18 +614,35 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
             export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def convert_to_pointer(self):
+    def convert_to_pointer(self) -> None:
+        """[Converts ReconstructedVolume to ReconstructedFile and saves
+            the volume array to ~/tree/format/SeriesInstanceUID.npy]
+        """
         populate = {'dims': self.dims,
                     'header': self._pull_header(),
                     'augmentations': self.ImgAugmentations,
                     'DateTime': self.DateTime.export()}
         parent = self._parent
-        filepath = self.save_file()
+        filepath = self.save_file(return_loc=True)
         self.volumes = None
         self.__class__ = ReconstructedFile
         self.__init__(filepath, parent, populate)
 
-    def save_file(self, save_dir=None, filepath=None, return_loc=True):
+    def save_file(self, save_dir: str = None, filepath: str = None,
+                  return_loc: bool = False) -> Union[None, pathlib.PosixPath]:
+        """[summary]
+
+        Args:
+            save_dir (str, optional): [Directory to save file to, defaults to ~]. Defaults to None.
+            filepath (str, optional): [Filepath to save file to, defaults to tree]. Defaults to None.
+            return_loc (bool, optional): [If true, returns saved filepath location]. Defaults to False.
+
+        Raises:
+            TypeError: [Raised if save_dir and filepath are specified]
+
+        Returns:
+            [None, pathlib.Path]: [None or pathlib.Path to saved file location]
+        """
         if save_dir and filepath:
             raise TypeError('Either a save directory or a full filepath')
         if not filepath:
@@ -595,7 +669,6 @@ class ReconstructedFile(GroupUtils):
     """
     def __init__(self, filepath: str, parent: object, populate: dict = None, *args, **kwargs):
         super().__init__(None, *args, **kwargs)
-        print(filepath)
         self.filepath = filepath
         self.populate = populate
         self._parent = parent
@@ -611,6 +684,8 @@ class ReconstructedFile(GroupUtils):
         return ' [ 1 pointer to volume ]'
 
     def _digest(self):
+        """[Generates a ReconstructedFile from a ReconstructedVolume, either from a dict or loaded]
+        """
         if self.populate:
             self.dims = self.populate['dims']
             self.ImgAugmentations = self.populate['augmentations']
@@ -621,12 +696,15 @@ class ReconstructedFile(GroupUtils):
             self.dims = ds['dims']
             self.ImgAugmentations = ds['augmentations']
             self.header = ds['header']
+            self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
         for name, value in self.populate['header'].items():
             self[name] = value
 
     def load_array(self):
+        """[Loads volume array from disk into memory, converts type to ReconstructedVolume]
+        """
         ds = np.load(self.filepath, allow_pickle=True).item()
-        ds_header = utils.dict_to_dataclass(ds['header'])#(**ds['header'])
+        ds_header = utils.dict_to_dataclass(ds['header'])
         self.__class__ = ReconstructedVolume
         self.__init__(ds_header, self.dims, self._parent)
         self.volumes = ds['volumes']
@@ -668,7 +746,12 @@ class DicomFile(GroupUtils):
             return self.SliceLocation == other.SliceLocation
         return self.FrameOfRefUID == other.FrameOfRefUID
 
-    def _pull_info(self, ds):
+    def _pull_info(self, ds: pydicom.dataset.FileDataset) -> None:
+        """[Pulls the info from the pydicom dataset]
+
+        Args:
+            ds (pydicom.dataset.FileDataset): [DICOM to remove relevant data from]
+        """
         self.PatientID = ds.PatientID
         self.StudyUID = ds.StudyInstanceUID
         self.SeriesUID = ds.SeriesInstanceUID
@@ -695,6 +778,8 @@ class DicomFile(GroupUtils):
         self.dcm_obj = None
 
     def _digest(self):
+        """[Digestion of the pydicom.dataset.FileDataset]
+        """
         if self.dcm_obj is not None:
             self._pull_info(self.dcm_obj)
         else:
