@@ -15,6 +15,7 @@ from utils import VolumeDimensions
 from processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import TYPE_CHECKING, Union
 from pathos.multiprocessing import ProcessPool
+from pathlib import Path
 
 
 class GroupUtils(NodeMixin):
@@ -312,8 +313,12 @@ class GroupUtils(NodeMixin):
             if mod.dicoms_data:
                 yield mod.dicoms_data
 
-    def iter_volumes(self) -> dict:
+    def iter_volumes(self, flat: bool = False) -> dict:
         """[Iterates over the reconstructed volumes]
+
+        Args:
+            flat (bool, optional): [Returns type ReconstructedVolume if True, dict
+                of volumes if False]. Defaults to False.
 
         Returns:
             dict: [dict of volume data from each modality]
@@ -323,6 +328,10 @@ class GroupUtils(NodeMixin):
         """
         for mod in self.iter_modalities():
             if mod.volumes_data:
+                if flat:
+                    for vols in mod.volumes_data.values():
+                        for vol in vols:
+                            yield vol
                 yield mod.volumes_data
 
     def iter_volume_frames(self) -> list:
@@ -338,9 +347,9 @@ class GroupUtils(NodeMixin):
             TODO: Decide if a different data structure is better
         """
         for frame in self.iter_frames():
-            vols = []
+            vols = {}
             for vol in frame.iter_volumes():
-                vols.append(vol)
+                vols.update(vol)
             yield vols
 
     def clear_dicoms(self) -> None:
@@ -432,12 +441,13 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
     struct = property(utils.mod_getter('RTSTRUCT'), utils.mod_setter('RTSTRUCT'))
 
     def __init__(self, dcm_header: pydicom.dataset.Dataset,
-                 dims: VolumeDimensions, *args, **kwargs):
-        super().__init__()
+                 dims: VolumeDimensions, parent: object, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.dcm_header = dcm_header
         self.dims = dims
         self.volumes = {}
         self.ImgAugmentations = ImgAugmentations()
+        self._parent = parent  # We don't want to actually add it to the tree
         self._digest()
 
     def __getitem__(self, name: str):
@@ -474,21 +484,51 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
     def _digest(self):
         ds = self.dcm_header
         self.PatientID = ds.PatientID
-        self.StudyUID = ds.StudyInstanceUID
-        self.SeriesUID = ds.SeriesInstanceUID
+        self.StudyInstanceUID = ds.StudyInstanceUID
+        self.SeriesInstanceUID = ds.SeriesInstanceUID
         self.Modality = ds.Modality
-        self.InstanceUID = ds.SOPInstanceUID
-        self.DateTime = DicomDateTime(ds)
+        self.SOPInstanceUID = ds.SOPInstanceUID
+
+        if type(ds) is pydicom.dataset.FileDataset:
+            self.DateTime = DicomDateTime(ds)
 
         if hasattr(ds, 'FrameOfReferenceUID'):
             self.FrameOfRefUID = ds.FrameOfReferenceUID
         elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
             ref_seq = ds.ReferencedFrameOfReferenceSequence
             self.FrameOfRefUID = ref_seq[0].FrameOfReferenceUID
+        elif hasattr(ds, 'FrameOfRefUID'):
+            self.FrameOfRefUID = ds.FrameOfRefUID
         else:
             self.FrameOfRefUID = None
 
         self.dcm_header = None
+
+    def _pull_header(self):
+        fields = ['PatientID', 'StudyInstanceUID', 'SeriesInstanceUID',
+                  'Modality', 'SOPInstanceUID', 'FrameOfRefUID']
+        header = {}
+        for field in fields:
+            header.update({field: self[field]})
+        return header
+
+    def _generate_filepath(self, prefix='group'):
+        parents = [self._parent]
+        temp = self._parent
+        while hasattr(temp.parent, 'parent'):
+            parents.append(temp.parent)
+            temp = temp.parent
+
+        if prefix == 'group':
+            names = [p.dirname for p in parents]
+        elif prefix == 'date':
+            names = [p.dirname for p in parents]
+        else:
+            names = [p.name for p in parents]
+
+        names.reverse()
+        names[0] += '_volumes'
+        return '/'.join(names) + '/'
 
     def add_vol(self, name: str, volume: np.ndarray):
         if name in self.volumes:
@@ -504,7 +544,7 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
         return self.dims.shape
 
     def export(self, include_augmentations: bool = True, include_dims: bool = True,
-               include_header: bool = True) -> dict:
+               include_header: bool = True, include_datetime: bool = True) -> dict:
         export_dict = {}
         export_dict.update({'volumes': self.volumes})
         if include_augmentations:
@@ -513,42 +553,37 @@ class ReconstructedVolume(GroupUtils):  # Alternative to Modality
             export_dict.update({'dims': self.dims.as_dict()})
         if include_header:
             export_dict.update({'header': self._pull_header()})
+        if include_datetime:
+            export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def _pull_header(self):
-        fields = ['PatientID', 'StudyUID', 'SeriesUID', 'Modality',
-                    'InstanceUID', 'DateTime', 'FrameOfRefUID']
-        header = {}
-        for field in fields:
-            header.update({field, self[field]})
-        return header
-
-    def _generate_filepath(self):
-        parents = []
-        temp = self
-        while hasattr(temp, 'parent'):
-            parents.append(self.parent)
-            temp = self.parent
-        names = [x.name for x in parents]
-        return '/'.join(names)
-
-    def convert_to_pointer(self, filepath=None):
-        if not filepath:
-            filepath = self._generate_filepath()
+    def convert_to_pointer(self):
         populate = {'dims': self.dims,
                     'header': self._pull_header(),
-                    'augmentations': self.ImgAugmentations}
-        parent = self.parent
-        self.save_file(filepath)
+                    'augmentations': self.ImgAugmentations,
+                    'DateTime': self.DateTime.export()}
+        parent = self._parent
+        filepath = self.save_file()
         self.volumes = None
         self.__class__ = ReconstructedFile
-        self.__init__(filepath, populate)
-        self.parent = parent
+        self.__init__(filepath, parent, populate)
 
-    def save_file(self, filepath=None):
+    def save_file(self, save_dir=None, filepath=None, return_loc=True):
+        if save_dir and filepath:
+            raise TypeError('Either a save directory or a full filepath')
         if not filepath:
             filepath = self._generate_filepath()
-        np.save(filepath, self.export())
+        if save_dir:
+            fullpath = Path(save_dir) / filepath
+        else:
+            fullpath = Path.home() / filepath
+
+        Path(fullpath).mkdir(parents=True, exist_ok=True)
+        output = copy(self.export())
+        np.save(fullpath / self.SeriesInstanceUID, output)
+
+        if return_loc:
+            return fullpath / (self.SeriesInstanceUID + '.npy')
 
 
 class ReconstructedFile(GroupUtils):
@@ -558,10 +593,12 @@ class ReconstructedFile(GroupUtils):
         add this leaf type within the tree. If we want to load that into memory, we will simply
         replace this node type with the type of ReconstructedVolume
     """
-    def __init__(self, filepath: str, populate: dict = None, *args, **kwargs):
-        super.__init__(None, *args, **kwargs)
+    def __init__(self, filepath: str, parent: object, populate: dict = None, *args, **kwargs):
+        super().__init__(None, *args, **kwargs)
+        print(filepath)
         self.filepath = filepath
-        self.header = None
+        self.populate = populate
+        self._parent = parent
         self._digest()
 
     def __getitem__(self, name: str):
@@ -570,30 +607,31 @@ class ReconstructedFile(GroupUtils):
     def __setitem__(self, name: str, value):
         setattr(self, name, value)
 
+    def __str__(self):
+        return ' [ 1 pointer to volume ]'
+
     def _digest(self):
         if self.populate:
             self.dims = self.populate['dims']
             self.ImgAugmentations = self.populate['augmentations']
             self.header = self.populate['header']
+            self.DateTime = DicomDateTime().from_dict(self.populate['DateTime'])
         else:
             ds = np.load(self.filepath, allow_pickle=True, mmap_mode='r').item()
             self.dims = ds['dims']
             self.ImgAugmentations = ds['augmentations']
             self.header = ds['header']
-        for name, value in self.populate['he`ader']:
+        for name, value in self.populate['header'].items():
             self[name] = value
-
-    def __str__(self):
-        return ' [ 1 pointer to volume ]'
 
     def load_array(self):
         ds = np.load(self.filepath, allow_pickle=True).item()
-        parent = self.parent
+        ds_header = utils.dict_to_dataclass(ds['header'])#(**ds['header'])
         self.__class__ = ReconstructedVolume
-        self.__init__(self.header, self.dims)
+        self.__init__(ds_header, self.dims, self._parent)
         self.volumes = ds['volumes']
         self.ImgAugmentations = ds['augmentations']
-        self.parent = parent
+        self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
 
 
 class DicomFile(GroupUtils):
@@ -735,6 +773,7 @@ class FrameOfRef(GroupUtils):
             self._organize_by = 'Modality'
         self._digest()
 
+    """
     @property
     def iter_modalities(self):
         if self.include_series:
@@ -742,7 +781,7 @@ class FrameOfRef(GroupUtils):
             return grandchildren
         else:
             return iter(self.children)
-
+    """
     def recon(self, in_place=False):
         return self._reconstruct(self)
 
@@ -797,10 +836,16 @@ class Modality(GroupUtils):
         middle = []
         if self.dicoms_data:
             for index, key in enumerate(self.dicoms_data):
-                middle.append(f' {len(self.dicoms_data[key])} files')
+                middle.append(f' {len(self.dicoms_data[key])} file(s)')
         if self.volumes_data:
             for index, key in enumerate(self.volumes_data):
-                middle.append(f' {len(self.volumes_data[key])} volumes')
+                data = self.volumes_data[key]
+                pointers = len([x for x in data if type(x) is ReconstructedFile])
+                fullvols = len([x for x in data if type(x) is ReconstructedVolume])
+                if pointers:
+                    middle.append(f' {pointers} volume pointer(s)')
+                if fullvols:
+                    middle.append(f' {fullvols} volume(s)')
         output = ' [' + ','.join(middle) + ' ]'
         return output
 
@@ -854,23 +899,29 @@ class DicomDateTime:
     Methods:
         iso_format (str): [returns ISO 8601 format date time for group type]
     """
-    ds: pydicom.dataset
+    ds: pydicom.dataset = None
 
     def __post_init__(self):
-        prefix = ['Study', 'Series', 'Acquisition', 'Content',
-                  'InstanceCreation', 'StructureSet']
-        suffix = ['Date', 'Time']
-        attrs = [p + s for p in prefix for s in suffix]
-        for name in attrs:
-            if hasattr(self.ds, name):
-                value = getattr(self.ds, name)
-                setattr(self, name, value)
-            else:
-                setattr(self, name, None)
-        self.modality = self.ds.Modality
+        if self.ds:
+            prefix = ['Study', 'Series', 'Acquisition', 'Content',
+                      'InstanceCreation', 'StructureSet']
+            suffix = ['Date', 'Time']
+            attrs = [p + s for p in prefix for s in suffix]
+            for name in attrs:
+                if hasattr(self.ds, name):
+                    value = getattr(self.ds, name)
+                    setattr(self, name, value)
+                else:
+                    setattr(self, name, None)
+            self.modality = self.ds.Modality
+            self.ds = None
 
     def __setitem__(self, name: str, value: Any):
         self.__dict__[name] = value
+
+    def from_dict(self, dict):
+        for name, value in dict.items():
+            setattr(self, name, value)
 
     def isoformat(self, group: str):
         """[returns ISO 8601 format date time for group type]
@@ -899,6 +950,9 @@ class DicomDateTime:
         dateobj = dateobj.replace(microsecond=0)
         str_name = dateobj.isoformat().replace(':', '.')
         return str_name
+
+    def export(self):
+        return vars(self)
 
 
 if __name__ == '__main__':

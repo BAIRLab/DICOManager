@@ -111,7 +111,7 @@ class Reconstruction:
             case _:
                 raise TypeError(f'Reconstruction of {mod.name} not supported')
         """
-        for mod in frame_of_ref.iter_modalities:
+        for mod in frame_of_ref.iter_modalities():
             # We need each reconstruction to return a ReconstructionVolume object
             if mod.name == 'CT':
                 self.ct(mod) # might have it add it there
@@ -184,7 +184,7 @@ class Reconstruction:
             TypeError: [Raised if CT or MR are not within FrameOfRef]
         """
         if not hasattr(self, 'dims'):
-            for mod in frame_of_ref.iter_modalities:
+            for mod in frame_of_ref.iter_modalities():
                 if mod.name in ['CT', 'MR']:
                     self.dims = VolumeDimensions(mod.dicoms_data)
                     break
@@ -216,7 +216,7 @@ class Reconstruction:
                         structs.update({name: built})
 
             if in_place:
-                struct_set = groupings.ReconstructedVolume(ds, self.dims)
+                struct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
                 struct_set.add_structs(structs)
                 modality._add_file(struct_set)
 
@@ -243,7 +243,7 @@ class Reconstruction:
                 fill_array = np.array(fill_array * slope + intercept, dtype='float32')
 
             if in_place:
-                ct_set = groupings.ReconstructedVolume(ds, self.dims)
+                ct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
                 ct_set.add_vol(ds.SOPInstanceUID, fill_array)
                 modality._add_file(ct_set)
 
@@ -266,7 +266,7 @@ class Reconstruction:
             fill_array = np.array(raw * slope + intercept, dtype='float32')
 
             if in_place:
-                nm_set = groupings.ReconstructedVolume(ds, self.dims)
+                nm_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
                 nm_set.add_vol(ds.SOPInstanceUID, fill_array)
                 modality._add_file(nm_set)
 
@@ -288,7 +288,7 @@ class Reconstruction:
                 fill_array[:, :, zloc] = ds.pixel_array
 
             if in_place:
-                mr_set = groupings.ReconstructedVolume(ds, self.dims)
+                mr_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
                 mr_set.add_vol(ds.SOPInstanceUID, fill_array)
                 modality._add_file(mr_set)
 
@@ -316,7 +316,7 @@ class Reconstruction:
             suv_values = rescaled * patient_weight / total_dose
 
             if in_place:
-                pet_set = groupings.ReconstructedVolume(ds, self.dims)
+                pet_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
                 pet_set.add_vol(ds.SOPInstanceUID, suv_values)
                 modality._add_file(pet_set)
 
@@ -339,7 +339,7 @@ class Reconstruction:
             dose_interp = interper(ct_coords).reshape(self.dims.shape)
 
             if in_place:
-                dose_set = groupings.ReconstructedVolume(ds, self.dims)
+                dose_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
                 dose_set.add_vol(ds.SOPInstanceUID, dose_interp)
                 modality._add_file(dose_set)
 

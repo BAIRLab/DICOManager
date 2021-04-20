@@ -373,4 +373,5 @@ def dict_to_dataclass(d, name='d_dataclass'):
 
     Wrapped.__qualname__ = Wrapped.__name__ = name
 
-    return Wrapped
+    dclass = Wrapped(**d)
+    return dclass

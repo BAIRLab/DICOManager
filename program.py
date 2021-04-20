@@ -15,8 +15,14 @@ files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True
 cohort = Cohort(name='TestFileSave', files=files, include_series=False)
 
 cohort.recon()
-cohort.clear_dicoms()
-cohort.save_tree('/home/eporter/eporter_data/')
+iterer = cohort.iter_volumes(flat=True)
+first = next(iterer)
+first.convert_to_pointer()
+print(cohort)
+first.load_array()
+print(cohort)
+#cohort.clear_dicoms()
+#cohort.save_tree('/home/eporter/eporter_data/')
 
 """
 for patient in cohort:
