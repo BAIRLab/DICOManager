@@ -151,7 +151,7 @@ class Reconstruction:
         return (coords, zloc[0])
 
     def _build_contour(self, contour_data: np.ndarray) -> np.ndarray:
-        fill_array = np.zeros(self.dims.shape, dtype=np.int8)
+        fill_array = np.zeros(self.dims.shape, dtype=np.half)
         for contour_slice in contour_data:
             coords, zloc = self._slice_coords(contour_slice)
 
@@ -237,18 +237,18 @@ class Reconstruction:
             in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
         """
         for ct_group in modality.ct:
-            fill_array = np.zeros(self.dims.shape, dtype='float16')
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
             for ct_file in sorted(ct_group):
                 ds = pydicom.dcmread(ct_file.filepath)
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float16')
+                fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float32')
 
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept
-                fill_array = np.array(fill_array * slope + intercept, dtype='float16')
+                fill_array = np.array(fill_array * slope + intercept, dtype='float32')
 
             ct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             ct_set.add_vol(ds.SOPInstanceUID, fill_array)
@@ -293,7 +293,7 @@ class Reconstruction:
             in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
         """
         for mr_group in modality.mr:
-            fill_array = np.zeros(self.dims.shape, dtype='float16')
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
             for mr_file in sorted(mr_group):
