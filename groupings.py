@@ -425,21 +425,24 @@ class GroupUtils(NodeMixin):
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
-    def recon(self, save_during=False) -> None:
+    def recon(self, in_memory=True) -> None:
         # This is single threaded
-        if save_during:
-            # W will have the save during be multithreaded
-            raise TypeError('Not implemented')
+        if not in_memory:
+            def recon_fn(obj):
+                return obj.recon(in_memory=False)
 
-            def fn(obj):
-                name, vol = obj.recon(in_place=False)
-                return (name, vol)
-
+            iterator = self.iter_frames()
             with ProcessPool() as P:
-                namevols = list(P.map(fn, self.iter_frames))
+                frame_groups = list(P.map(recon_fn, iterator))
 
-            for name, vol in namevols:
-                np.save(name, vol)
+            mods_ptrs = [x for sublist in frame_groups for x in sublist]
+
+            # The returned modalities don't point to the tree. Need to find proper modality
+            for modality, pointer in mods_ptrs:
+                node = self
+                for a in modality.ancestors:
+                    node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
+                node._add_file(pointer)
         else:
             total_frames, iterator = self.iter_frames(return_count=True)
             if total_frames > 10:
@@ -450,7 +453,8 @@ class GroupUtils(NodeMixin):
                 frame.recon()
 
 
-class ReconstructedVolume(GroupUtils):  # Alternative to Modality
+class ReconstructedVolume(GroupUtils):
+    # These properties might be unnecessary
     ct = property(utils.mod_getter('CT'), utils.mod_setter('CT'))
     nm = property(utils.mod_getter('NM'), utils.mod_setter('NM'))
     mr = property(utils.mod_getter('MR'), utils.mod_setter('MR'))
@@ -846,9 +850,9 @@ class FrameOfRef(GroupUtils):
         self.decon = Deconstruction(tree=self)
         if self.filter_list:
             structs = self.filter_list['StructName']
-            self._recontruct = Reconstruction(tree=self, filter_structs=structs)
+            self._reconstruct = Reconstruction(filter_structs=structs)
         else:
-            self._reconstruct = Reconstruction(tree=self)
+            self._reconstruct = Reconstruction()
 
         if self.include_series:
             self._child_type = Series
@@ -858,17 +862,8 @@ class FrameOfRef(GroupUtils):
             self._organize_by = 'Modality'
         self._digest()
 
-    """
-    @property
-    def iter_modalities(self):
-        if self.include_series:
-            grandchildren = list(LevelOrderGroupIter(self))[2]
-            return grandchildren
-        else:
-            return iter(self.children)
-    """
-    def recon(self, in_place=False):
-        return self._reconstruct(self)
+    def recon(self, in_memory: bool = True):
+        return self._reconstruct(self, in_memory=in_memory)
 
 
 class Series(GroupUtils):
@@ -913,7 +908,7 @@ class Modality(GroupUtils):
         self.dirname = name
         self.dicoms_data = {}
         self.volumes_data = {}
-        self._child_type = [DicomFile, ReconstructedVolume]
+        self._child_type = [DicomFile, ReconstructedVolume, ReconstructedFile]
         self._organize_by = 'Modality'
         self._digest()
 
@@ -939,10 +934,10 @@ class Modality(GroupUtils):
         key = str(item[self._organize_by])
         if type(item) is DicomFile:
             data = self.dicoms_data
-        elif type(item) is ReconstructedVolume:
+        elif isinstance(item, ReconstructedVolume) or isinstance(item, ReconstructedFile):
             data = self.volumes_data
         else:
-            raise TypeError('Added item must be DicomFile or ReconstructedVolume')
+            raise TypeError('Added item must be DicomFile, Reconstructed(Volume / File)')
 
         if key in data.keys():
             data[key].append(item)

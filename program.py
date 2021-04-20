@@ -12,14 +12,15 @@ filter_list = {'PatientID': [...],
                'StructName': [...]}
 '''
 
-files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True)
+files = glob('/home/eporter/eporter_data/hippo_data/**/**/*.dcm', recursive=True)
 cohort = Cohort(name='TestFileSave', files=files, include_series=False)
 
-cohort.recon()
+start = time.time()
+cohort.recon(in_memory=False)
 process = psutil.Process(os.getpid())
 print(cohort)
 print('All:', process.memory_info().rss * 10e-9)
-
+print('elapsed time:', time.time()-start)
 
 cohort.volumes_to_pointers()
 process = psutil.Process(os.getpid())
