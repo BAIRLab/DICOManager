@@ -9,6 +9,8 @@ import numpy as np
 from dataclasses import dataclass
 import warnings
 from copy import copy
+import time
+import functools
 
 
 class bcolors:
@@ -375,3 +377,31 @@ def dict_to_dataclass(d, name='d_dataclass'):
 
     dclass = Wrapped(**d)
     return dclass
+
+
+import csv
+
+def clear_runtime():
+    f = open('runtimes.csv', "w+")
+    f.close()
+
+
+def timer(func):
+    @functools.wraps(func)
+    def wrapper_timer(*args, **kwargs):
+        tic = time.perf_counter()
+        value = func(*args, **kwargs)
+        toc = time.perf_counter()
+        elapsed_time = toc - tic
+        with open('runtimes.csv', 'a', newline='') as csvfile:
+            writer = csv.writer(csvfile, delimiter=',')
+            writer.writerow([elapsed_time])
+        return value
+    return wrapper_timer
+
+
+def average_runtime():
+    with open('runtimes.csv', 'r', newline='') as f:
+        reader = csv.reader(f)
+        data = np.array(list(reader), dtype=np.float)
+        print(f'Average runtime: {np.mean(data):0.3f} +/- {np.std(data):0.3f} seconds')
