@@ -3,19 +3,17 @@ import cv2
 import numpy as np
 import pydicom
 import utils
-from copy import deepcopy
 import SimpleITK as sitk
 from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass
 from utils import VolumeDimensions, check_dims
 from new_deconstruction import RTStructConstructor
-from typing import TYPE_CHECKING, Union
-from anytree import NodeMixin
+from typing import TYPE_CHECKING
 import groupings
 
 if TYPE_CHECKING:
-    from groupings import Cohort, FrameOfRef, Modality, DicomFile, ReconstructedVolume
+    from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume
 
 
 @dataclass
@@ -503,7 +501,8 @@ class Tools:
             return dose_coords[index]
         return index
 
-    def window_level(self, img: ReconstructedVolume, window: int, level: int) -> ReconstructedVolume:
+    def window_level(self, img: ReconstructedVolume, window: int,
+                     level: int) -> ReconstructedVolume:
         """[Applies a window and level to the given object. Works for either HU or CT number,
             whichever was specified during reconstruction of the array]
 

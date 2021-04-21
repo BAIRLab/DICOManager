@@ -13,7 +13,7 @@ import utils
 import numpy as np
 from utils import VolumeDimensions
 from processing import Reconstruction, Deconstruction, ImgAugmentations
-from typing import TYPE_CHECKING, Union
+from typing import Union
 from pathos.multiprocessing import ProcessPool
 from pathlib import Path
 import pathlib

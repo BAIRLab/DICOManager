@@ -1,7 +1,6 @@
 #! /usr/bin/python
 import copy
 import pydicom
-import utils
 from datetime import datetime
 from dataclasses import dataclass
 from matplotlib import cm

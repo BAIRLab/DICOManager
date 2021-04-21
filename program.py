@@ -22,6 +22,7 @@ print(cohort)
 print('All:', process.memory_info().rss * 10e-9)
 print('elapsed time:', time.time()-start)
 
+"""
 cohort.volumes_to_pointers()
 process = psutil.Process(os.getpid())
 print(cohort)
@@ -33,7 +34,6 @@ print(cohort)
 print('Loaded:', process.memory_info().rss * 10e-9)
 #cohort.save_tree('/home/eporter/eporter_data/')
 
-"""
 for patient in cohort:
     for study in patient:
         for ref in study:
