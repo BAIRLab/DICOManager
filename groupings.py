@@ -14,9 +14,10 @@ import numpy as np
 from utils import VolumeDimensions
 from processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import Union
-from pathos.multiprocessing import ProcessPool
+from pathos.pools import ProcessPool, ThreadPool
 from pathlib import Path
 import pathlib
+import itertools
 
 
 class GroupUtils(NodeMixin):
@@ -186,6 +187,14 @@ class GroupUtils(NodeMixin):
         for child in self.children:
             if child.name in childname:
                 child.parent = None
+
+    def adopt(self, child: NodeMixin) -> None:
+        """[Adopts a child from one tree to the current tree]
+
+        Args:
+            child (NodeMixin): [Node to adopt to tree]
+        """
+        child.parent = self
 
     def flatten(self) -> None:
         """[flatten results in each parent having one child, except for
@@ -428,14 +437,34 @@ class GroupUtils(NodeMixin):
     def recon(self, in_memory=True) -> None:
         # This is single threaded
         if not in_memory:
+            # with too many procs & threads I saturate the disk I/O
             def recon_fn(obj):
-                return obj.recon(in_memory=False)
+                newobj = deepcopy(obj)
+                return newobj.recon()
 
-            iterator = self.iter_frames()
-            with ProcessPool() as P:
-                frame_groups = list(P.map(recon_fn, iterator))
+            def split_iter(n):
+                def filterframe(node):
+                    return type(node) is FrameOfRef
+                iterer = LevelOrderGroupIter(self, filter_=filterframe, maxlevel=4)
+                frames = list([f for f in iterer if f][0])
+                return [frames[i:i + n] for i in range(0, len(frames), n)]
 
-            mods_ptrs = [x for sublist in frame_groups for x in sublist]
+            PROCS = 32
+            frame_groups = []
+            for group in split_iter(PROCS):
+                with ProcessPool(nodes=PROCS) as P:
+                    frame_groups.append(list(P.map(recon_fn, group)))
+            #frame_groups = list(map(recon_fn, iterator))
+
+            def flatten(S):
+                if S == []:
+                    return S
+                if isinstance(S[0], list):
+                    return flatten(S[0]) + flatten(S[1:])
+                return S[:1] + flatten(S[1:])
+
+            mods_ptrs = flatten(frame_groups)
+            print(mods_ptrs)
 
             # The returned modalities don't point to the tree. Need to find proper modality
             for modality, pointer in mods_ptrs:
@@ -447,7 +476,7 @@ class GroupUtils(NodeMixin):
             total_frames, iterator = self.iter_frames(return_count=True)
             if total_frames > 10:
                 source = 'DICOManager/groupings.py'
-                message = 'save_during=True recommended for reconstructing large datasets'
+                message = 'in_memory=False recommended for reconstructing large datasets'
                 utils.colorwarn(message, source)
             for frame in iterator:
                 frame.recon()
@@ -658,7 +687,7 @@ class ReconstructedVolume(GroupUtils):
 
         Path(fullpath).mkdir(parents=True, exist_ok=True)
         output = copy(self.export())
-        np.save(fullpath / self.SeriesInstanceUID, output)
+        #np.save(fullpath / self.SeriesInstanceUID, output)
 
         if return_loc:
             return fullpath / (self.SeriesInstanceUID + '.npy')
@@ -762,6 +791,7 @@ class DicomFile(GroupUtils):
         self.Modality = ds.Modality
         self.InstanceUID = ds.SOPInstanceUID
         self.DateTime = DicomDateTime(ds)
+        # For reconstruction
 
         if hasattr(ds, 'FrameOfReferenceUID'):
             self.FrameOfRefUID = ds.FrameOfReferenceUID
@@ -772,6 +802,7 @@ class DicomFile(GroupUtils):
             self.FrameOfRefUID = None
 
         if hasattr(ds, 'Columns'):
+            # Need to standardize the nomenclature
             self.cols = ds.Columns
             self.rows = ds.Rows
 

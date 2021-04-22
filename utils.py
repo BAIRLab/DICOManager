@@ -224,6 +224,7 @@ class VolumeDimensions:
         slice_thicknesses = []
 
         z0, z1 = (0, 0)
+        #for ds in files:
         for dcm in files:
             ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
             self.ipp = ds.ImagePositionPatient

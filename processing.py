@@ -15,6 +15,8 @@ import groupings
 if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume
 
+from concurrent.futures import ProcessPoolExecutor as ProcessPool
+from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 @dataclass
 class ImgAugmentations:
@@ -86,9 +88,7 @@ class Reconstruction:
     def __init__(self, filter_structs: list = None):
         self.filter_structs = filter_structs
 
-    def __call__(self, frame_of_ref: FrameOfRef, in_memory: bool = True) -> None:
-        if not hasattr(self, 'dims'):
-            self.define_vol_dims(frame_of_ref)
+    def __call__(self, frame_of_ref: FrameOfRef, in_memory: bool = False) -> None:
         """
         # Match statement in python 3.10
         match mod.name:
@@ -106,6 +106,9 @@ class Reconstruction:
                 vols = self.struct(mod)
             case _:
                 raise TypeError(f'Reconstruction of {mod.name} not supported')
+        """
+        if not hasattr(self, 'dims'):
+            self.define_vol_dims(frame_of_ref)
         """
         all_pointers = []
         for mod in frame_of_ref.iter_modalities():
@@ -125,9 +128,25 @@ class Reconstruction:
 
             if not in_memory:
                 all_pointers.append((mod, pointer))
+        """
+        with ThreadPool() as P:
+            all_pointers = list(P.map(self.split_mod, frame_of_ref.iter_modalities()))
+        return all_pointers
 
-        if not in_memory:
-            return all_pointers
+    def split_mod(self, mod):
+        if mod.name == 'CT':
+            pointer = self.ct(mod, in_memory=False)
+        elif mod.name == 'RTSTRUCT':
+            pointer = self.struct(mod, in_memory=False)
+        elif mod.name == 'MR':
+            pointer = self.mr(mod, in_memory=False)
+        elif mod.name == 'NM':
+            pointer = self.nm(mod, in_memory=False)
+        elif mod.name == 'PET':
+            pointer = self.pet(mod, in_memory=False)
+        elif mod.name == 'DOSE':
+            pointer = self.dose(mod, in_memory=False)
+        return (mod, pointer)
 
     def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
         """[converts a dicom contour slice into image coordinates]
@@ -148,17 +167,13 @@ class Reconstruction:
             raise ValueError('RTSTRUCT not registered to rectilinear coordinates')
         return (coords, zloc[0])
 
-    @utils.timer
     def _build_contour(self, contour_data: np.ndarray) -> np.ndarray:
-        fill_array = np.zeros(self.dims.shape, dtype=np.uint8) #np.half
+        fill_array = np.zeros(self.dims.shape, dtype=np.uint8)
         for contour_slice in contour_data:
             coords, zloc = self._slice_coords(contour_slice)
-
             poly2D = np.zeros(self.dims.shape[:2])
             cv2.fillPoly(poly2D, coords, 1)
-
-            # fill_array[..., zloc] += np.array(poly2D, dtype=np.unint8)
-            fill_array[..., zloc] = fill_array[..., zloc] + np.array(poly2D, dtype=np.uint8)
+            fill_array[..., zloc] += np.array(poly2D, dtype=np.uint8)
         fill_array = fill_array % 2
         return fill_array
 
@@ -195,6 +210,48 @@ class Reconstruction:
                     break
             if not hasattr(self, 'dims'):
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
+
+    def struct2(self, modality: Modality, in_memory: bool = False) -> None:
+        def _slice_coords(contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
+            contour_pts = np.array(contour_slice.ContourData).reshape(-1, 3)
+            pts_diff = abs(contour_pts - self.dims.origin)
+            points = np.array(
+                np.round(pts_diff / self.dims.vox_size), dtype=np.int32)
+            coords = np.array([points[:, :2]], dtype=np.int32)
+            zloc = list(set(points[:, 2]))
+            if len(zloc) > 1:
+                raise ValueError('RTSTRUCT not registered to rectilinear coordinates')
+            return (coords, zloc[0])
+
+        def _build_contour(contour_data: np.ndarray) -> np.ndarray:
+            fill_array = np.zeros(self.dims.shape, dtype=np.uint8)
+            for contour_slice in contour_data:
+                coords, zloc = self._slice_coords(contour_slice)
+                poly2D = np.zeros(self.dims.shape[:2])
+                cv2.fillPoly(poly2D, coords, 1)
+                fill_array[..., zloc] += np.array(poly2D, dtype=np.uint8)
+            fill_array = fill_array % 2
+            return fill_array
+
+        def fn(seq):
+            contour_data = seq.ContourSequence
+            built = np.array(self._build_contour(contour_data), dtype='bool')
+            return built
+
+        for struct_group in modality.struct:
+            structs = {}
+            for struct in struct_group:
+                ds = pydicom.dcmread(struct.filepath)
+                with ProcessPool() as P:
+                    constructed = list(P.map(fn, ds.ROIContourSequence))
+
+                for i, built in enumerate(constructed):
+                    name = 'name_' + str(i)
+                    structs.update({name: built})
+            struct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
+            struct_set.add_structs(structs)
+            struct_set.convert_to_pointer()
+            return struct_set
 
     def struct(self, modality: Modality, in_memory: bool = True) -> None:
         """[RTSTRUCT reconstruction from a modality with RTSTRUCT DicomFiles]
@@ -237,18 +294,18 @@ class Reconstruction:
             in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
         """
         for ct_group in modality.ct:
-            fill_array = np.zeros(self.dims.shape, dtype='float16')
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
             for ct_file in sorted(ct_group):
                 ds = pydicom.dcmread(ct_file.filepath)
                 zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float16')
+                fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float32')
 
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept
-                fill_array = np.array(fill_array * slope + intercept, dtype='float16')
+                fill_array = np.array(fill_array * slope + intercept, dtype='float32')
 
             ct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             ct_set.add_vol(ds.SOPInstanceUID, fill_array)
@@ -274,7 +331,7 @@ class Reconstruction:
             intercept = float(map_seq.RealWorldValueIntercept)
             if intercept != 0:
                 utils.colorwarn(f'NM file: {nm_group.filepath} has non-zero intercept')
-            fill_array = np.array(raw * slope + intercept, dtype='float16')
+            fill_array = np.array(raw * slope + intercept, dtype='float32')
 
             nm_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             nm_set.add_vol(ds.SOPInstanceUID, fill_array)
@@ -293,7 +350,7 @@ class Reconstruction:
             in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
         """
         for mr_group in modality.mr:
-            fill_array = np.zeros(self.dims.shape, dtype='float16')
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
             for mr_file in sorted(mr_group):
@@ -318,7 +375,7 @@ class Reconstruction:
             in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
         """
         for pet_group in modality.pet:
-            fill_array = np.zeros(self.dims.shape, dtype='float16')
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
             origin = self.dims.origin
 
             for pet_file in sorted(pet_group):

@@ -5,6 +5,7 @@ import utils
 import time
 import os
 import psutil
+from concurrent.futures import ProcessPoolExecutor as ProcessPool
 '''
 filter_list = {'PatientID': [...],
                'StudyDate': [...],
@@ -13,16 +14,51 @@ filter_list = {'PatientID': [...],
 '''
 utils.clear_runtime()
 
-files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True)
+files = glob('/home/eporter/eporter_data/hippo_data/**/**/*.dcm', recursive=True)
 cohort = Cohort(name='TestFileSave', files=files, include_series=False)
 
+print('Reconstructing')
 start = time.time()
+
+temp0 = Cohort(name='Temp0', files=None, include_series=False)
+temp1 = Cohort(name='Temp1', files=None, include_series=False)
+temp2 = Cohort(name='Temp2', files=None, include_series=False)
+
+count = 0
+for patient in cohort:
+    count += 1
+    temp0.adopt(patient)
+    if count > 10:
+        break
+
+count = 0
+for patient in cohort:
+    count += 1
+    temp1.adopt(patient)
+    if count > 10:
+        break
+
+count = 0
+for patient in cohort:
+    count += 1
+    temp2.adopt(patient)
+    if count > 10:
+        break
+
+def fn(obj):
+    return obj.recon(in_memory=False)
+
+with ProcessPool() as P:
+    trees = list(P.map(fn, [cohort, temp0, temp1, temp2]))
+"""
 cohort.recon(in_memory=False)
-process = psutil.Process(os.getpid())
-print(cohort)
-print('All:', process.memory_info().rss * 10e-9)
+temp0.recon(in_memory=False)
+temp1.recon(in_memory=False)
+temp2.recon(in_memory=False)
+"""
+print(trees)
 print('elapsed time:', time.time()-start)
-utils.average_runtime()
+#utils.average_runtime()
 
 """
 cohort.volumes_to_pointers()
