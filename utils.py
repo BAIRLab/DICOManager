@@ -1,6 +1,7 @@
 import os
 import shutil
 import pydicom
+import anytree
 from anytree import NodeMixin
 from anytree.iterators.levelorderiter import LevelOrderIter
 from datetime import datetime
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 import warnings
 from copy import copy
 import time
+import csv
 import functools
 
 
@@ -369,7 +371,16 @@ def three_axis_plot(array: np.ndarray, name: str, mask: np.ndarray = None) -> No
     plt.savefig(name+'.png', format='png', dpi=300, bbox_inches='tight')
 
 
-def dict_to_dataclass(d, name='d_dataclass'):
+def dict_to_dataclass(d: dict, name: str = 'd_dataclass') -> object:
+    """[Converts a dictionary into a dataclass]
+
+    Args:
+        d (dict): [Dict of name and properties for the dataclass]
+        name (str, optional): [Name of dataclass]. Defaults to 'd_dataclass'.
+
+    Returns:
+        [object]: [Created dataclass]
+    """
     @dataclass
     class Wrapped:
         __annotations__ = {k: type(v) for k, v in d.items()}
@@ -379,8 +390,6 @@ def dict_to_dataclass(d, name='d_dataclass'):
     dclass = Wrapped(**d)
     return dclass
 
-
-import csv
 
 def clear_runtime():
     f = open('runtimes.csv', "w+")
@@ -408,9 +417,16 @@ def average_runtime():
         print(f'Average runtime: {np.mean(data):0.3f} +/- {np.std(data):0.3f} seconds')
 
 
-def split_tree(primary: NodeMixin, n: int = None) -> list:
-    if not n:
-        n = (len(primary) // 10 + 1)
+def split_tree(primary: NodeMixin, n: int = 10) -> list:
+    """[Splits a tree into a series of n-sized trees]
+
+    Args:
+        primary (NodeMixin): [Primary tree to split]
+        n (int, optional): [Size of each smaller tree]. Defaults to 10.
+
+    Returns:
+        list: [A list of the split trees]
+    """
     trees = []
     tree = primary.__class__(primary.name)
     count = 0
@@ -429,14 +445,28 @@ def split_tree(primary: NodeMixin, n: int = None) -> list:
 
 # this should really be type GroupUtils
 def combine_trees(primary: NodeMixin, secondaries: list) -> NodeMixin:
+    """[Combine a series of trees into the primary tree]
+
+    Args:
+        primary (NodeMixin): [Primary tree to return with secondaries]
+        secondaries (list): [Secondaries to add to primary tree]
+
+    Returns:
+        NodeMixin: [Unified tree under type Primary]
+    """
     for tree in secondaries:
         for child in tree:
             primary.adopt(child)
     return primary
 
 
-def insert_into_tree(tree, mod_ptr_pairs):
-    import anytree
+def insert_into_tree(tree: NodeMixin, mod_ptr_pairs: list) -> None:
+    """[Inserts a volume pointer into a tree]
+
+    Args:
+        tree (NodeMixin): [Tree to insert volume pointers]
+        mod_ptr_pairs (list): [list of modality and corresponding pointer]
+    """
     for modality, pointer in mod_ptr_pairs:
         node = tree
         for a in modality.ancestors:
@@ -444,26 +474,37 @@ def insert_into_tree(tree, mod_ptr_pairs):
         node._add_file(pointer)
 
 
-def fn(tree):
+def recon_fn(tree: NodeMixin) -> list:
+    """[For reconstruction of a tree]
+
+    Args:
+        tree (NodeMixin): [Tree to reconstruct]
+
+    Returns:
+        [list]: [A list of tuples containing modality and ReconstructedFile]
+    """
     return tree.recon(in_memory=False, return_mods=True)
 
 
-def threaded_recon(primary):
+def threaded_recon(primary: NodeMixin) -> NodeMixin:
+    """[A multiprocessed reconstruction of primary]
+
+    Args:
+        primary (NodeMixin): [Tree for reconstruction]
+
+    Returns:
+        NodeMixin: [Primary with the volume pointers inserted]
+
+    Notes:
+        Reconstruction does not scale with processors, so we split the
+            tree into smaller trees, reconstruct each in parallel and
+            then recombine the trees
+    """
     from concurrent.futures import ProcessPoolExecutor as ProcessPool
     trees = split_tree(primary, n=10)
 
     with ProcessPool() as P:
-        results = list(P.map(fn, trees))
-
-    """
-    print([x[0].name for x in results])
-    print([x.name for x in trees])
-    results = sorted(results, key=lambda x: x[0].name, reverse=True)
-    trees = sorted(trees, key=lambda x: x.name, reverse=True)
-
-    for tree, (_, mod_ptr_pairs) in zip(trees, results):
-        insert_into_tree(tree, mod_ptr_pairs)
-    """
+        results = list(P.map(recon_fn, trees))
 
     primary = combine_trees(primary, trees)
 
