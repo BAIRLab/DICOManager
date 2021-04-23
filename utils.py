@@ -406,3 +406,79 @@ def average_runtime():
         reader = csv.reader(f)
         data = np.array(list(reader), dtype=np.float)
         print(f'Average runtime: {np.mean(data):0.3f} +/- {np.std(data):0.3f} seconds')
+
+
+def split_tree(primary: NodeMixin, n: int = None) -> list:
+    if not n:
+        n = (len(primary) // 10 + 1)
+    trees = []
+    name = 'temp' + str(len(trees))
+    tree = primary.__class__(name)
+    count = 0
+    while len(primary):
+        child = primary.pop()
+        tree.adopt(child)
+        count += 1
+        if count == n:
+            trees.append(tree)
+            name = 'temp' + str(len(trees))
+            tree = primary.__class__(name)
+            count = 0
+    if len(tree) > 0:
+        trees.append(tree)
+    return trees
+
+
+# this should really be type GroupUtils
+def combine_trees(primary: NodeMixin, secondaries: list) -> NodeMixin:
+    for tree in secondaries:
+        for child in tree:
+            primary.adopt(child)
+    return primary
+
+
+def insert_into_tree(tree, mod_ptr_pairs):
+    import anytree
+    for modality, pointer in mod_ptr_pairs:
+        node = tree
+        for a in modality.ancestors:
+            node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
+        node._add_file(pointer)
+
+
+class renamerecon:
+    def __init__(self, name):
+        self.name = name
+
+    def fn(self, tree):
+        temp = tree.name
+        tree.name = self.name
+        results = tree.recon(in_memory=False, return_mods=True)
+        #tree.name = temp
+        return (tree, results)
+
+
+def threaded_recon(primary):
+    from concurrent.futures import ProcessPoolExecutor as ProcessPool
+    trees = split_tree(primary, n=10)
+    rr = renamerecon(primary.name)
+
+    with ProcessPool() as P:
+        results = list(P.map(rr.fn, trees))
+
+    """
+    print([x[0].name for x in results])
+    print([x.name for x in trees])
+    results = sorted(results, key=lambda x: x[0].name, reverse=True)
+    trees = sorted(trees, key=lambda x: x.name, reverse=True)
+
+    for tree, (_, mod_ptr_pairs) in zip(trees, results):
+        insert_into_tree(tree, mod_ptr_pairs)
+    """
+
+    primary = combine_trees(primary, trees)
+
+    for tree, mod_ptr_pairs in results:
+        insert_into_tree(primary, mod_ptr_pairs)
+
+    return primary

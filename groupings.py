@@ -50,6 +50,7 @@ class GroupUtils(NodeMixin):
         self.include_series = include_series
         self.isodatetime = isodatetime
         self.filter_list = filter_list
+        self._index = -1
         if children:
             self.children = children
 
@@ -58,6 +59,13 @@ class GroupUtils(NodeMixin):
 
     def __iter__(self):
         return iter(self.children)
+
+    def __next__(self):
+        if self._index == (len(self.children) - 1):
+            raise StopIteration
+        else:
+            self._index += 1
+            return self.children[self._index]
 
     def __repr__(self):
         return self.__class__.__name__
@@ -213,6 +221,9 @@ class GroupUtils(NodeMixin):
                     if i > 0:
                         group[0].steal(child)
                         child.parent.prune(child.name)
+
+    def pop(self) -> NodeMixin:
+        return self.children[0]
 
     def save_tree(self, path: str, prefix: str = 'group') -> None:
         """[saves a copy of the tree to a specified location, ordered
@@ -434,27 +445,16 @@ class GroupUtils(NodeMixin):
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
-    def recon(self, in_memory=True) -> None:
+    def recon(self, in_memory=True, return_mods=False) -> None:
         # This is single threaded
         if not in_memory:
             # with too many procs & threads I saturate the disk I/O
             def recon_fn(obj):
-                newobj = deepcopy(obj)
-                return newobj.recon()
+                return obj.recon()
 
-            def split_iter(n):
-                def filterframe(node):
-                    return type(node) is FrameOfRef
-                iterer = LevelOrderGroupIter(self, filter_=filterframe, maxlevel=4)
-                frames = list([f for f in iterer if f][0])
-                return [frames[i:i + n] for i in range(0, len(frames), n)]
-
-            PROCS = 32
-            frame_groups = []
-            for group in split_iter(PROCS):
-                with ProcessPool(nodes=PROCS) as P:
-                    frame_groups.append(list(P.map(recon_fn, group)))
-            #frame_groups = list(map(recon_fn, iterator))
+            iterator = self.iter_frames()
+            with ProcessPool() as P:
+                frame_group = list(P.map(recon_fn, iterator))
 
             def flatten(S):
                 if S == []:
@@ -463,15 +463,17 @@ class GroupUtils(NodeMixin):
                     return flatten(S[0]) + flatten(S[1:])
                 return S[:1] + flatten(S[1:])
 
-            mods_ptrs = flatten(frame_groups)
-            print(mods_ptrs)
+            mods_ptrs = flatten(frame_group)
 
-            # The returned modalities don't point to the tree. Need to find proper modality
-            for modality, pointer in mods_ptrs:
-                node = self
-                for a in modality.ancestors:
-                    node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
-                node._add_file(pointer)
+            if return_mods:
+                return mods_ptrs
+            else:
+                # The returned modalities don't point to the tree. Need to find proper modality
+                for modality, pointer in mods_ptrs:
+                    node = self
+                    for a in modality.ancestors:
+                        node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
+                    node._add_file(pointer)
         else:
             total_frames, iterator = self.iter_frames(return_count=True)
             if total_frames > 10:
