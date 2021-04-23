@@ -689,7 +689,7 @@ class ReconstructedVolume(GroupUtils):
 
         Path(fullpath).mkdir(parents=True, exist_ok=True)
         output = copy(self.export())
-        #np.save(fullpath / self.SeriesInstanceUID, output)
+        np.save(fullpath / self.SeriesInstanceUID, output)
 
         if return_loc:
             return fullpath / (self.SeriesInstanceUID + '.npy')

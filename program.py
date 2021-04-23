@@ -5,6 +5,7 @@ import utils
 import time
 import os
 import psutil
+import sys
 from concurrent.futures import ProcessPoolExecutor as ProcessPool
 
 '''
@@ -25,6 +26,7 @@ start1 = time.time()
 cohort = utils.threaded_recon(cohort)
 print(cohort)
 print('elapsed1:', time.time() - start1)
+sys.stdout.flush()
 
 start0 = time.time()
 cohort.recon(in_memory=False)
