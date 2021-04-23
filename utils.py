@@ -412,8 +412,7 @@ def split_tree(primary: NodeMixin, n: int = None) -> list:
     if not n:
         n = (len(primary) // 10 + 1)
     trees = []
-    name = 'temp' + str(len(trees))
-    tree = primary.__class__(name)
+    tree = primary.__class__(primary.name)
     count = 0
     while len(primary):
         child = primary.pop()
@@ -421,8 +420,7 @@ def split_tree(primary: NodeMixin, n: int = None) -> list:
         count += 1
         if count == n:
             trees.append(tree)
-            name = 'temp' + str(len(trees))
-            tree = primary.__class__(name)
+            tree = primary.__class__(primary.name)
             count = 0
     if len(tree) > 0:
         trees.append(tree)
@@ -446,25 +444,16 @@ def insert_into_tree(tree, mod_ptr_pairs):
         node._add_file(pointer)
 
 
-class renamerecon:
-    def __init__(self, name):
-        self.name = name
-
-    def fn(self, tree):
-        temp = tree.name
-        tree.name = self.name
-        results = tree.recon(in_memory=False, return_mods=True)
-        #tree.name = temp
-        return (tree, results)
+def fn(tree):
+    return tree.recon(in_memory=False, return_mods=True)
 
 
 def threaded_recon(primary):
     from concurrent.futures import ProcessPoolExecutor as ProcessPool
     trees = split_tree(primary, n=10)
-    rr = renamerecon(primary.name)
 
     with ProcessPool() as P:
-        results = list(P.map(rr.fn, trees))
+        results = list(P.map(fn, trees))
 
     """
     print([x[0].name for x in results])
@@ -478,7 +467,7 @@ def threaded_recon(primary):
 
     primary = combine_trees(primary, trees)
 
-    for tree, mod_ptr_pairs in results:
+    for mod_ptr_pairs in results:
         insert_into_tree(primary, mod_ptr_pairs)
 
     return primary

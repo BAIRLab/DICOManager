@@ -14,13 +14,17 @@ filter_list = {'PatientID': [...],
                'StructName': [...]}
 '''
 
-files = glob('/home/eporter/eporter_data/hippo_data/**/**/*.dcm', recursive=True)
+#files = glob('/home/eporter/eporter_data/hippo_data/**/**/*.dcm', recursive=True)
+start2 = time.time()
+files = glob('/home/eporter/eporter_data/hippo_data_fldr/hippo_data/**/**/*.dcm', recursive=True)
+print(len(files))
 cohort = Cohort(name='TestFileSave', files=files, include_series=False)
+print('build tree time:', time.time() - start2)
 
 start1 = time.time()
 cohort = utils.threaded_recon(cohort)
-print('elapsed1:', time.time() - start1)
 print(cohort)
+print('elapsed1:', time.time() - start1)
 
 start0 = time.time()
 cohort.recon(in_memory=False)
