@@ -4,7 +4,6 @@ from anytree import NodeMixin
 from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
 from dataclasses import dataclass
 import pydicom
-from glob import glob
 import os
 from copy import deepcopy, copy
 from datetime import datetime
@@ -510,7 +509,7 @@ class GroupUtils(NodeMixin):
 
     def recon(self, in_memory=True, return_mods=False) -> None:
         # This is single threaded
-        elif not in_memory:
+        if not in_memory:
             # with too many procs & threads I saturate the disk I/O
             def recon_fn(obj):
                 return obj.recon()
@@ -733,7 +732,7 @@ class ReconstructedVolume(GroupUtils):
 
         Args:
             save_dir (str, optional): [Directory to save file to, defaults to ~]. Defaults to None.
-            filepath (str, optional): [Filepath to save file to, defaults to tree]. Defaults to None.
+            filepath (str, optional): [Filepath to save file tree]. Defaults to None.
             return_loc (bool, optional): [If true, returns saved filepath location]. Defaults to False.
 
         Raises:
@@ -902,7 +901,6 @@ class Cohort(GroupUtils):
         self._organize_by = 'PatientID'
         if self.files:
             self._multithread_digest()
-        #self._digest()
         self.isodatetime = utils.current_datetime()
 
 
@@ -1132,30 +1130,3 @@ class DicomDateTime:
 
     def export(self):
         return vars(self)
-
-
-if __name__ == '__main__':
-    files = glob('/home/eporter/eporter_data/hippo_data/4*/**/*.dcm', recursive=True)
-    cohort = Cohort(name='TestFileSave', files=files, include_series=True)
-    print(cohort)
-
-    def filterfunc(node):
-        return type(node) is Study
-
-    import anytree
-    def iter_modalities(tree):
-        def filtermod(node):
-            return type(node) is Modality
-        mods = [t for t in list(LevelOrderGroupIter(tree, filter_=filtermod)) if t]
-        return iter(*mods)
-
-
-    mods = iter_modalities(cohort)
-    print(list(mods))
-
-    for patient in cohort:
-        for study in patient:
-            for ref in study:
-                test = ref.recon()
-
-    # cohort.save_tree('/home/eporter/eporter_data/', prefix='date')

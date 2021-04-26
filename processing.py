@@ -11,12 +11,11 @@ from utils import VolumeDimensions, check_dims
 from new_deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
 import groupings
+from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume
 
-from concurrent.futures import ProcessPoolExecutor as ProcessPool
-from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 @dataclass
 class ImgAugmentations:
@@ -109,26 +108,7 @@ class Reconstruction:
         """
         if not hasattr(self, 'dims'):
             self.define_vol_dims(frame_of_ref)
-        """
-        all_pointers = []
-        for mod in frame_of_ref.iter_modalities():
-            # We need each reconstruction to return a ReconstructionVolume object
-            if mod.name == 'CT':
-                pointer = self.ct(mod, in_memory=in_memory)
-            elif mod.name == 'RTSTRUCT':
-                pointer = self.struct(mod, in_memory=in_memory)
-            elif mod.name == 'MR':
-                pointer = self.mr(mod, in_memory=in_memory)
-            elif mod.name == 'NM':
-                pointer = self.nm(mod, in_memory=in_memory)
-            elif mod.name == 'PET':
-                pointer = self.pet(mod, in_memory=in_memory)
-            elif mod.name == 'DOSE':
-                pointer = self.dose(mod, in_memory=in_memory)
 
-            if not in_memory:
-                all_pointers.append((mod, pointer))
-        """
         with ThreadPool() as P:
             all_pointers = list(P.map(self.split_mod, frame_of_ref.iter_modalities()))
         return all_pointers
@@ -210,48 +190,6 @@ class Reconstruction:
                     break
             if not hasattr(self, 'dims'):
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
-
-    def struct2(self, modality: Modality, in_memory: bool = False) -> None:
-        def _slice_coords(contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
-            contour_pts = np.array(contour_slice.ContourData).reshape(-1, 3)
-            pts_diff = abs(contour_pts - self.dims.origin)
-            points = np.array(
-                np.round(pts_diff / self.dims.vox_size), dtype=np.int32)
-            coords = np.array([points[:, :2]], dtype=np.int32)
-            zloc = list(set(points[:, 2]))
-            if len(zloc) > 1:
-                raise ValueError('RTSTRUCT not registered to rectilinear coordinates')
-            return (coords, zloc[0])
-
-        def _build_contour(contour_data: np.ndarray) -> np.ndarray:
-            fill_array = np.zeros(self.dims.shape, dtype=np.uint8)
-            for contour_slice in contour_data:
-                coords, zloc = self._slice_coords(contour_slice)
-                poly2D = np.zeros(self.dims.shape[:2])
-                cv2.fillPoly(poly2D, coords, 1)
-                fill_array[..., zloc] += np.array(poly2D, dtype=np.uint8)
-            fill_array = fill_array % 2
-            return fill_array
-
-        def fn(seq):
-            contour_data = seq.ContourSequence
-            built = np.array(self._build_contour(contour_data), dtype='bool')
-            return built
-
-        for struct_group in modality.struct:
-            structs = {}
-            for struct in struct_group:
-                ds = pydicom.dcmread(struct.filepath)
-                with ProcessPool() as P:
-                    constructed = list(P.map(fn, ds.ROIContourSequence))
-
-                for i, built in enumerate(constructed):
-                    name = 'name_' + str(i)
-                    structs.update({name: built})
-            struct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
-            struct_set.add_structs(structs)
-            struct_set.convert_to_pointer()
-            return struct_set
 
     def struct(self, modality: Modality, in_memory: bool = True) -> None:
         """[RTSTRUCT reconstruction from a modality with RTSTRUCT DicomFiles]
