@@ -548,7 +548,7 @@ class GroupUtils(NodeMixin):
         total_frames, iterator = self.iter_frames(return_count=True)
         if total_frames > 10:
             source = 'DICOManager/groupings.py'
-            message = 'in_memory=False recommended for reconstructing large datasets'
+            message = '.recon(in_memory=False, parallelize=True) recommended for large datasets'
             utils.colorwarn(message, source)
         for frame in iterator:
             frame.recon(in_memory=True)
@@ -560,13 +560,18 @@ class GroupUtils(NodeMixin):
             in_memory (bool, optional): [Saves the volumes into memory if True
                 and onto disk if False]. Defaults to False.
             parallelize (bool, optional): [Parallelize onto additional CPU cores,
-                runs faster this way but will override in_memory parameter and
-                write the resultant volumes to disk]. Defaults to True.
+                runs faster this way]. Defaults to True.
+        Notes:
+            in_memory=True is only recommended for small datasets or uses where the
+                hardware is write-limited. Loading large amounts of data into memory
+                may cause the system to swap and become exceedingly slow.
         """
         if in_memory and not parallelize:
             self._recon_to_memory()
         elif parallelize:
             self = utils.threaded_recon(self)
+            if in_memory:
+                self.pointers_to_volumes()
         else:
             return self._recon_to_disk()
 
