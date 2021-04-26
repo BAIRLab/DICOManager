@@ -3,7 +3,6 @@ import cv2
 import numpy as np
 import pydicom
 import utils
-import SimpleITK as sitk
 from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
 from dataclasses import dataclass
@@ -628,7 +627,12 @@ class Tools:
 
         Returns:
             ReconstructedVolume: [N4 bias corrected image]
+
+        Notes:
+            SimpleITK is not compiled for PowerPC, therefore this function is not
+                avaliable to all architetures
         """
+        import SimpleITK as sitk
         img.augmentations.bias_corrected = True
 
         sitk_image = sitk.GetImageFromArray(img.array)
