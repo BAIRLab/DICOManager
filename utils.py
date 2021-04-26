@@ -13,6 +13,8 @@ from copy import copy
 import time
 import csv
 import functools
+from concurrent.futures import ProcessPoolExecutor as ProcessPool
+import multiprocessing
 
 
 class bcolors:
@@ -500,10 +502,11 @@ def threaded_recon(primary: NodeMixin) -> NodeMixin:
             tree into smaller trees, reconstruct each in parallel and
             then recombine the trees
     """
-    from concurrent.futures import ProcessPoolExecutor as ProcessPool
     trees = split_tree(primary, n=10)
 
-    with ProcessPool() as P:
+    ncpus = multiprocessing.cpu_count()
+
+    with ProcessPool(max_workers=ncpus//4) as P:
         results = list(P.map(recon_fn, trees))
 
     primary = combine_trees(primary, trees)

@@ -14,10 +14,9 @@ import numpy as np
 from utils import VolumeDimensions
 from processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import Union
-from pathos.pools import ProcessPool, ThreadPool
+from pathos.pools import ProcessPool
 from pathlib import Path
 import pathlib
-import itertools
 
 
 class GroupUtils(NodeMixin):
@@ -51,6 +50,8 @@ class GroupUtils(NodeMixin):
         self.isodatetime = isodatetime
         self.filter_list = filter_list
         self._index = -1
+        if self.files:
+            self.files.sort()
         if children:
             self.children = children
 
@@ -91,11 +92,73 @@ class GroupUtils(NodeMixin):
                 f = DicomFile(f)
             self._add_file(f)
 
+    def _digestfn(self, dicomfile):
+        if dicomfile.__class__ is not DicomFile:
+            dicomfile = DicomFile(dicomfile)
+        if type(dicomfile) is pydicom.dataset.Dataset:
+            dicomfile = DicomFile(dicomfile.SOPInstanceUID, dcm_obj=dicomfile)
+
+        if self._filter_check(dicomfile):
+            key = str(dicomfile[self._organize_by])
+            found = False
+            for child in self.children:
+                if key == child.name:
+                    child._add_file(dicomfile)
+                    found = True
+
+            if not found:
+                dt = dicomfile.DateTime.isoformat(self._child_type)
+                child_params = {'name': key,
+                                'files': [dicomfile],
+                                'parent': self,
+                                'include_series': self.include_series,
+                                'isodatetime': dt}
+                return self._child_type(**child_params)
+
+    def _clean_up_children(self, children):
+        combined = self.__class__(self.name)
+        for child in children:
+            within = [child.name == x.name for x in combined]
+            if not any(within) or len(within) == 0:
+                combined.adopt(child)
+            else:
+                for modality in child.iter_modalities():
+                    node = combined
+                    previous = None
+                    for a in modality.ancestors:
+                        previous = node
+                        node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
+                        if node is None:  # not in tree
+                            previous.adopt(a)
+                        elif node._organize_by == 'Modality':
+                            found = False
+                            for node_mod in node:
+                                if node_mod.name == modality.name:
+                                    found = True
+                                    for f in modality.dicoms:
+                                        node_mod._add_file(f)
+                            if not found:
+                                modality.parent = node
+        return combined
+
+    def _multithread_digest(self):
+        with ProcessPool() as P:
+            children = list(P.map(self._digestfn, self.files))
+        ProcessPool().clear()
+
+        # Need to iterate through and merge any duplicates
+        children = [x for x in children if x]
+        cleaned = self._clean_up_children(children)
+
+        for child in cleaned:
+            self.adopt(child)
+        self.files = None
+
     def _filter_check(self, dicomfile: object) -> bool:
         def date_check(date, dtype):
-            cond0 = str(date) in self.filter_list[dtype]
-            cond1 = int(date) in self.filter_list[dtype]
-            return not (cond0 or cond1)
+            condition0 = str(date) in self.filter_list[dtype]
+            condition1 = int(date) in self.filter_list[dtype]
+            return not (condition0 or condition1)
 
         # We want to return true if its good to add
         if self.filter_list:
@@ -447,14 +510,15 @@ class GroupUtils(NodeMixin):
 
     def recon(self, in_memory=True, return_mods=False) -> None:
         # This is single threaded
-        if not in_memory:
+        elif not in_memory:
             # with too many procs & threads I saturate the disk I/O
             def recon_fn(obj):
                 return obj.recon()
 
             iterator = self.iter_frames()
-            with ProcessPool() as P:
+            with ProcessPool(nodes=4) as P:
                 frame_group = list(P.map(recon_fn, iterator))
+            ProcessPool().clear()
 
             def flatten(S):
                 if S == []:
@@ -836,7 +900,9 @@ class Cohort(GroupUtils):
         super().__init__(name, *args, **kwargs)
         self._child_type = Patient
         self._organize_by = 'PatientID'
-        self._digest()
+        if self.files:
+            self._multithread_digest()
+        #self._digest()
         self.isodatetime = utils.current_datetime()
 
 
