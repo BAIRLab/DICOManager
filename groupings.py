@@ -525,7 +525,7 @@ class GroupUtils(NodeMixin):
             return_mods (bool, optional): [Returns the modality pairs]. Defaults to False.
         """
         def recon_fn(frame):
-            return frame.recon()
+            return frame.recon(in_memory=False)
 
         iterator = self.iter_frames()
         with ProcessPool(nodes=4) as P:
@@ -541,9 +541,9 @@ class GroupUtils(NodeMixin):
     def _recon_to_memory(self):
         """[Reconstructs volumes and stores in memory]
 
-            Notes:
-                Not recommended for large data sets (N>10), only useful for
-                    small sample inference applications or write limited hardware
+        Notes:
+            Not recommended for large data sets (N>10), only useful for
+                small sample inference applications or write limited hardware
         """
         total_frames, iterator = self.iter_frames(return_count=True)
         if total_frames > 10:
@@ -551,7 +551,7 @@ class GroupUtils(NodeMixin):
             message = 'in_memory=False recommended for reconstructing large datasets'
             utils.colorwarn(message, source)
         for frame in iterator:
-            frame.recon()
+            frame.recon(in_memory=True)
 
     def recon(self, in_memory=False, parallelize=True, *args, **kwargs) -> None:
         """[Reconstruction of a patient or cohort]
@@ -983,7 +983,7 @@ class FrameOfRef(GroupUtils):
             self._organize_by = 'Modality'
         self._digest()
 
-    def recon(self, in_memory: bool = True):
+    def recon(self, in_memory: bool = False):
         return self._reconstruct(self, in_memory=in_memory)
 
 
