@@ -285,7 +285,18 @@ class GroupUtils(NodeMixin):
                         child.parent.prune(child.name)
 
     def pop(self) -> NodeMixin:
-        return self.children[0]
+        """[Pops a child from the parent]
+
+        Returns:
+            NodeMixin: [Returns the first child]
+
+        Notes:
+            The item is not deleted, instead its parent is
+                changed to None, severing the relationship
+        """
+        child = self.children[0]
+        child.parent = None
+        return child
 
     def save_tree(self, path: str, prefix: str = 'group') -> None:
         """[saves a copy of the tree to a specified location, ordered
@@ -507,44 +518,57 @@ class GroupUtils(NodeMixin):
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
-    def recon(self, in_memory=True, return_mods=False) -> None:
-        # This is single threaded
-        if not in_memory:
-            # with too many procs & threads I saturate the disk I/O
-            def recon_fn(obj):
-                return obj.recon()
+    def _recon_to_disk(self, return_mods=False):
+        """[Reconstructs self, writes volumes to disk]
 
-            iterator = self.iter_frames()
-            with ProcessPool(nodes=4) as P:
-                frame_group = list(P.map(recon_fn, iterator))
-            ProcessPool().clear()
+        Args:
+            return_mods (bool, optional): [Returns the modality pairs]. Defaults to False.
+        """
+        def recon_fn(frame):
+            return frame.recon()
 
-            def flatten(S):
-                if S == []:
-                    return S
-                if isinstance(S[0], list):
-                    return flatten(S[0]) + flatten(S[1:])
-                return S[:1] + flatten(S[1:])
+        iterator = self.iter_frames()
+        with ProcessPool(nodes=4) as P:
+            frame_group = list(P.map(recon_fn, iterator))
+        ProcessPool().clear()
 
-            mods_ptrs = flatten(frame_group)
-
-            if return_mods:
-                return mods_ptrs
-            else:
-                # The returned modalities don't point to the tree. Need to find proper modality
-                for modality, pointer in mods_ptrs:
-                    node = self
-                    for a in modality.ancestors:
-                        node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
-                    node._add_file(pointer)
+        mods_ptrs = utils.flatten_list(frame_group)
+        if return_mods:
+            return mods_ptrs
         else:
-            total_frames, iterator = self.iter_frames(return_count=True)
-            if total_frames > 10:
-                source = 'DICOManager/groupings.py'
-                message = 'in_memory=False recommended for reconstructing large datasets'
-                utils.colorwarn(message, source)
-            for frame in iterator:
-                frame.recon()
+            utils.insert_into_tree(self, mods_ptrs)
+
+    def _recon_to_memory(self):
+        """[Reconstructs volumes and stores in memory]
+
+            Notes:
+                Not recommended for large data sets (N>10), only useful for
+                    small sample inference applications or write limited hardware
+        """
+        total_frames, iterator = self.iter_frames(return_count=True)
+        if total_frames > 10:
+            source = 'DICOManager/groupings.py'
+            message = 'in_memory=False recommended for reconstructing large datasets'
+            utils.colorwarn(message, source)
+        for frame in iterator:
+            frame.recon()
+
+    def recon(self, in_memory=False, parallelize=True, *args, **kwargs) -> None:
+        """[Reconstruction of a patient or cohort]
+
+        Args:
+            in_memory (bool, optional): [Saves the volumes into memory if True
+                and onto disk if False]. Defaults to False.
+            parallelize (bool, optional): [Parallelize onto additional CPU cores,
+                runs faster this way but will override in_memory parameter and
+                write the resultant volumes to disk]. Defaults to True.
+        """
+        if in_memory and not parallelize:
+            self._recon_to_memory()
+        elif parallelize:
+            self = utils.threaded_recon(self)
+        else:
+            return self._recon_to_disk()
 
 
 class ReconstructedVolume(GroupUtils):

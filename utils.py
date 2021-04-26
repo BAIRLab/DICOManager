@@ -418,6 +418,14 @@ def average_runtime():
         print(f'Average runtime: {np.mean(data):0.3f} +/- {np.std(data):0.3f} seconds')
 
 
+def flatten_list(S):
+    if S == []:
+        return S
+    if isinstance(S[0], list):
+        return flatten_list(S[0]) + flatten_list(S[1:])
+    return S[:1] + flatten_list(S[1:])
+
+
 def split_tree(primary: NodeMixin, n: int = 10) -> list:
     """[Splits a tree into a series of n-sized trees]
 
@@ -484,7 +492,7 @@ def recon_fn(tree: NodeMixin) -> list:
     Returns:
         [list]: [A list of tuples containing modality and ReconstructedFile]
     """
-    return tree.recon(in_memory=False, return_mods=True)
+    return tree._recon_to_disk(return_mods=True)
 
 
 def threaded_recon(primary: NodeMixin) -> NodeMixin:

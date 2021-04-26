@@ -11,11 +11,12 @@ filter_list = {'PatientID': [...],
                'StructName': [...]}
 '''
 
-start1 = time.time()
-files = glob('/home/eporter/eporter_data/hippo_data_fldr/hippo_data/**/**/*.dcm', recursive=True)
+start = time.time()
+files = glob('/home/eporter/eporter_data/hippo_data_fldr/hippo_data/1*/**/*.dcm', recursive=True)
 cohort = Cohort(name='TestFileSave', files=files, include_series=True)
-cohort = utils.threaded_recon(cohort)
+#cohort = utils.threaded_recon(cohort)
+cohort.recon(parallelize=True)
 print(cohort)
-print('elapsed1:', time.time() - start1)
+print('elapsed:', time.time() - start)
 print(len(cohort))
 sys.stdout.flush()
