@@ -7,7 +7,7 @@ from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
 from dataclasses import dataclass
 from utils import VolumeDimensions, check_dims
-from new_deconstruction import RTStructConstructor
+from deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
 import groupings
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
