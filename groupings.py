@@ -1,21 +1,17 @@
 import anytree
-from anytree import RenderTree
-from anytree import NodeMixin
-from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
-from dataclasses import dataclass
-import pydicom
 import os
-from copy import deepcopy, copy
-from datetime import datetime
-from typing import Any, TypeVar
-import utils
 import numpy as np
-from utils import VolumeDimensions
-from processing import Reconstruction, Deconstruction, ImgAugmentations
-from typing import Union
-from pathos.pools import ProcessPool
-from pathlib import Path
 import pathlib
+import pydicom
+import utils
+from anytree import RenderTree, NodeMixin
+from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
+from copy import deepcopy, copy
+from dataclasses import dataclass
+from datetime import datetime
+from pathos.pools import ProcessPool
+from processing import Reconstruction, Deconstruction, ImgAugmentations
+from typing import Any, TypeVar, Union
 
 
 class GroupUtils(NodeMixin):
@@ -586,7 +582,7 @@ class ReconstructedVolume(GroupUtils):
     struct = property(utils.mod_getter('RTSTRUCT'), utils.mod_setter('RTSTRUCT'))
 
     def __init__(self, dcm_header: pydicom.dataset.Dataset,
-                 dims: VolumeDimensions, parent: object, *args, **kwargs):
+                 dims: utils.VolumeDimensions, parent: object, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dcm_header = dcm_header
         self.dims = dims
@@ -757,7 +753,7 @@ class ReconstructedVolume(GroupUtils):
 
     def save_file(self, save_dir: str = None, filepath: str = None,
                   return_loc: bool = False) -> Union[None, pathlib.PosixPath]:
-        """[summary]
+        """[Save the reconstructed volume and associated information to a .npy pickled file]
 
         Args:
             save_dir (str, optional): [Directory to save file to, defaults to ~]. Defaults to None.
@@ -775,11 +771,11 @@ class ReconstructedVolume(GroupUtils):
         if not filepath:
             filepath = self._generate_filepath()
         if save_dir:
-            fullpath = Path(save_dir) / filepath
+            fullpath = pathlib.Path(save_dir) / filepath
         else:
-            fullpath = Path.home() / filepath
+            fullpath = pathlib.Path.home() / filepath
 
-        Path(fullpath).mkdir(parents=True, exist_ok=True)
+        pathlib.Path(fullpath).mkdir(parents=True, exist_ok=True)
         output = copy(self.export())
         np.save(fullpath / self.SeriesInstanceUID, output)
 

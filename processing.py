@@ -2,6 +2,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 import pydicom
+import groupings
 import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
 from skimage.transform import rescale
@@ -9,8 +10,6 @@ from dataclasses import dataclass
 from utils import VolumeDimensions, check_dims
 from deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
-import groupings
-from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume
@@ -88,34 +87,32 @@ class Reconstruction:
         self.in_memory = True
 
     def __call__(self, frame_of_ref: FrameOfRef, in_memory: bool = False) -> None:
-        """
-        # Match statement in python 3.10
-        match mod.name:
-            case 'CT':
-                vols = self.ct(mod)
-            case 'MR':
-                vols = self.mr(mod)
-            case 'NM':
-                vols = self.nm(mod)
-            case 'PET':
-                vols = self.pet(mod)
-            case 'DOSE':
-                vols = self.dose(mod)
-            case 'RTSTRUCT':
-                vols = self.struct(mod)
-            case _:
-                raise TypeError(f'Reconstruction of {mod.name} not supported')
-        """
         if not hasattr(self, 'dims'):
             self.define_vol_dims(frame_of_ref)
 
         self.in_memory = in_memory
 
-        with ThreadPool() as P:
-            all_pointers = list(P.map(self.split_mod, frame_of_ref.iter_modalities()))
+        all_pointers = list(map(self._split_mod, frame_of_ref.iter_modalities()))
         return all_pointers
 
-    def split_mod(self, mod):
+    def _split_mod(self, mod: Modality):
+        """[Wrapper function to split the modalities to their respective functions]
+
+        Args:
+            mod (Modality): [Modality to reconstruct]
+
+        Returns:
+            [tuple]: [Modality and ReconstructedFile]
+
+        Notes:
+            # Match statement in python 3.10
+            match mod.name:
+                case 'CT':
+                    pointer = self.ct(mod)
+                ...
+                case _:
+                    raise TypeError(f'Reconstruction of {mod.name} not supported')
+        """
         if mod.name == 'CT':
             pointer = self.ct(mod)
         elif mod.name == 'RTSTRUCT':

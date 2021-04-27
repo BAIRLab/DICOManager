@@ -1,18 +1,17 @@
 #! /usr/bin/python
 import copy
 import pydicom
-from datetime import datetime
-from dataclasses import dataclass
-from matplotlib import cm
 import numpy as np
 import hashlib
 import os
 import random
 import uuid
 import scipy
-from scipy.ndimage.morphology import binary_erosion
-from scipy.ndimage.morphology import binary_dilation
+from datetime import datetime
+from dataclasses import dataclass
+from matplotlib import cm
 from scipy import spatial
+from scipy.ndimage.morphology import binary_erosion, binary_dilation
 from skimage import measure as skm
 from utils import VolumeDimensions
 
