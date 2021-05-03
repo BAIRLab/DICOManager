@@ -100,7 +100,7 @@ For this to intergrate into the library, we would want to say:
 
 generator = cohort.generator.tensorflow(*args, **kwargs) -> formatted for tensorflow
 generator = cohort.generator.pytorch(*args, **kwargs) -> formatted for pytorch
-generator = cohort.generator(*args, **kwargs) -> non-optimized generator function
+generator = cohort.generator.basic(*args, **kwargs) -> non-optimized generator function
 
 This will create a generator, like above and then will format it into tensorflow or pytorch
 
@@ -113,14 +113,159 @@ optional parameters:
     filter_: function. Default = None
     iterator: function. Default = None
     modalities: list. Default = None
+
+Basic Layout:
+    class GeneratorUtils:
+        pass
+
+    class Basic(GeneratorUtils):
+        pass
+
+    class Augmented(Basic):
+        pass
+
+    def pytorch(*args, **kwargs):
+        if augmented:
+            gen = Augmented(*args, **kwargs)
+        else:
+            gen = Basic(*args, **kwargs)
+        prepped = gen
+        return prepped
+
+    def tensorflow(*args, **kwargs):
+        if augmented:
+            gen = Augmented(*args, **kwargs)
+        else:
+            gen = Basic(*args, **kwargs)
+        prepped = gen
+        return prepped
+
+    def numpy(*args, **kwargs):
+        if augmented:
+            return Augmented(*args, **kwargs)
+        else:
+            return Basic(*args, **kwargs)
+
+    def nifti(*args, **kwargs):
+        if augmented:
+            gen = Augmented(*args, **kwargs)
+        else:
+            gen = Basic(*args, **kwargs)
+        niftigen = dcm_to_nifti_wrapper(gen)
+        return niftigen
 '''
 
-class generator:
-    def __init__(self, n_channels: int, augmentations: dict = None, shuffle: bool = False, filter_: object = None,
-                 modalities: list = None, iterator: object = None):
+class GeneratorUtils:
+    def __init__(self, n_channels: int, output_dims: tuple, augmentations: dict = None,
+                 shuffle: bool = False, filter_: object = None, modalities: list = None,
+                 iterator: object = None, in_memory: bool = False, struct_names: list = None):
         self.n_channels = n_channels
-        self.augmentations = augmentations
+        self.output_dims = output_dims
         self.shuffle = shuffle
         self.filter_ = filter_
         self.modalities = modalities
+        self.augmentations = augmentations
         self.iterator = iterator
+        self.in_memory = in_memory
+        self._index_list = []
+        if not self.iterator:
+            self.iterator = self.iter_frames()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self._group_data()
+
+    def __call__(self):
+        yield next(self)
+
+    def _to_gen(self):
+        while True:
+            yield self._group_data()
+
+    def _index_tracker(self):
+        if not self._index_list:
+            n_groups = len(self.iterator)
+            self._index_list = list(range(n_groups))
+        if self.shuffle:
+            random.shuffle(self._index_list)
+        return self._index_list.pop(0)
+
+    def _crop(self, array):
+        in_size = self.ch_arr.shape[1:-1]
+        diffs = [a-b for a, b in zip(in_size, self.output_dims)]
+        empty = [slice(None)]  # Used to pad the slice tuple
+        slices = empty + [slice(d//2, d-d//2) for d in diffs] + empty
+        return array[tuple(slices)]
+
+    def _get_data(self):
+        index = self._index_tracker()
+        return self.ch_arr[index], self.labels[index]
+
+    def _group_data(self):
+        train_array = np.zeros((self.batch_size,
+                                *self.ch_arr.shape[1:]))
+        truth_array = np.zeros((self.batch_size,
+                                *self.labels.shape[1:]))
+        for i in range(self.batch_size):
+            train_array[i], truth_array[i] = self._get_data()
+        if not self.out_size:
+            return train_array, truth_array
+        return self._crop(train_array), self._crop(truth_array)
+
+
+class AugmentationGeneratorUtils(GeneratorUtils):
+    def __init__(self, batch_size, labels, ch0,
+                 ch1=None, ch2=None, out_size=None, **kwargs):
+        super().__init__(batch_size, labels, ch0, ch1, ch2)
+        self.out_size = out_size
+        self._IDG = IDG(**kwargs)
+        self._seed = random.randint(0, 2**32-1)
+        self._truth_IDG = self._init_generator(self.labels)
+        self._train_IDG = self._init_generator(self.ch_arr)
+
+    def _init_generator(self, arr):
+        indx = range(arr.shape[-1])
+        flow_dict = {'seed': self._seed,
+                     'batch_size': 1}
+        return zip(*[self._IDG.flow(x=arr[..., i], **flow_dict) for i in indx])
+
+    def _get_data(self):
+        train = np.rollaxis(np.array(next(self._train_IDG))[:, 0], 0, 4)
+        test = np.rollaxis(np.array(next(self._truth_IDG))[:, 0], 0, 4)
+        return train, test
+
+
+
+class basic(GeneratorUtils, AugmentationGeneratorUtils):
+    def __init__(self, augmentations: dict = None, *args, **kwargs):
+        if augmentations:
+
+
+        super().__init__(*args, **kwargs)
+
+
+class pytorch(GeneratorUtils, ):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def __call__(self):
+        return self._to_pytorch()
+
+    def _to_pytorch(self):
+        pass
+
+
+class tensorflow(GeneratorUtils):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def __call__(self):
+        return self._to_tf()
+
+    def _to_tf(self, data):
+        tfgen = tf.data.Dataset.from_generator(self._to_gen(),
+                                               output_types=(tf.float32, tf.float32),
+                                               output_shapes=(self.output_dims, self.output_dims))
+        return tfgen
