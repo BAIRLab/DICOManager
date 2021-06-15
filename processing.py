@@ -12,7 +12,7 @@ from deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume
+    from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume, ReconstructedFile
 
 
 @dataclass
@@ -43,6 +43,7 @@ class ImgAugmentations:
 
     # interpolation
     interpolated: bool = False
+    empty_slices: list = None
     interpolated_slices: list = None
 
     # biase field correction
@@ -73,9 +74,17 @@ class ImgAugmentations:
         self.pixelspacing_original = pixelspacing_original
         self.ratio = ratio
 
-    def interpolated_update(self, interpolated_slices: list) -> None:
-        self.interpolated = True
-        self.interpolated_slices = interpolated_slices
+    def interpolated_update(self, interpolated_slices: list, extrapolated_slices: list) -> None:
+        temp = self.empty_slices
+        if len(interpolated_slices) > 0:
+            self.interpolated = True
+            self.interpolated_slices = interpolated_slices
+            temp = list(set(temp) - set(interpolated_slices))
+        if len(extrapolated_slices) > 0:
+            self.extrapolated = True
+            self.extrapolated_slices = extrapolated_slices
+            temp = list(set(temp) - set(extrapolated_slices))
+        self.empty_slices = temp
 
     def as_dict(self):
         return vars(self)
@@ -86,11 +95,13 @@ class Reconstruction:
         self.filter_structs = filter_structs
         self.in_memory = True
 
-    def __call__(self, frame_of_ref: FrameOfRef, in_memory: bool = False) -> None:
+    def __call__(self, frame_of_ref: FrameOfRef, in_memory: bool = False,
+                 path: str = None) -> None:
         if not hasattr(self, 'dims'):
             self.define_vol_dims(frame_of_ref)
 
         self.in_memory = in_memory
+        self.path = path
 
         all_pointers = list(map(self._split_mod, frame_of_ref.iter_modalities()))
         return all_pointers
@@ -157,21 +168,20 @@ class Reconstruction:
         return fill_array
 
     def _struct_filter_check(self, name):
-        if self.filter_structs is None:
-            return True
-        elif type(self.filter_structs) is list:
-            return name in self.filter_structs
-        elif type(self.filter_structs) is dict:
+        if self.filter_structs is None:  # No filter
+            return (True, name)
+        elif type(self.filter_structs) is list:  # list
+            contains = name in self.filter_structs
+            return (contains, name)
+        elif type(self.filter_structs) is dict:  # dict, rename
             if name in self.filter_structs:
-                return True
-            found = False
-            for value in self.filter_structs.values():
+                return (True, name)
+            for key, value in self.filter_structs.items():
                 if name in value:
-                    found = True
-                    break
-            return found
+                    return (True, key)
+            return (False, name)
         else:
-            raise TypeError('filter_structs must be dict or list')
+            raise TypeError('filter_by[\'StructName\'] must be dict or list')
 
     def define_vol_dims(self, frame_of_ref: FrameOfRef) -> None:
         """[Defines the volume dimensions from a FrameOfRef for RTSTRUCT construction]
@@ -188,6 +198,9 @@ class Reconstruction:
                     self.dims = VolumeDimensions(mod.dicoms_data)
                     break
             if not hasattr(self, 'dims'):
+                print(frame_of_ref.name)
+                for patient in frame_of_ref:
+                    print(patient.name)
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
     def struct(self, modality: Modality) -> None:
@@ -209,7 +222,8 @@ class Reconstruction:
                 ds = pydicom.dcmread(struct.filepath)
                 for index, contour in enumerate(ds.StructureSetROISequence):
                     name = contour.ROIName.lower()
-                    if self._struct_filter_check(name):
+                    valid, name = self._struct_filter_check(name)
+                    if valid:
                         contour_data = ds.ROIContourSequence[index].ContourSequence
                         built = np.array(self._build_contour(contour_data), dtype='bool')
                         structs.update({name: built})
@@ -218,7 +232,7 @@ class Reconstruction:
             struct_set.add_structs(structs)
 
             if not self.in_memory:
-                struct_set.convert_to_pointer()
+                struct_set.convert_to_pointer(path=self.path)
                 return struct_set
             modality._add_file(struct_set)
 
@@ -232,12 +246,21 @@ class Reconstruction:
         """
         for ct_group in modality.ct:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
-            origin = self.dims.origin
 
+            corrupt_slices = []
+            filled_zlocs = []
             for ct_file in sorted(ct_group):
                 ds = pydicom.dcmread(ct_file.filepath)
-                zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float32')
+                zloc = self.dims.calc_z_index(loc=ds.ImagePositionPatient[-1])
+                try:
+                    fill_array[:, :, zloc] = np.array(ds.pixel_array, dtype='float32')
+                    filled_zlocs.append(zloc)
+                except ValueError:
+                    corrupt_slices.append(zloc)
+                except IndexError:
+                    utils.colorwarn(f'Patient {ds.PatientID}, slice {zloc} is problematic')
+                else:
+                    filled_zlocs.append(zloc)
 
             if HU:
                 slope = ds.RescaleSlope
@@ -247,8 +270,17 @@ class Reconstruction:
             ct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             ct_set.add_vol(ds.SOPInstanceUID, fill_array)
 
+            empty_slices = list(set(range(self.dims.slices)) - set(filled_zlocs))
+            empty_slices.sort()
+            if len(empty_slices) > 0:
+                message = f'Empty slices in: {ds.PatientID}, interpolation recommended'
+                source = 'DICOManager/processing.py'
+                utils.colorwarn(message, source)
+                #utils.colorwarn(f'Empty slices in: {ds.PatientID}, interpolation recommended')
+                ct_set.ImgAugmentations.empty_slices = empty_slices
+
             if not self.in_memory:
-                ct_set.convert_to_pointer()
+                ct_set.convert_to_pointer(path=self.path)
                 return ct_set
             modality._add_file(ct_set)
 
@@ -274,7 +306,7 @@ class Reconstruction:
             nm_set.add_vol(ds.SOPInstanceUID, fill_array)
 
             if not self.in_memory:
-                nm_set.convert_to_pointer()
+                nm_set.convert_to_pointer(path=self.path)
                 return nm_set
             modality._add_file(nm_set)
 
@@ -288,18 +320,26 @@ class Reconstruction:
         """
         for mr_group in modality.mr:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
-            origin = self.dims.origin
 
+            empty_slices = []
             for mr_file in sorted(mr_group):
                 ds = pydicom.dcmread(mr_file.filepath)
-                zloc = int(round(abs(origin[-1] - ds.SliceLocation)))
-                fill_array[:, :, zloc] = ds.pixel_array
+                zloc = self.dims.calc_z_index(loc=ds.ImagePositionPatient[-1])
+                try:
+                    fill_array[:, :, zloc] = ds.pixel_array
+                except ValueError:
+                    empty_slices.append(zloc)
 
             mr_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             mr_set.add_vol(ds.SOPInstanceUID, fill_array)
 
+            if len(empty_slices) > 0:
+                empty_slices.sort()
+                print(f'Patient {ds.PatientID} missing slices: {empty_slices}')
+                mr_set.ImgAugmentations.empty_slices = empty_slices
+
             if not self.in_memory:
-                mr_set.convert_to_pointer()
+                mr_set.convert_to_pointer(path=self.path)
                 return mr_set
             modality._add_file(mr_set)
 
@@ -330,7 +370,7 @@ class Reconstruction:
             pet_set.add_vol(ds.SOPInstanceUID, suv_values)
 
             if not self.in_memory:
-                pet_set.convert_to_pointer()
+                pet_set.convert_to_pointer(path=self.path)
                 return pet_set
             modality._add_file(pet_set)
 
@@ -356,7 +396,7 @@ class Reconstruction:
             dose_set.add_vol(ds.SOPInstanceUID, dose_interp)
 
             if not self.in_memory:
-                dose_set.convert_to_pointer()
+                dose_set.convert_to_pointer(path=self.path)
                 return dose_set
             modality._add_file(dose_set)
 
@@ -481,6 +521,19 @@ class Tools:
     # Tools are used to process reconstructed arrays
     # DicomUtils are for DICOM reconstruction utilities
     # Should probably unnest from the class and move to a seperate file
+    def handle_pointers(self, function):
+        def wrapped(data):
+            original = type(data)
+            if original is ReconstructedFile:
+                data.load_array()
+                results = function(data)
+                results.convert_to_pointer()
+            else:
+                results = function(data)
+            return results
+        return wrapped
+
+    @handle_pointers
     def dose_max_points(self, dose_array: np.ndarray,
                         dose_coords: np.ndarray = None) -> np.ndarray:
         """[Calculates the dose maximum point in an array, returns index or coordinates]
@@ -497,6 +550,7 @@ class Tools:
             return dose_coords[index]
         return index
 
+    @handle_pointers
     def window_level(self, img: ReconstructedVolume, window: int,
                      level: int) -> ReconstructedVolume:
         """[Applies a window and level to the given object. Works for either HU or CT number,
@@ -522,6 +576,7 @@ class Tools:
         img.array = temp
         return img
 
+    @handle_pointers
     def normalize(self, img: ReconstructedVolume) -> ReconstructedVolume:
         """[Normalizes an image volume ojbect]
 
@@ -538,6 +593,7 @@ class Tools:
         img.array = temp
         return img
 
+    @handle_pointers
     def standardize(self, img: ReconstructedVolume) -> ReconstructedVolume:
         """[Standardizes an image volume object]
 
@@ -555,6 +611,7 @@ class Tools:
         img.array = temp
         return img
 
+    @handle_pointers
     def crop(self, img: ReconstructedVolume, centroid: np.ndarray,
              crop_size: np.ndarray) -> ReconstructedVolume:
         """[Crops an image volume and updates headers accordingly]
@@ -601,6 +658,7 @@ class Tools:
         img.augmentations.crop_update(img_coords, patient_coords)
         return img
 
+    @handle_pointers
     def resample(self, img: ReconstructedVolume, ratio: float) -> ReconstructedVolume:
         """[Downsample an image by a specified ratio]
 
@@ -619,6 +677,7 @@ class Tools:
         img.augmentations.resample_update(None, round(ratio))
         return img
 
+    @handle_pointers
     def bias_field_correction(self, img: ReconstructedVolume) -> ReconstructedVolume:
         """[MRI Bias Field Correction]
 
@@ -641,4 +700,40 @@ class Tools:
         output = corrector.Execute(sitk_image, sitk_mask)
         img.array = sitk.GetArrayFromImage(output)
 
+        return img
+
+    @handle_pointers
+    def interpolate(self, img: ReconstructedVolume, extrapolate: bool = False) -> ReconstructedVolume:
+        empty_slices = img.ImgAugmentations.empty_slices
+        if len(empty_slices) > 0 and not img.is_struct:
+            interpolated = []
+            extrapolated = []
+            for name, volume in img.volumes.items():
+                for eslice in empty_slices:
+                    zlo, zhi = (1, 1)
+                    lo_slice, hi_slice = (None, None)
+                    # Find filled slice below
+                    while (eslice - zlo) > 0:
+                        lo_slice = volume[..., eslice-zlo]
+                        if lo_slice.size:
+                            break
+                        zlo += 1
+                    # Find filled slice above
+                    while (eslice + zhi) < (img.dims.slices - 1):
+                        hi_slice = volume[..., eslice+zhi]
+                        if hi_slice.size:
+                            break
+                        zhi += 1
+                    if lo_slice.size and hi_slice.size:
+                        volume[eslice] = (hi_slice + lo_slice) / 2
+                        interpolated.append(eslice)
+                    elif not extrapolate:
+                        utils.colorwarn(f'Cannot interpolate {img}, try extroplate=True')
+                    elif not lo_slice.size:
+                        volume[eslice] = hi_slice
+                    else:
+                        volume[eslice] = lo_slice
+
+                interpolated.sort()
+                img.ImgAugmenations.interpolated_update(interpolated, extrapolated)
         return img
