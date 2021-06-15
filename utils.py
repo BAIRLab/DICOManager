@@ -1,20 +1,20 @@
-import os
-import shutil
-import pydicom
 import anytree
+import csv
+import functools
+import multiprocessing
+import numpy as np
+import os
+import pydicom
+import shutil
+import time
+import warnings
 from anytree import NodeMixin
 from anytree.iterators.levelorderiter import LevelOrderIter
 from datetime import datetime
 from pathlib import Path
-import numpy as np
 from dataclasses import dataclass
-import warnings
 from copy import copy
-import time
-import csv
-import functools
 from concurrent.futures import ProcessPoolExecutor as ProcessPool
-import multiprocessing
 
 
 class bcolors:
@@ -210,6 +210,21 @@ class VolumeDimensions:
         self.vox_size = [self.dx, self.dy, self.dz]
         self.dicoms = None
 
+    def _calculate_dz(self, zlocations):
+        zlocations.sort()
+        differences = np.zeros((len(zlocations) - 1))
+        previous = min(zlocations)
+
+        for i in range(1, len(zlocations)):
+            differences[i - 1] = round(abs(previous - zlocations[i]), 2)
+            previous = zlocations[i]
+
+        differences = list(set(differences))
+
+        if len(differences) > 1:
+            self.multi_thick = True
+        return min(differences)
+
     def _calc_n_slices(self, files: list):
         """[calculates the number of volume slices]
 
@@ -223,40 +238,67 @@ class VolumeDimensions:
             instance if we do not have instance 1, but we cannot extrapolate
             if higher instances are missing
         """
-        inst0 = np.inf
-        inst1 = -np.inf
-        slice_thicknesses = []
+        z0, z1 = (np.inf, -np.inf)
+        low_inst = np.inf
+        low_thickness = None
+        header_thicknesses = []
+        zlocations = []
 
-        z0, z1 = (0, 0)
         for dcm in files:
             ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
             self.ipp = ds.ImagePositionPatient
             self.iop = ds.ImageOrientationPatient
-            inst = int(ds.InstanceNumber)
-            slice_thicknesses.append(float(ds.SliceThickness))
-            if inst < inst0:  # Low instance
-                inst0 = inst
-                z0 = float(self.ipp[-1])
-            if inst > inst1:  # High instance
-                inst1 = inst
-                z1 = float(self.ipp[-1])
+            header_thicknesses.append(float(ds.SliceThickness))
+            zloc = float(self.ipp[-1])
+            zlocations.append(zloc)
+
+            if zloc < z0:
+                z0 = zloc
+            if zloc > z1:
+                z1 = zloc
+
+            if hasattr(ds, 'InstanceNumber'):
+                inst = int(ds.InstanceNumber)
+                if inst < low_inst:
+                    low_inst = inst
+                    low_thickness = ds.SliceThickness
+            """
+            try:
+                inst = int(ds.InstanceNumber)
+                if inst < inst0:  # Low instance
+                    inst0 = inst
+                    z0 = float(self.ipp[-1])
+                if inst > inst1:  # High instance
+                    inst1 = inst
+                    z1 = float(self.ipp[-1])
+            except AttributeError:
+                # I might be able to just do this for all cases...
+                zloc = float(self.ipp[-1])
+                inst0 = 0
+                inst1 = 0
+                if zloc < z0:
+                    z0 = zloc
+                if zloc > z1:
+                    z1 = zloc
+            """
+
+        if 1 < low_inst < 5 and low_inst != np.inf:  # For extrapolation of missing slices
+            # Need to make it the slice thickness of the lowest slice
+            # in case the image has mixed thicknesses
+            z0 -= low_thickness * (low_inst - 1)
+            low_inst = 1
+
+        self.dz = self._calculate_dz(zlocations)
         self.zlohi = (z0, z1)
-
-        if inst0 > 1:
-            z0 -= ds.SliceThickness * (inst0 - 1)
-            inst0 = 1
-
-        slice_thicknesses = list(set(slice_thicknesses))
-        if len(slice_thicknesses) > 1:
-            self.multi_thick = True
-
-        self.dz = min(slice_thicknesses)
         self.origin = np.array([*self.ipp[:2], max(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
 
+        """
         if z1 < z0:
+            print("flipping the slice thickness")
             # TODO: We can replace thiw with the ImagePositionPatient header
             self.flipped = True
+        """
 
         return ds
 
@@ -282,6 +324,9 @@ class VolumeDimensions:
         pts_x, pts_y, pts_z = self.coordrange()
         grid = np.array([*np.meshgrid(pts_x, pts_y, pts_z, indexing='ij')])
         return grid.reshape(3, -1)
+
+    def calc_z_index(self, loc):
+        return int(round(abs((self.origin[-1] - loc) / self.dz)))
 
     def Mgrid(self, dcm_hdr):
         """
@@ -479,23 +524,34 @@ def insert_into_tree(tree: NodeMixin, mod_ptr_pairs: list) -> None:
     for modality, pointer in mod_ptr_pairs:
         node = tree
         for a in modality.ancestors:
-            node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
+            node = anytree.search.findall(node, filter_=lambda x: x.name == a.name)[-1]
         node._add_file(pointer)
 
+"""
+def recon_fn(path: str = None) -> list:
+    def nested(tree: NodeMixin) -> list:
+        return tree._recon_to_disk(return_mods=True, path=path)
+    return nested
+"""
 
-def recon_fn(tree: NodeMixin) -> list:
+class ReconToPath:
     """[For reconstruction of a tree]
 
     Args:
         tree (NodeMixin): [Tree to reconstruct]
+        path (str): [Path to save reconstructed volume]
 
     Returns:
         [list]: [A list of tuples containing modality and ReconstructedFile]
     """
-    return tree._recon_to_disk(return_mods=True)
+    def __init__(self, path: str = None):
+        self.path = path
+
+    def __call__(self, tree: NodeMixin):
+        return tree._recon_to_disk(return_mods=True, path=self.path)
 
 
-def threaded_recon(primary: NodeMixin) -> NodeMixin:
+def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
     """[A multiprocessed reconstruction of primary]
 
     Args:
@@ -512,6 +568,7 @@ def threaded_recon(primary: NodeMixin) -> NodeMixin:
     trees = split_tree(primary, n=10)
 
     ncpus = multiprocessing.cpu_count()
+    recon_fn = ReconToPath(path)
 
     with ProcessPool(max_workers=ncpus//4) as P:
         results = list(P.map(recon_fn, trees))
