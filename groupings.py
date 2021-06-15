@@ -36,14 +36,14 @@ class GroupUtils(NodeMixin):
         flatten (None): flattens tree to one child per parent
     """
     def __init__(self, name=None, files=None, parent=None, children=None,
-                 include_series=False, isodatetime=None, filter_list=None):
+                 include_series=True, isodatetime=None, filter_by=None):
         super().__init__()
         self.name = name
         self.files = files
         self.parent = parent
         self.include_series = include_series
         self.isodatetime = isodatetime
-        self.filter_list = filter_list
+        self.filter_by = filter_by
         self._index = -1
         if self.files:
             self.files.sort()
@@ -107,8 +107,34 @@ class GroupUtils(NodeMixin):
                                 'files': [dicomfile],
                                 'parent': self,
                                 'include_series': self.include_series,
+                                'filter_by': self.filter_by,
                                 'isodatetime': dt}
                 return self._child_type(**child_params)
+
+    def _find_leaf(self, combined, modality):
+        current = combined
+        previous = None
+        for ancs in modality.ancestors:
+            # Find the deepest common ancestor
+            previous = current
+            try:
+                current = anytree.search.findall(current, filter_=lambda x: x.name == ancs.name)[-1]
+            except Exception:
+                current = anytree.search.find(current, filter_=lambda x: x.name == ancs.name)
+
+            if current is None:  # not in tree
+                previous.adopt(ancs)
+                break
+            elif current._organize_by == 'Modality':  # at bottom, find series or make new
+                found = False
+                for series in current:
+                    if series.name == modality.name and series is not modality:
+                        found = True
+                        for f in modality.dicoms:
+                            series._add_file(f)
+                if not found:
+                    modality.parent = current
+        return combined
 
     def _clean_up_children(self, children):
         combined = self.__class__(self.name)
@@ -118,31 +144,34 @@ class GroupUtils(NodeMixin):
                 combined.adopt(child)
             else:
                 for modality in child.iter_modalities():
+                    combined = self._find_leaf(combined, modality)
+                    """
                     node = combined
                     previous = None
                     for a in modality.ancestors:
                         previous = node
-                        node = anytree.search.find(node, filter_=lambda x: x.name == a.name)
+                        node = anytree.search.findall(node, filter_=lambda x: x.name == a.name)[-1]
                         if node is None:  # not in tree
                             previous.adopt(a)
+                            break
                         elif node._organize_by == 'Modality':
                             found = False
                             for node_mod in node:
-                                if node_mod.name == modality.name:
+                                if node_mod.name == modality.name and node_mod is not modality:
                                     found = True
                                     for f in modality.dicoms:
                                         node_mod._add_file(f)
                             if not found:
                                 modality.parent = node
+                    """
         return combined
 
     def _multithread_digest(self):
         with ProcessPool() as P:
-            children = list(P.map(self._digestfn, self.files))
+            children = [x for x in list(P.map(self._digestfn, self.files)) if x]
         ProcessPool().clear()
 
         # Need to iterate through and merge any duplicates
-        children = [x for x in children if x]
         cleaned = self._clean_up_children(children)
 
         for child in cleaned:
@@ -151,21 +180,29 @@ class GroupUtils(NodeMixin):
 
     def _filter_check(self, dicomfile: object) -> bool:
         def date_check(date, dtype):
-            condition0 = str(date) in self.filter_list[dtype]
-            condition1 = int(date) in self.filter_list[dtype]
+            condition0 = str(date) in self.filter_by[dtype]
+            condition1 = int(date) in self.filter_by[dtype]
             return not (condition0 or condition1)
 
         # We want to return true if its good to add
-        if self.filter_list:
-            if self._organize_by == 'PatientID':
-                mrn = self.dicomfile.PatientID
-                return (mrn not in self.filter_list['PatientID'])
-            if self._organize_by == 'StudyUID':
+        if self.filter_by:
+            conditions = {'mrn': True,
+                          'study': True,
+                          'series': True,
+                          'modality': True}
+            if 'PatientID' in self.filter_by:
+                mrn = dicomfile.PatientID
+                conditions['mrn'] = (mrn in self.filter_by['PatientID'])
+            if 'StudyDate' in self.filter_by:
                 date = dicomfile.DateTime.StudyDate
-                return date_check(date, 'StudyDate')
-            if self._organize_by == 'SeriesUID':
+                conditions['study'] = date_check(date, 'StudyDate')
+            if 'SeriesDate' in self.filter_by:
                 date = dicomfile.DateTime.SeriesDate
-                return date_check(date, 'SeriesDate')
+                conditions['series'] = date_check(date, 'SeriesDate')
+            if 'Modality' in self.filter_by:
+                modality = dicomfile.Modality
+                conditions['modality'] = modality in self.filter_by['Modality']
+            return all(conditions.values())
         return True
 
     def _add_file(self, dicomfile: object, volumes: bool = False) -> None:
@@ -190,6 +227,7 @@ class GroupUtils(NodeMixin):
                 child_params = {'name': key,
                                 'files': [dicomfile],
                                 'parent': self,
+                                'filter_by': self.filter_by,
                                 'include_series': self.include_series,
                                 'isodatetime': dt}
                 self._child_type(**child_params)
@@ -371,7 +409,8 @@ class GroupUtils(NodeMixin):
             return type(node) is Modality
         iterer = LevelOrderGroupIter(self, filter_=filtermod)
         mods = [t for t in iterer if t]
-        return iter(*mods)
+        if not mods == [None] * len(mods):
+            return iter(*mods)
 
     def iter_frames(self, return_count=False) -> object:
         """[Iterates through each FrameOfRef]
@@ -514,14 +553,14 @@ class GroupUtils(NodeMixin):
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
-    def _recon_to_disk(self, return_mods=False):
+    def _recon_to_disk(self, return_mods=False, path=None):
         """[Reconstructs self, writes volumes to disk]
 
         Args:
             return_mods (bool, optional): [Returns the modality pairs]. Defaults to False.
         """
         def recon_fn(frame):
-            return frame.recon(in_memory=False)
+            return frame.recon(in_memory=False, path=path)
 
         iterator = self.iter_frames()
         with ProcessPool(nodes=4) as P:
@@ -549,7 +588,7 @@ class GroupUtils(NodeMixin):
         for frame in iterator:
             frame.recon(in_memory=True)
 
-    def recon(self, in_memory=False, parallelize=True, *args, **kwargs) -> None:
+    def recon(self, in_memory=False, parallelize=True, path=None, *args, **kwargs) -> None:
         """[Reconstruction of a patient or cohort]
 
         Args:
@@ -565,11 +604,11 @@ class GroupUtils(NodeMixin):
         if in_memory and not parallelize:
             self._recon_to_memory()
         elif parallelize:
-            self = utils.threaded_recon(self)
+            self = utils.threaded_recon(self, path=path)
             if in_memory:
-                self.pointers_to_volumes()
+                self.pointers_to_volumes(path=path)
         else:
-            return self._recon_to_disk()
+            return self._recon_to_disk(path=path)
 
 
 class ReconstructedVolume(GroupUtils):
@@ -644,7 +683,6 @@ class ReconstructedVolume(GroupUtils):
             self.FrameOfRefUID = ds.FrameOfRefUID
         else:
             self.FrameOfRefUID = None
-
         self.dcm_header = None
 
     def _pull_header(self) -> dict:
@@ -696,6 +734,7 @@ class ReconstructedVolume(GroupUtils):
         """
         if name in self.volumes:
             name = self._rename(name)
+
         self.volumes.update({name: volume})
 
     def add_structs(self, structdict: dict):
@@ -712,6 +751,10 @@ class ReconstructedVolume(GroupUtils):
     def shape(self):
         return self.dims.shape
 
+    @property
+    def is_struct(self):
+        return self.Modality == 'RTSTRUCT'
+
     def export(self, include_augmentations: bool = True, include_dims: bool = True,
                include_header: bool = True, include_datetime: bool = True) -> dict:
         """[Export the ReconstructedVolume array]
@@ -726,7 +769,7 @@ class ReconstructedVolume(GroupUtils):
             dict: [A dictionary of volumes and specified additional information]
         """
         export_dict = {}
-        export_dict.update({'volumes': self.volumes})
+        export_dict.update({'volumes': dict(sorted(self.volumes.items()))})
         if include_augmentations:
             export_dict.update({'augmentations': self.ImgAugmentations.as_dict()})
         if include_dims:
@@ -737,7 +780,7 @@ class ReconstructedVolume(GroupUtils):
             export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def convert_to_pointer(self) -> None:
+    def convert_to_pointer(self, path=None) -> None:
         """[Converts ReconstructedVolume to ReconstructedFile and saves
             the volume array to ~/tree/format/SeriesInstanceUID.npy]
         """
@@ -746,7 +789,7 @@ class ReconstructedVolume(GroupUtils):
                     'augmentations': self.ImgAugmentations,
                     'DateTime': self.DateTime.export()}
         parent = self._parent
-        filepath = self.save_file(return_loc=True)
+        filepath = self.save_file(save_dir=path, return_loc=True)
         self.volumes = None
         self.__class__ = ReconstructedFile
         self.__init__(filepath, parent, populate)
@@ -758,7 +801,7 @@ class ReconstructedVolume(GroupUtils):
         Args:
             save_dir (str, optional): [Directory to save file to, defaults to ~]. Defaults to None.
             filepath (str, optional): [Filepath to save file tree]. Defaults to None.
-            return_loc (bool, optional): [If true, returns saved filepath location]. Defaults to False.
+            return_loc (bool, optional): [Returns saved filepath location]. Defaults to False.
 
         Raises:
             TypeError: [Raised if save_dir and filepath are specified]
@@ -970,8 +1013,8 @@ class FrameOfRef(GroupUtils):
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.decon = Deconstruction(tree=self)
-        if self.filter_list:
-            structs = self.filter_list['StructName']
+        if self.filter_by:
+            structs = self.filter_by['StructName']
             self._reconstruct = Reconstruction(filter_structs=structs)
         else:
             self._reconstruct = Reconstruction()
@@ -984,8 +1027,8 @@ class FrameOfRef(GroupUtils):
             self._organize_by = 'Modality'
         self._digest()
 
-    def recon(self, in_memory: bool = False):
-        return self._reconstruct(self, in_memory=in_memory)
+    def recon(self, in_memory: bool = False, path: str = None):
+        return self._reconstruct(self, in_memory=in_memory, path=path)
 
 
 class Series(GroupUtils):
@@ -1061,10 +1104,18 @@ class Modality(GroupUtils):
         else:
             raise TypeError('Added item must be DicomFile, Reconstructed(Volume / File)')
 
-        if key in data.keys():
-            data[key].append(item)
-        else:
-            data.update({key: [item]})
+        if self._filter_check(item):
+            if key in data.keys():
+                if item not in data[key]:
+                    data[key].append(item)
+            else:
+                data.update({key: [item]})
+
+    def _filter_check(self, dicomfile):
+        if 'Modality' in self.filter_by:
+            if dicomfile.Modality not in self.filter_by['Modality']:
+                return False
+        return True
 
     def recon(self):
         raise NotImplementedError('Cannot reconstruct from Modality')
@@ -1135,6 +1186,7 @@ class DicomDateTime:
             [str]: [ISO 8601 formatted date time string with milliseconds]
         """
         # ISO 8601 formatted date time string
+        date, time = (None, None)
         if group == 'Study' and self.StudyDate is not None:
             date, time = (self.StudyDate, self.StudyTime)
         elif group == 'Series' and self.SeriesDate is not None:
@@ -1145,10 +1197,16 @@ class DicomDateTime:
             date, time = (self.AcquisitionDate, self.AcquisitionTime)
         elif self.ContentDate is not None:
             date, time = (self.ContentDate, self.ContentTime)
-        else:
-            date, time = ('19700101', '000000.000000')
 
-        dateobj = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f')
+        if not date:
+            date = '19700101'
+        if not time:
+            time = '000000.000000'
+
+        if '.' in time:
+            dateobj = datetime.strptime(date+time, '%Y%m%d%H%M%S.%f')
+        else:
+            dateobj = datetime.strptime(date+time, '%Y%m%d%H%M%S')
         dateobj = dateobj.replace(microsecond=0)
         str_name = dateobj.isoformat().replace(':', '.')
         return str_name
