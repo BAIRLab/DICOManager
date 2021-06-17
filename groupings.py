@@ -36,7 +36,7 @@ class GroupUtils(NodeMixin):
         flatten (None): flattens tree to one child per parent
     """
     def __init__(self, name=None, files=None, parent=None, children=None,
-                 include_series=True, isodatetime=None, filter_by=None):
+                 include_series=True, isodatetime=None, filter_by=None, writepath=None):
         super().__init__()
         self.name = name
         self.files = files
@@ -44,6 +44,7 @@ class GroupUtils(NodeMixin):
         self.include_series = include_series
         self.isodatetime = isodatetime
         self.filter_by = filter_by
+        self.writepath = writepath
         self._index = -1
         if self.files:
             self.files.sort()
@@ -601,6 +602,9 @@ class GroupUtils(NodeMixin):
                 hardware is write-limited. Loading large amounts of data into memory
                 may cause the system to swap and become exceedingly slow.
         """
+        if path:
+            self.writepath = path
+
         if in_memory and not parallelize:
             self._recon_to_memory()
         elif parallelize:
@@ -782,7 +786,7 @@ class ReconstructedVolume(GroupUtils):
             export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def convert_to_pointer(self, path=None) -> None:
+    def convert_to_pointer(self, path=None, output=False) -> None:
         """[Converts ReconstructedVolume to ReconstructedFile and saves
             the volume array to ~/tree/format/SeriesInstanceUID.npy]
         """
@@ -792,13 +796,13 @@ class ReconstructedVolume(GroupUtils):
                     'augmentations': self.ImgAugmentations.export(),
                     'DateTime': self.DateTime.export()}
         parent = self._parent
-        filepath = self.save_file(save_dir=path, return_loc=True)
+        filepath = self.save_file(save_dir=path, return_loc=True, output_=output)
         self.volumes = None
         self.__class__ = ReconstructedFile
         self.__init__(filepath, parent, populate)
 
     def save_file(self, save_dir: str = None, filepath: str = None,
-                  return_loc: bool = False) -> Union[None, pathlib.PosixPath]:
+                  return_loc: bool = False, output_=False) -> Union[None, pathlib.PosixPath]:
         """[Save the reconstructed volume and associated information to a .npy pickled file]
 
         Args:
@@ -824,6 +828,9 @@ class ReconstructedVolume(GroupUtils):
         pathlib.Path(fullpath).mkdir(parents=True, exist_ok=True)
         output = copy(self.export())
         np.save(fullpath / self.SeriesInstanceUID, output)
+
+        if output_:
+            print(fullpath / (self.SeriesInstanceUID + '.npy'))
 
         if return_loc:
             return fullpath / (self.SeriesInstanceUID + '.npy')

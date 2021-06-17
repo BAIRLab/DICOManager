@@ -20,9 +20,7 @@ def handle_pointers(func):
         if type(img) is ReconstructedFile:
             utils.colorwarn('Will write over reconstructed volume files')
             img.load_array()
-            print('pre', img.ImgAugmentations)
             results = func(img, *args, **kwargs)
-            print('post: ', results.ImgAugmentations)
             results.convert_to_pointer()
         else:
             results = func(img, *args, **kwargs)
@@ -249,14 +247,18 @@ def interpolate(img: ReconstructedVolume,
 
 
 class handler:
-    def pointer_conversion(self, img):
+    def pointer_conversion(self, img, path):
         if self._check_needed(img):
+            utils.colorwarn('Will write over reconstructed volume files')
             if type(img) is ReconstructedFile:
                 img.load_array()
-                img = self._function(img)
-                img.convert_to_pointer()
+                print(img.PatientID, img.ImgAugmentations.interpolated)
+                results = self._function(img)
+                print(img.PatientID, results.ImgAugmentations.interpolated)
+                results.convert_to_pointer(output=True, path=path)
             else:
-                img = self._function(img)
+                results = self._function(img)
+            return results
         return img
 
 
@@ -264,8 +266,8 @@ class Interpolate(handler):
     def __init__(self, extrapolate=False):
         self.extrapolate = extrapolate
 
-    def __call__(self, img):
-        return self.pointer_conversion(img)
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
 
     def _function(self, img):
         # Simple linear interpolation, will use more sophisticated bilinear interpolation
