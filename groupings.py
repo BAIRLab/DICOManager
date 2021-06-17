@@ -624,6 +624,7 @@ class ReconstructedVolume(GroupUtils):
                  dims: utils.VolumeDimensions, parent: object, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.dcm_header = dcm_header
+        self.name = dcm_header.SeriesInstanceUID
         self.dims = dims
         self.volumes = {}
         self.ImgAugmentations = ImgAugmentations()
@@ -769,6 +770,7 @@ class ReconstructedVolume(GroupUtils):
             dict: [A dictionary of volumes and specified additional information]
         """
         export_dict = {}
+        export_dict.update({'name': self.name})
         export_dict.update({'volumes': dict(sorted(self.volumes.items()))})
         if include_augmentations:
             export_dict.update({'augmentations': self.ImgAugmentations.as_dict()})
@@ -784,9 +786,10 @@ class ReconstructedVolume(GroupUtils):
         """[Converts ReconstructedVolume to ReconstructedFile and saves
             the volume array to ~/tree/format/SeriesInstanceUID.npy]
         """
-        populate = {'dims': self.dims,
+        populate = {'name': self.name,
+                    'dims': self.dims,
                     'header': self._pull_header(),
-                    'augmentations': self.ImgAugmentations,
+                    'augmentations': self.ImgAugmentations.export(),
                     'DateTime': self.DateTime.export()}
         parent = self._parent
         filepath = self.save_file(save_dir=path, return_loc=True)
@@ -853,14 +856,17 @@ class ReconstructedFile(GroupUtils):
         """[Generates a ReconstructedFile from a ReconstructedVolume, either from a dict or loaded]
         """
         if self.populate:
+            self.name = self.populate['name']
             self.dims = self.populate['dims']
-            self.ImgAugmentations = self.populate['augmentations']
+            self.ImgAugmentations = ImgAugmentations().from_dict(self.populate['augmentations'])
             self.header = self.populate['header']
             self.DateTime = DicomDateTime().from_dict(self.populate['DateTime'])
         else:
             ds = np.load(self.filepath, allow_pickle=True, mmap_mode='r').item()
+            self.name = ds['name']
             self.dims = ds['dims']
-            self.ImgAugmentations = ds['augmentations']
+            augs = ImgAugmentations().from_dict(ds['augmentations'])
+            self.ImgAugmentations = augs
             self.header = ds['header']
             self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
         for name, value in self.populate['header'].items():
@@ -874,8 +880,8 @@ class ReconstructedFile(GroupUtils):
         self.__class__ = ReconstructedVolume
         self.__init__(ds_header, self.dims, self._parent)
         self.volumes = ds['volumes']
-        self.ImgAugmentations = ds['augmentations']
         self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
+        self.ImgAugmentations = ImgAugmentations().from_dict(ds['augmentations'])
 
 
 class DicomFile(GroupUtils):
@@ -1172,9 +1178,10 @@ class DicomDateTime:
     def __setitem__(self, name: str, value: Any):
         self.__dict__[name] = value
 
-    def from_dict(self, dict):
-        for name, value in dict.items():
+    def from_dict(self, fields):
+        for name, value in fields.items():
             setattr(self, name, value)
+        return self
 
     def isoformat(self, group: str):
         """[returns ISO 8601 format date time for group type]
