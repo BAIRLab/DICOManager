@@ -5,11 +5,15 @@ import utils
 import numpy as np
 import pydicom
 from skimage.transform import rescale
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar, Union
 from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume, ReconstructedFile
 
 if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume, ReconstructedFile
+
+
+# Custom Types
+ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
 
 # Tools are used to process reconstructed arrays
 # DicomUtils are for DICOM reconstruction utilities
@@ -205,57 +209,23 @@ def bias_field_correction(self, img: ReconstructedVolume) -> ReconstructedVolume
     return img
 
 
-@handle_pointers
-def interpolate(img: ReconstructedVolume,
-                extrapolate: bool = False) -> ReconstructedVolume:
-    # Simple linear interpolation, will use more sophisticated bilinear interpolation
-    # in the second revision
-    empty_slices = img.ImgAugmentations.empty_slices
-    if empty_slices and not img.is_struct:
-        interpolated = []
-        extrapolated = []
-        for name, volume in img.volumes.items():
-            for eslice in empty_slices:
-                zlo, zhi = (1, 1)
-                lo_slice, hi_slice = (None, None)
-                # Find filled slice below
-                while (eslice - zlo) > 0:
-                    lo_slice = volume[..., eslice-zlo]
-                    if lo_slice.size:
-                        break
-                    zlo += 1
-                # Find filled slice above
-                while (eslice + zhi) < (img.dims.slices - 1):
-                    hi_slice = volume[..., eslice+zhi]
-                    if hi_slice.size:
-                        break
-                    zhi += 1
-                # interpolate or extrapolate, if valid
-                if lo_slice is not None and hi_slice is not None:
-                    volume[..., eslice] = (hi_slice + lo_slice) / 2
-                    interpolated.append(eslice)
-                elif not extrapolate:
-                    utils.colorwarn(f'Cannot interpolate {img.PatientID}, try extroplate=True')
-                elif lo_slice is not None:
-                    volume[..., eslice] = hi_slice
-                else:
-                    volume[..., eslice] = lo_slice
-
-        interpolated.sort()
-        img.ImgAugmentations.interpolated_update(interpolated, extrapolated)
-    return img
-
-
 class handler:
-    def pointer_conversion(self, img, path):
+    def pointer_conversion(self, img: ReconVolumeOrFile, path: str = None) -> ReconVolumeOrFile:
+        """[Handles conversion of ReconstructedFile to Volume for any tools]
+
+        Args:
+            img (ReconVolumeOrFile): [Either ReconstructedFile or ReconstructedVolume]
+            path (str, optional): [Path to write the modified files]. Defaults to None.
+
+        Returns:
+            ReconVolumeOrFile: [Returns modified image of same type as img]
+        """
         if self._check_needed(img):
             utils.colorwarn('Will write over reconstructed volume files')
             if type(img) is ReconstructedFile:
                 img.load_array()
-                print(img.PatientID, img.ImgAugmentations.interpolated)
                 results = self._function(img)
-                print(img.PatientID, results.ImgAugmentations.interpolated)
-                results.convert_to_pointer(output=True, path=path)
+                results.convert_to_pointer(path=path)
             else:
                 results = self._function(img)
             return results
@@ -263,13 +233,32 @@ class handler:
 
 
 class Interpolate(handler):
+    """[Axial image interpolation function, currently using bilinear interpolation]
+
+    Args:
+        extrapolate (bool): [Specifies if extrapolation is permitted]. Defaults to False.
+
+    Warnings:
+        UserWarning: Warns if extrapolation is attempted but forbidden
+        UserWarning: Warns that if path is not specified, interpolated images will be written
+            over their existing reconstructed image volumes
+    """
     def __init__(self, extrapolate=False):
         self.extrapolate = extrapolate
 
     def __call__(self, img, path):
         return self.pointer_conversion(img, path)
 
-    def _function(self, img):
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        """[Actual interpolation function, obscured from user because class instance
+            call should be used instead for more efficient performance]
+
+        Args:
+            img (ReconVolumeOrFile): [ReconstructedVolume or ReconstructedFile]
+
+        Returns:
+            ReconVolumeOrFile: [Modified image returned in same format as img input]
+        """
         # Simple linear interpolation, will use more sophisticated bilinear interpolation
         # in the second revision
         empty_slices = img.ImgAugmentations.empty_slices
@@ -307,7 +296,15 @@ class Interpolate(handler):
             img.ImgAugmentations.interpolated_update(interpolated, extrapolated)
         return img
 
-    def _check_needed(self, img):
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        """[Checks if interpolation of the file is required]
+
+        Args:
+            img (ReconVolumeOrFile): [ReconstructedVolume or ReconstructedFile]
+
+        Returns:
+            bool: [Boolean if interpolation is needed]
+        """
         empty = img.ImgAugmentations.empty_slices
         if not empty or len(empty) == 0:
             return False
@@ -315,6 +312,9 @@ class Interpolate(handler):
 
 
 """
+Start of Code for the interpolation of RTSTRUCTs. These will require more user specification to prevent
+the interpolation of intentional gaps within the structure sets.
+
 @handle_pointers
 def interpolate_contour(img: ReconstructedVolume, extrapolate=False) -> ReconstructedVolume:
     # https://stackoverflow.com/questions/48818373/interpolate-between-two-images

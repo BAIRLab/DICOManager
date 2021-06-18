@@ -98,7 +98,6 @@ class ImgAugmentations:
         return vars(self)
 
 
-
 class Reconstruction:
     def __init__(self, filter_structs: list = None):
         self.filter_structs = filter_structs
@@ -472,9 +471,7 @@ class Deconstruction:
 
         new_rt = RTStructConstructor(self.tree, mim=mim)
         new_rt.initialize()
-        print('initialized')
         new_rt.append_masks(masks, roi_names)
-        print('masks added')
 
         if not sort:
             return new_rt.to_pydicom()

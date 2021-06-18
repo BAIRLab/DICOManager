@@ -91,6 +91,14 @@ class GroupUtils(NodeMixin):
             self._add_file(f)
 
     def _digestfn(self, dicomfile: 'DicomFile') -> NodeMixin:
+        """[Function to digest a dicom file, sorting it into the tree]
+
+        Args:
+            dicomfile (DicomFile): [Dicom file to add to the tree]
+
+        Returns:
+            NodeMixin: [Child type of the root node]
+        """
         if dicomfile.__class__ is not DicomFile:
             dicomfile = DicomFile(dicomfile)
         if type(dicomfile) is pydicom.dataset.Dataset:
@@ -115,6 +123,15 @@ class GroupUtils(NodeMixin):
                 return self._child_type(**child_params)
 
     def _find_leaf(self, combined: NodeMixin, modality: 'Modality') -> NodeMixin:
+        """[When merging into a unified tree, the proper leaf must be identified]
+
+        Args:
+            combined (NodeMixin): [The combined or unified tree]
+            modality (Modality): [A modality to add or merge into the tree]
+
+        Returns:
+            NodeMixin: [The combined or unifed tree]
+        """
         current = combined
         previous = None
         for ancs in modality.ancestors:
@@ -140,6 +157,14 @@ class GroupUtils(NodeMixin):
         return combined
 
     def _clean_up_children(self, children: list) -> NodeMixin:
+        """[Following multithreaded sorting, trees need to be merged into one]
+
+        Args:
+            children (list): [A list of trees with reocnstructed volumes or pointers]
+
+        Returns:
+            NodeMixin: [A unified tree]
+        """
         combined = self.__class__(self.name)
         for child in children:
             within = [child.name == x.name for x in combined]
@@ -148,28 +173,11 @@ class GroupUtils(NodeMixin):
             else:
                 for modality in child.iter_modalities():
                     combined = self._find_leaf(combined, modality)
-                    """
-                    node = combined
-                    previous = None
-                    for a in modality.ancestors:
-                        previous = node
-                        node = anytree.search.findall(node, filter_=lambda x: x.name == a.name)[-1]
-                        if node is None:  # not in tree
-                            previous.adopt(a)
-                            break
-                        elif node._organize_by == 'Modality':
-                            found = False
-                            for node_mod in node:
-                                if node_mod.name == modality.name and node_mod is not modality:
-                                    found = True
-                                    for f in modality.dicoms:
-                                        node_mod._add_file(f)
-                            if not found:
-                                modality.parent = node
-                    """
         return combined
 
     def _multithread_digest(self) -> None:
+        """[Multithreaded tree digestion for greater IOPs and faster tree construction]
+        """
         with ProcessPool() as P:
             children = [x for x in list(P.map(self._digestfn, self.files)) if x]
         ProcessPool().clear()
@@ -182,6 +190,14 @@ class GroupUtils(NodeMixin):
         self.files = None
 
     def _filter_check(self, dicomfile: object) -> bool:
+        """[Function to identify if the node is unique or existing]
+
+        Args:
+            dicomfile (object): [Dicom file to check uniqueness]
+
+        Returns:
+            bool: [Returns if the file is uniuqe, needing a new node, or not]
+        """
         def date_check(date, dtype):
             condition0 = str(date) in self.filter_by[dtype]
             condition1 = int(date) in self.filter_by[dtype]
@@ -867,7 +883,7 @@ class ReconstructedVolume(GroupUtils):
             export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def convert_to_pointer(self, path=None, output=False) -> None:
+    def convert_to_pointer(self, path=None) -> None:
         """[Converts ReconstructedVolume to ReconstructedFile and saves
             the volume array to ~/tree/format/SeriesInstanceUID.npy]
         """
@@ -877,13 +893,13 @@ class ReconstructedVolume(GroupUtils):
                     'augmentations': self.ImgAugmentations.export(),
                     'DateTime': self.DateTime.export()}
         parent = self._parent
-        filepath = self.save_file(save_dir=path, return_loc=True, output_=output)
+        filepath = self.save_file(save_dir=path, return_loc=True)
         self.volumes = None
         self.__class__ = ReconstructedFile
         self.__init__(filepath, parent, populate)
 
     def save_file(self, save_dir: str = None, filepath: str = None,
-                  return_loc: bool = False, output_=False) -> Union[None, pathlib.PosixPath]:
+                  return_loc: bool = False) -> Union[None, pathlib.PosixPath]:
         """[Save the reconstructed volume and associated information to a .npy pickled file]
 
         Args:
@@ -909,9 +925,6 @@ class ReconstructedVolume(GroupUtils):
         pathlib.Path(fullpath).mkdir(parents=True, exist_ok=True)
         output = copy(self.export())
         np.save(fullpath / self.SeriesInstanceUID, output)
-
-        if output_:
-            print(fullpath / (self.SeriesInstanceUID + '.npy'))
 
         if return_loc:
             return fullpath / (self.SeriesInstanceUID + '.npy')
