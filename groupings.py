@@ -4,6 +4,7 @@ import numpy as np
 import pathlib
 import pydicom
 import utils
+import multiprocessing
 from anytree import RenderTree, NodeMixin
 from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
 from copy import deepcopy, copy
@@ -12,6 +13,7 @@ from datetime import datetime
 from pathos.pools import ProcessPool
 from processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import Any, TypeVar, Union
+from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 
 class GroupUtils(NodeMixin):
@@ -88,7 +90,7 @@ class GroupUtils(NodeMixin):
                 f = DicomFile(f)
             self._add_file(f)
 
-    def _digestfn(self, dicomfile):
+    def _digestfn(self, dicomfile: 'DicomFile') -> NodeMixin:
         if dicomfile.__class__ is not DicomFile:
             dicomfile = DicomFile(dicomfile)
         if type(dicomfile) is pydicom.dataset.Dataset:
@@ -112,7 +114,7 @@ class GroupUtils(NodeMixin):
                                 'isodatetime': dt}
                 return self._child_type(**child_params)
 
-    def _find_leaf(self, combined, modality):
+    def _find_leaf(self, combined: NodeMixin, modality: 'Modality') -> NodeMixin:
         current = combined
         previous = None
         for ancs in modality.ancestors:
@@ -137,7 +139,7 @@ class GroupUtils(NodeMixin):
                     modality.parent = current
         return combined
 
-    def _clean_up_children(self, children):
+    def _clean_up_children(self, children: list) -> NodeMixin:
         combined = self.__class__(self.name)
         for child in children:
             within = [child.name == x.name for x in combined]
@@ -167,7 +169,7 @@ class GroupUtils(NodeMixin):
                     """
         return combined
 
-    def _multithread_digest(self):
+    def _multithread_digest(self) -> None:
         with ProcessPool() as P:
             children = [x for x in list(P.map(self._digestfn, self.files)) if x]
         ProcessPool().clear()
@@ -234,17 +236,17 @@ class GroupUtils(NodeMixin):
                 self._child_type(**child_params)
 
     @property
-    def dirname(self):
+    def dirname(self) -> None:
         if hasattr(self, '_dirname'):
             return self._dirname
         return repr(self) + '_' + self.name
 
     @dirname.setter
-    def dirname(self, name: str):
+    def dirname(self, name: str) -> None:
         self._dirname = name
 
     @property
-    def datename(self):
+    def datename(self) -> None:
         if hasattr(self, '_datename'):
             return self._datename
         if not self.isodatetime:
@@ -252,7 +254,7 @@ class GroupUtils(NodeMixin):
         return '_'.join([repr(self), self.name, self.isodatetime])
 
     @datename.setter
-    def datename(self, name):
+    def datename(self, name: str) -> None:
         self._datename = name
 
     def merge(self, other: NodeMixin) -> None:
@@ -413,7 +415,7 @@ class GroupUtils(NodeMixin):
         if not mods == [None] * len(mods):
             return iter(*mods)
 
-    def iter_frames(self, return_count=False) -> object:
+    def iter_frames(self, return_count: bool = False) -> object:
         """[Iterates through each FrameOfRef]
 
         Args:
@@ -554,7 +556,7 @@ class GroupUtils(NodeMixin):
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
-    def _recon_to_disk(self, return_mods=False, path=None):
+    def _recon_to_disk(self, return_mods: bool = False, path: str = None) -> None:
         """[Reconstructs self, writes volumes to disk]
 
         Args:
@@ -589,7 +591,8 @@ class GroupUtils(NodeMixin):
         for frame in iterator:
             frame.recon(in_memory=True)
 
-    def recon(self, in_memory=False, parallelize=True, path=None, *args, **kwargs) -> None:
+    def recon(self, in_memory: bool = False, parallelize: bool = True,
+              path: str = None, *args, **kwargs) -> None:
         """[Reconstruction of a patient or cohort]
 
         Args:
@@ -613,6 +616,84 @@ class GroupUtils(NodeMixin):
                 self.pointers_to_volumes(path=path)
         else:
             return self._recon_to_disk(path=path)
+
+    def apply_tool(self, toolset: list, path: str = None,
+                   mod: 'Modality' = None, warn: bool = True) -> None:
+        """[A single threaded application of a list of tool functions]
+
+        Args:
+            toolset (list): [List of tool functions]
+            path (str, optional): [Path to write volumes]. Defaults to None.
+            mod (Modality, optional): [Moadlity to apply function to]. Defaults to self.
+            warn (bool, optional): [Raise warning when applied]. Defaults to True.
+
+        Warnings:
+            If path is not specified, the previously reconstructed volumes will be
+                overwritten by the newly modified volumes
+        """
+        if warn:
+            message = 'Applied tools will overwrite volumes unless path is specified'
+            utils.colorwarn(message)
+        if type(toolset) is not list:
+            toolset = list(toolset)
+        if not path:
+            path = self.writepath
+
+        if mod is None:
+            it = self.iter_volumes()
+        else:
+            it = mod.iter_volumes()
+
+        for volume in it:
+            for name, reconfiles in volume.items():
+                newfiles = []
+                for f in reconfiles:
+                    for tool in toolset:
+                        f = tool(f, path)
+                    newfiles.append(f)
+                volume[name] = newfiles
+
+    def apply_tools(self, toolset: list, path: str = None, nthreads: int = None) -> None:
+        """[Multithreaded application of a list of tool functions applied]
+
+        Args:
+            toolset (list): [List of tool functions]
+            path (str, optional): [Path to write volumes]. Defaults to previous save path.
+            nthreads (int, optional): [Number of concurrent threads]. Defaults to nCPUs // 2.
+
+        Returns:
+            [None]: [Changes to the cohort are completed in place]
+
+        Warnings:
+            If path is not specified, the previously reconstructed volumes will be
+                overwritten by the newly modified volumes
+
+        Notes:
+            nthreads = cpus / 16 was chosen to limit memory footprint. Increasing this
+                number may not translate to a decreased runtime if disk I/O is saturated
+        """
+        if type(toolset) is not list:
+            toolset = list(toolset)
+        if not path:
+            path = self.writepath
+        if not nthreads:
+            nthreads = multiprocessing.cpu_count() // 2
+
+        # Multithreaded
+        def toolfn(toolset, path):
+            def wrapper(mod):
+                self.apply_tool(toolset=toolset, path=path, mod=mod, warn=False)
+                return mod
+            return wrapper
+
+        message = 'Applied tools will overwrite volumes unless path is specified'
+        utils.colorwarn(message)
+
+        fn = toolfn(toolset, path)
+        it = self.iter_modalities()
+        with ThreadPool(max_workers=nthreads) as P:
+            _ = list(P.map(fn, it))
+        ThreadPool().shutdown()
 
 
 class ReconstructedVolume(GroupUtils):
@@ -1124,7 +1205,7 @@ class Modality(GroupUtils):
             else:
                 data.update({key: [item]})
 
-    def _filter_check(self, dicomfile):
+    def _filter_check(self, dicomfile: 'DicomFile') -> bool:
         if 'Modality' in self.filter_by:
             if dicomfile.Modality not in self.filter_by['Modality']:
                 return False
@@ -1182,15 +1263,15 @@ class DicomDateTime:
             self.modality = self.ds.Modality
             self.ds = None
 
-    def __setitem__(self, name: str, value: Any):
+    def __setitem__(self, name: str, value: Any) -> None:
         self.__dict__[name] = value
 
-    def from_dict(self, fields):
+    def from_dict(self, fields: dict) -> object:
         for name, value in fields.items():
             setattr(self, name, value)
         return self
 
-    def isoformat(self, group: str):
+    def isoformat(self, group: str) -> str:
         """[returns ISO 8601 format date time for group type]
 
         Args:
@@ -1225,5 +1306,5 @@ class DicomDateTime:
         str_name = dateobj.isoformat().replace(':', '.')
         return str_name
 
-    def export(self):
+    def export(self) -> dict:
         return vars(self)
