@@ -225,6 +225,7 @@ class VolumeDimensions:
             self.multi_thick = True
         return min(differences)
 
+
     def _calc_n_slices(self, files: list):
         """[calculates the number of volume slices]
 
@@ -262,25 +263,6 @@ class VolumeDimensions:
                 if inst < low_inst:
                     low_inst = inst
                     low_thickness = ds.SliceThickness
-            """
-            try:
-                inst = int(ds.InstanceNumber)
-                if inst < inst0:  # Low instance
-                    inst0 = inst
-                    z0 = float(self.ipp[-1])
-                if inst > inst1:  # High instance
-                    inst1 = inst
-                    z1 = float(self.ipp[-1])
-            except AttributeError:
-                # I might be able to just do this for all cases...
-                zloc = float(self.ipp[-1])
-                inst0 = 0
-                inst1 = 0
-                if zloc < z0:
-                    z0 = zloc
-                if zloc > z1:
-                    z1 = zloc
-            """
 
         if 1 < low_inst < 5 and low_inst != np.inf:  # For extrapolation of missing slices
             # Need to make it the slice thickness of the lowest slice
@@ -292,13 +274,6 @@ class VolumeDimensions:
         self.zlohi = (z0, z1)
         self.origin = np.array([*self.ipp[:2], max(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
-
-        """
-        if z1 < z0:
-            print("flipping the slice thickness")
-            # TODO: We can replace thiw with the ImagePositionPatient header
-            self.flipped = True
-        """
 
         return ds
 
@@ -361,6 +336,22 @@ class VolumeDimensions:
         C = np.array([i, j, np.zeros_like(i), np.ones_like(i)])
 
         return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
+
+    def resampled_update(self, ratio: float) -> None:
+        if type(ratio) is int or type(ratio) is float:
+            ratio = np.array([ratio, ratio, ratio])
+        if type(ratio) is list:
+            ratio = np.array(ratio)
+
+        self.dx *= ratio[0]
+        self.dy *= ratio[1]
+        self.dz *= ratio[2]
+        self.vox_size = [self.dx, self.dy, self.dz]
+
+        self.rows *= ratio[0]
+        self.cols *= ratio[1]
+        self.slices *= ratio[2]
+        self.dims = [self.rows, self.cols, self.slices]
 
 
 def check_dims(func):

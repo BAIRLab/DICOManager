@@ -31,14 +31,17 @@ cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
 cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data/rtog_project/built/')
 
 # Apply interpolation function
-toolset = [tools.Interpolate(extrapolate=True)]
+# Working: extrapolate, normalize, standardize, window level, resampling
+# Untested: BiasFieldCorrection, cropping
+
+toolset = [tools.Interpolate(extrapolate=True), tools.Resample(dims=[512, 512, None])]
 cohort.apply_tools(toolset)
 print(cohort)
 
 for vol in cohort.iter_volumes():
     for name, files in vol.items():
         f = files[0]
-        print(f.ImgAugmentations.interpolated)
+        print(f.Modality, f.ImgAugmentations.interpolated, f.ImgAugmentations.resampled, f.dims.shape, f.ImgAugmentations.ratio)
 
 
 print('elapsed:', time.time() - start)

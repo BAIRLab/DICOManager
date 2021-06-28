@@ -726,7 +726,7 @@ class ReconstructedVolume(GroupUtils):
         super().__init__(*args, **kwargs)
         self.dcm_header = dcm_header
         self.name = dcm_header.SeriesInstanceUID
-        self.dims = dims
+        self.dims = deepcopy(dims)
         self.volumes = {}
         self.ImgAugmentations = ImgAugmentations()
         self._parent = parent  # We don't want to actually add it to the tree

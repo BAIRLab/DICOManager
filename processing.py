@@ -40,6 +40,7 @@ class ImgAugmentations:
     # resampling augmentation metadata
     resampled: bool = False
     pixelspacing_original: np.ndarray = None
+    ratio: float = None
 
     # interpolation
     interpolated: bool = False
@@ -70,6 +71,7 @@ class ImgAugmentations:
         self.patient_coords = patient_coords
 
     def resampled_update(self, pixelspacing_original: np.ndarray, ratio: int) -> None:
+        # TODO: Need to update the img.VolumeDimensions to correlate too
         self.resampled = True
         self.pixelspacing_original = pixelspacing_original
         self.ratio = ratio

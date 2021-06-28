@@ -1,4 +1,5 @@
 from __future__ import annotations
+import abc
 from scipy.interpolate import interpn
 from scipy.ndimage.morphology import distance_transform_edt
 from scipy.ndimage import center_of_mass
@@ -61,6 +62,22 @@ class ImgHandler:
             return results
         return img
 
+    @abc.abstractmethod
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        """[Determines if the tool should be applied to the volume]
+
+        Args:
+            img (ReconVolumeOrFile): [Image volume to apply tool]
+
+        Returns:
+            bool: [Determines if tool should be applied]
+
+        Notes:
+            This is an abstract method and each tool class requires
+            implementation to work appropriately
+        """
+        return True
+
 
 class WindowLevel(ImgHandler):
     def __init__(self, window, level):
@@ -76,7 +93,7 @@ class WindowLevel(ImgHandler):
 
         for name, volume in img.volumes.items():
             imgmin, imgmax = (volume.min(), volume.max())
-            img.augmentations.wl_update(self.window, self.level, imgmin, imgmax)
+            img.ImgAugmentations.wl_update(self.window, self.level, imgmin, imgmax)
 
             ctlo = self.level - self.window / 2
             cthi = ctlo + self.window
@@ -87,6 +104,9 @@ class WindowLevel(ImgHandler):
             img.volumes[name] = temp
 
         return img
+
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        return img.Modality == 'CT'
 
 
 class Normalize(ImgHandler):
@@ -101,11 +121,14 @@ class Normalize(ImgHandler):
         for name, volume in img.volumes.items():
             if imgmin is None or imgmax is None:
                 imgmin, imgmax = (volume.min(), volume.max())
-                img.augmentations.norm_update(imgmin, imgmax)
+                img.ImgAugmentations.norm_update(imgmin, imgmax)
 
             img.volumes[name] = (np.copy(volume) - imgmin) / (imgmax - imgmin)
 
         return img
+
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        return not img.ImgAugmentations.normalized
 
 
 class Standardize(ImgHandler):
@@ -119,10 +142,13 @@ class Standardize(ImgHandler):
         for name, volume in img.volumes.items():
             imgmean = np.mean(volume)
             imgstd = np.std(volume)
-            img.augmentation.std_update(imgmean, imgstd)
+            img.ImgAugmentations.std_update(imgmean, imgstd)
 
             img.volumes[name] = (np.copy(volume) - imgmean) / imgstd
         return img
+
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        return not img.ImgAugmentations.standardized
 
 
 class BiasFieldCorrection(ImgHandler):
@@ -143,7 +169,7 @@ class BiasFieldCorrection(ImgHandler):
             avaliable to all architetures
         """
         import SimpleITK as sitk
-        img.augmentations.bias_corrected = True
+        img.ImgAugmentations.bias_corrected = True
 
         for name, volume in img.volumes.items():
             sitk_image = sitk.GetImageFromArray(volume)
@@ -153,6 +179,9 @@ class BiasFieldCorrection(ImgHandler):
             img.volumes[name] = sitk.GetArrayFromImage(output)
 
         return img
+
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        return img.Modality == 'MR'
 
 
 class Interpolate(ImgHandler):
@@ -234,9 +263,14 @@ class Interpolate(ImgHandler):
         return True
 
 
+# We could also resample by Field of View
 class Resample(ImgHandler):
-    def __init__(self, ratio: float):
+    def __init__(self, ratio: float = None, dims: list = None):
         self.ratio = ratio
+        self.dims = dims
+        message = 'Must specify either ratio or xy-dims'
+        passes = self.ratio is not None or self.dims is not None
+        assert passes, message
 
     def __call__(self, img, path):
         return self.pointer_conversion(img, path)
@@ -253,10 +287,34 @@ class Resample(ImgHandler):
         Notes:
             TODO: Does not update voxel spacing yet
         """
-        temp = np.copy(img.array)
-        img.array = rescale(temp, self.ratio)
-        img.augmentations.resample_update(None, round(self.ratio))
+        current_ratio = self.ratio
+        if self.ratio is None:
+            current_ratio = []
+            for d0, d1 in zip(self.dims, img.dims.shape):
+                if d0 is None:
+                    d0 = d1
+                print(d0, d1)
+                current_ratio.append(d0 / d1)
+
+        for name, volume in img.volumes.items():
+            img.volumes[name] = rescale(np.copy(volume), current_ratio)
+
+        if not img.ImgAugmentations.resampled:
+            img.ImgAugmentations.resampled_update(img.dims.vox_size, current_ratio)
+            img.dims.resampled_update(current_ratio)
         return img
+
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        def condition(x, y):
+            if x is None:
+                return True
+            return x == y
+
+        if self.dims is not None:
+            passes = [condition(x, y) for x, y in zip(self.dims, img.dims.shape)]
+            return not all(passes)
+
+        return not img.ImgAugmentations.resampled
 
 
 class Crop(ImgHandler):
@@ -321,7 +379,7 @@ class Crop(ImgHandler):
         img.array = temp[xlo: xhi, ylo: yhi, zlo: zhi]
 
         # img.crop_update()
-        img.augmentations.crop_update(img_coords, patient_coords)
+        img.ImgAugmentations.crop_update(img_coords, patient_coords)
         return img
 
     def _calc_centroid(self, img):
@@ -342,7 +400,9 @@ class Crop(ImgHandler):
 
         raise ValueError(f'Structure not found for patient {img.PatientID}')
 
-
+    def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        passes = [x == y for x, y in zip(self.crop_size, img.dims.shape)]
+        return not all(passes)
 
 
 """
