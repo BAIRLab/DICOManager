@@ -1,6 +1,7 @@
 from __future__ import annotations
 from scipy.interpolate import interpn
 from scipy.ndimage.morphology import distance_transform_edt
+from scipy.ndimage import center_of_mass
 import utils
 import numpy as np
 import pydicom
@@ -19,20 +20,7 @@ ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
 # DicomUtils are for DICOM reconstruction utilities
 # Should probably unnest from the class and move to a seperate file
 
-def handle_pointers(func):
-    def wrapped(img, *args, **kwargs):
-        if type(img) is ReconstructedFile:
-            utils.colorwarn('Will write over reconstructed volume files')
-            img.load_array()
-            results = func(img, *args, **kwargs)
-            results.convert_to_pointer()
-        else:
-            results = func(img, *args, **kwargs)
-        return results
-    return wrapped
 
-
-@handle_pointers
 def dose_max_points(dose_array: np.ndarray,
                     dose_coords: np.ndarray = None) -> np.ndarray:
     """[Calculates the dose maximum point in an array, returns index or coordinates]
@@ -51,165 +39,7 @@ def dose_max_points(dose_array: np.ndarray,
     return index
 
 
-@handle_pointers
-def window_level(img: ReconstructedVolume, window: int,
-                 level: int) -> ReconstructedVolume:
-    """[Applies a window and level to the given object. Works for either HU or CT number,
-        whichever was specified during reconstruction of the array]
-
-    Args:
-        img (ReconstructedVolume): [Image volume object to window and level]
-        window (int): [window in either HU or CT number]
-        level (int): [level in either HU or CT number]
-
-    Returns:
-        ReconstructedVolume: [Image volume with window and level applied]
-    """
-    imgmin, imgmax = (img.min(), img.max())
-    img.augmetnations.wl_update(window, level, imgmin, imgmax)
-
-    ctlo = level - window / 2
-    cthi = ctlo + window
-
-    temp = np.copy(img.array)
-    temp[temp < ctlo] = ctlo
-    temp[temp > cthi] = cthi
-    img.array = temp
-    return img
-
-
-@handle_pointers
-def normalize(img: ReconstructedVolume) -> ReconstructedVolume:
-    """[Normalizes an image volume ojbect]
-
-    Args:
-        img (ReconstructedVolume): [The image volume object to normalize]
-
-    Returns:
-        ReconstructedVolume: [Normalized image volume object]
-    """
-    imgmin, imgmax = (img.array.min(), img.array.max())
-    img.augmentations.norm_update(imgmin, imgmax)
-
-    temp = (np.copy(img.array) - imgmin) / (imgmax - imgmin)
-    img.array = temp
-    return img
-
-
-@handle_pointers
-def standardize(img: ReconstructedVolume) -> ReconstructedVolume:
-    """[Standardizes an image volume object]
-
-    Args:
-        img (ReconstructedVolume): [The image volume object to standardize]
-
-    Returns:
-        ReconstructedVolume: [Standardized image volume object]
-    """
-    imgmean = np.mean(img.array)
-    imgstd = np.std(img.array)
-    img.augmentation.std_update(imgmean, imgstd)
-
-    temp = (np.copy(img.array) - imgmean) / imgstd
-    img.array = temp
-    return img
-
-
-@handle_pointers
-def crop(img: ReconstructedVolume, centroid: np.ndarray,
-         crop_size: np.ndarray) -> ReconstructedVolume:
-    """[Crops an image volume and updates headers accordingly]
-
-    Args:
-        img (ReconstructedVolume): [Image volume object to crop]
-        centroid (np.ndarray): [central cropping value]
-        crop_size (np.ndarray): [dimensions of final cropped array]
-
-    Returns:
-        ReconstructedVolume: [description]
-
-    Notes:
-        Centroid will not be observed if the cropped volume will be
-        smaller than the crop_size. Will shift centroid to maintain
-        the specific crop size
-        This function currently does not update the ReconstructedVolume header
-        or ReconstructedVolume.dicom_header to reflect the new dimensions
-    """
-    # Need to update the VolumeDimensions header and dicom header too
-    imgshape = img.array.shape()
-    img_coords = np.zeros((2, len(imgshape)))
-    patient_coords = np.zeros((2, len(imgshape)))
-
-    for i, (point, size) in enumerate(zip(centroid, crop_size)):
-        low = min(0, point - size // 2)
-        high = low + size
-        if high > (imgshape[i] - 1):
-            high = (imgshape[i] - 1)
-            low = high - size
-            img_coords[0, i] = low
-            img_coords[1, i] = high
-
-    coordrange = img.dims.coordrange()
-    for i, (low, high) in enumerate(img_coords.T):
-        patient_coords[0, i] = coordrange[i, low]
-        patient_coords[1, i] = coordrange[i, high]
-
-    xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
-    temp = np.copy(img.array)
-    img.array = temp[xlo: xhi, ylo: yhi, zlo: zhi]
-
-    # img.crop_update()
-    img.augmentations.crop_update(img_coords, patient_coords)
-    return img
-
-
-@handle_pointers
-def resample(img: ReconstructedVolume, ratio: float) -> ReconstructedVolume:
-    """[Downsample an image by a specified ratio]
-
-    Args:
-        img (ReconstructedVolume): [Image to resample]
-        ratio (float): [Ratio to downsample]
-
-    Returns:
-        ReconstructedVolume: [Downsampled image array]
-
-    Notes:
-        TODO: Does not update voxel spacing yet
-    """
-    temp = np.copy(img.array)
-    img.array = rescale(temp, ratio)
-    img.augmentations.resample_update(None, round(ratio))
-    return img
-
-
-@handle_pointers
-def bias_field_correction(self, img: ReconstructedVolume) -> ReconstructedVolume:
-    """[MRI Bias Field Correction]
-
-    Args:
-        img (ReconstructedVolume): [MRI Image Volume to be N4 bias corrected]
-
-    Returns:
-        ReconstructedVolume: [N4 bias corrected image]
-
-    Notes:
-        SimpleITK is not compiled for PowerPC, therefore this function is not
-        avaliable to all architetures
-    """
-    import SimpleITK as sitk
-    img.augmentations.bias_corrected = True
-
-    sitk_image = sitk.GetImageFromArray(img.array)
-    sitk_mask = sitk.OtsuThreshold(sitk_image, 0, 1, 200)
-    corrector = sitk.N4BiasFieldCorrectionImageFilter()
-    output = corrector.Execute(sitk_image, sitk_mask)
-    img.array = sitk.GetArrayFromImage(output)
-
-    return img
-
-
-class handler:
+class ImgHandler:
     def pointer_conversion(self, img: ReconVolumeOrFile, path: str = None) -> ReconVolumeOrFile:
         """[Handles conversion of ReconstructedFile to Volume for any tools]
 
@@ -232,7 +62,100 @@ class handler:
         return img
 
 
-class Interpolate(handler):
+class WindowLevel(ImgHandler):
+    def __init__(self, window, level):
+        self.window = window
+        self.level = level
+
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        if img.is_struct:
+            return img
+
+        for name, volume in img.volumes.items():
+            imgmin, imgmax = (volume.min(), volume.max())
+            img.augmentations.wl_update(self.window, self.level, imgmin, imgmax)
+
+            ctlo = self.level - self.window / 2
+            cthi = ctlo + self.window
+
+            temp = np.copy(volume)
+            temp[temp < ctlo] = ctlo
+            temp[temp > cthi] = cthi
+            img.volumes[name] = temp
+
+        return img
+
+
+class Normalize(ImgHandler):
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        if img.is_struct:
+            return img
+
+        imgmin, imgmax = (None, None)
+        for name, volume in img.volumes.items():
+            if imgmin is None or imgmax is None:
+                imgmin, imgmax = (volume.min(), volume.max())
+                img.augmentations.norm_update(imgmin, imgmax)
+
+            img.volumes[name] = (np.copy(volume) - imgmin) / (imgmax - imgmin)
+
+        return img
+
+
+class Standardize(ImgHandler):
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        if img.is_struct:
+            return img
+
+        for name, volume in img.volumes.items():
+            imgmean = np.mean(volume)
+            imgstd = np.std(volume)
+            img.augmentation.std_update(imgmean, imgstd)
+
+            img.volumes[name] = (np.copy(volume) - imgmean) / imgstd
+        return img
+
+
+class BiasFieldCorrection(ImgHandler):
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        """[MRI Bias Field Correction]
+
+        Args:
+            img (ReconstructedVolume): [MRI Image Volume to be N4 bias corrected]
+
+        Returns:
+            ReconstructedVolume: [N4 bias corrected image]
+
+        Notes:
+            SimpleITK is not compiled for PowerPC, therefore this function is not
+            avaliable to all architetures
+        """
+        import SimpleITK as sitk
+        img.augmentations.bias_corrected = True
+
+        for name, volume in img.volumes.items():
+            sitk_image = sitk.GetImageFromArray(volume)
+            sitk_mask = sitk.OtsuThreshold(sitk_image, 0, 1, 200)
+            corrector = sitk.N4BiasFieldCorrectionImageFilter()
+            output = corrector.Execute(sitk_image, sitk_mask)
+            img.volumes[name] = sitk.GetArrayFromImage(output)
+
+        return img
+
+
+class Interpolate(ImgHandler):
     """[Axial image interpolation function, currently using bilinear interpolation]
 
     Args:
@@ -309,6 +232,117 @@ class Interpolate(handler):
         if not empty or len(empty) == 0:
             return False
         return True
+
+
+class Resample(ImgHandler):
+    def __init__(self, ratio: float):
+        self.ratio = ratio
+
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        """[Downsample an image by a specified ratio]
+
+        Args:
+            img (ReconstructedVolume): [Image to resample]
+
+        Returns:
+            ReconstructedVolume: [Downsampled image array]
+
+        Notes:
+            TODO: Does not update voxel spacing yet
+        """
+        temp = np.copy(img.array)
+        img.array = rescale(temp, self.ratio)
+        img.augmentations.resample_update(None, round(self.ratio))
+        return img
+
+
+class Crop(ImgHandler):
+    def __init__(self, crop_size, centroid=None, structure=None,
+                 offset=None, custom_centroid=None):
+        # Custom centroid takes ReconstructedVolume and returns a list of
+        # ints with dimensions equal to the image volume dimensions
+        self.crop_size = crop_size
+        self.centroid = centroid
+        self.custom_centroid = custom_centroid
+        self.structure = structure
+        self.offset = offset
+        self._centroids = {}
+
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
+    def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
+        """[Crops an image volume and updates headers accordingly]
+
+        Args:
+            img (ReconVolumeOrFile): [Image volume object to crop]
+
+        Returns:
+            ReconVolumeOrFile: [description]
+
+        Notes:
+            Centroid will not be observed if the cropped volume will be
+            smaller than the crop_size. Will shift centroid to maintain
+            the specific crop size
+            This function currently does not update the ReconstructedVolume header
+            or ReconstructedVolume.dicom_header to reflect the new dimensions
+        """
+        # Need to update the VolumeDimensions header and dicom header too
+        imgshape = np.array(img.dims.shape)
+        img_coords = np.zeros((2, len(imgshape)))
+        patient_coords = np.zeros((2, len(imgshape)))
+
+        if self.centroid is None:
+            this_centroid = self._calc_centroid(imgshape)
+        elif self.custom_centroid is not None:
+            this_centroid = self.custom_centroid(img)
+        else:
+            this_centroid = self.centroid
+
+        for i, (point, size) in enumerate(zip(this_centroid, self.crop_size)):
+            low = min(0, point - size // 2)
+            high = low + size
+            if high > (imgshape[i] - 1):
+                high = (imgshape[i] - 1)
+                low = high - size
+                img_coords[0, i] = low
+                img_coords[1, i] = high
+
+        coordrange = img.dims.coordrange()
+        for i, (low, high) in enumerate(img_coords.T):
+            patient_coords[0, i] = coordrange[i, low]
+            patient_coords[1, i] = coordrange[i, high]
+
+        xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
+        temp = np.copy(img.array)
+        img.array = temp[xlo: xhi, ylo: yhi, zlo: zhi]
+
+        # img.crop_update()
+        img.augmentations.crop_update(img_coords, patient_coords)
+        return img
+
+    def _calc_centroid(self, img):
+        if self.structure is None:
+            return np.array(img.dims.shape) // 2
+
+        frame = img.ancestors[-1]
+        if frame.name in self._centroids:
+            return self._centroids[frame.name]
+
+        for mod in frame.iter_modalities:
+            if mod.name == 'RTSTRUCT':
+                for name, volume in mod.volumes_data.items():
+                    if name in self.structure:
+                        centroid = center_of_mass(volume)
+                        self._centroids.update({frame.name: centroid})
+                        return centroid
+
+        raise ValueError(f'Structure not found for patient {img.PatientID}')
+
+
 
 
 """
