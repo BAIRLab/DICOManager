@@ -160,7 +160,7 @@ class Reconstruction:
         """
         contour_pts = np.array(contour_slice.ContourData).reshape(-1, 3)
         pts_diff = abs(contour_pts - self.dims.origin)
-        points = np.array(np.round(pts_diff / self.dims.vox_size), dtype=np.int32)
+        points = np.array(np.round(pts_diff / self.dims.voxel_size), dtype=np.int32)
         coords = np.array([points[:, :2]], dtype=np.int32)
         zloc = list(set(points[:, 2]))
         if len(zloc) > 1:

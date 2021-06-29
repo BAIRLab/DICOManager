@@ -265,9 +265,35 @@ class Interpolate(ImgHandler):
 
 # We could also resample by Field of View
 class Resample(ImgHandler):
-    def __init__(self, ratio: float = None, dims: list = None):
+    def __init__(self, ratio: float = None, dims: list = None,
+                 voxel_size: list = None, dz_limit: float = None,
+                 dz_goal: float = None, dz_exact: float = None):
+        """[Resamples volumetric image to dimensions, coordinates or voxel size]
+
+        Args:
+            ratio (float, optional): [Resampling ratio, either per-dimension or uniform
+                with r>1 upsampling and r<1 downsampling]. Defaults to None.
+            dims (list, optional): [Number of voxels per-dimension to resmaple to, with
+                dimensions of None left unsampled. (e.g. [512, 512, None])]. Defaults to None.
+            voxel_size (list, optional): [Voxel size, in mm, to resample image]. Defaults to None.
+            dz_limit (float, optional): [Limited slice thickness, with dz > dz_limit being
+                resampled to dz_goal or 1/2 slice thickness otherwise]. Defaults to None.
+            dz_goal (float, optional): [Resampling goal if dz_limit is specified]. Defaults to None.
+            dz_exact (float, optional): [Resamples all images to this exact dz, if
+                specified. Will override dz_limit and dz_goal]. Defaults to None.
+
+        Notes:
+            Non-integer resampling ratios may cause artifacting errors. Therefore, resampling by
+                factors of 2 is recommended, if at all possible.
+            Using the dz_exact parameter may result in resampling a large number of image volumes,
+                requiring significant computational resources and time to complete. Use sparingly.
+        """
         self.ratio = ratio
         self.dims = dims
+        self.voxel_size = voxel_size
+        self.dz_limit = dz_limit
+        self.dz_goal = dz_goal
+        self.dz_exact = dz_exact
         message = 'Must specify either ratio or xy-dims'
         passes = self.ratio is not None or self.dims is not None
         assert passes, message
@@ -287,33 +313,136 @@ class Resample(ImgHandler):
         Notes:
             TODO: Does not update voxel spacing yet
         """
-        current_ratio = self.ratio
-        if self.ratio is None:
-            current_ratio = []
-            for d0, d1 in zip(self.dims, img.dims.shape):
-                if d0 is None:
-                    d0 = d1
-                current_ratio.append(d0 / d1)
+        if self.ratio is not None:
+            current_ratio = self.ratio
+        elif self.dims is not None:
+            current_ratio = self._dims_to_ratio(img)
+        elif self.voxel_size is not None:
+            current_ratio = self._voxel_size_to_ratio(img)
+        else:
+            raise TypeError('Need to specify a rescaling attribute')
+
+        if self.dz_exact is not None or self.dz_limit is not None:
+            current_ratio = self._dz_limit_to_ratio(img, previous=current_ratio)
 
         for name, volume in img.volumes.items():
             img.volumes[name] = rescale(np.copy(volume), current_ratio)
 
         if not img.ImgAugmentations.resampled:
-            img.ImgAugmentations.resampled_update(img.dims.vox_size, current_ratio)
+            img.ImgAugmentations.resampled_update(img.dims.voxel_size, current_ratio)
             img.dims.resampled_update(current_ratio)
         return img
 
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
+        """[Determines if the volume or file requires resampling]
+
+        Args:
+            img (ReconVolumeOrFile): [Image volume or file]
+
+        Returns:
+            bool: [Requires resampling]
+
+        Notes:
+            Resampling heirarchy, where resampling occurs if any is True:
+                1. If dz_exact is specified and dz is outside tolerance
+                2. If dz_limit is specified and dz is outside tolerance
+                3. If voxel_size is specified and img is outside tolerance
+                4. If dims is specified and img is outside tolerance
+                5. If not resampled previously
+        """
         def condition(x, y):
             if x is None:
                 return True
             return x == y
 
+        if img.PatientID == '0933-638561':
+            print(f'HERE!! - {img.dims.dz}')
+
+        # slice thickness resampling
+        if self.dz_exact is not None:
+            if img.dims.dz != self.dz_exact:
+                return True
+
+        if self.dz_limit is not None:
+            if img.dims.dz > self.dz_limit:
+                return True
+
+        # voxel resampling
+        if self.voxel_size is not None:
+            passes = [condition(x, y) for x, y in zip(self.voxel_size, img.dims.voxel_size)]
+            return not all(passes)
+
+        # xyz-dimensions resampling
         if self.dims is not None:
             passes = [condition(x, y) for x, y in zip(self.dims, img.dims.shape)]
             return not all(passes)
 
         return not img.ImgAugmentations.resampled
+
+    def _compute_ratio(self, list1: list, list2: list) -> list:
+        """[Computes resampling ratio between two lists]
+
+        Args:
+            list1 (list): [Desired parameters]
+            list2 (list): [Current parameters]
+
+        Returns:
+            list: [Resampling ratio]
+        """
+        ratio = []
+        for x0, x1 in zip(list1, list2):
+            if x0 is None:
+                x0 = x1
+            ratio.append(x0 / x1)
+        return ratio
+
+    def _dims_to_ratio(self, img: ReconVolumeOrFile) -> list:
+        """[Calculates the resampling ratio based on dimensions]
+
+        Args:
+            img (ReconVolumeOrFile): [Image volume or file]
+
+        Returns:
+            list: [Resampling ratio]
+        """
+        return self._compute_ratio(self.dims, img.dims.shape)
+
+    def _voxel_size_to_ratio(self, img: ReconVolumeOrFile) -> list:
+        """[Calculates the resampling ratio based on voxel size]
+
+        Args:
+            img (ReconVolumeOrFile): [Image volume or file]
+
+        Returns:
+            list: [Resampling ratio]
+        """
+        return self._compute_ratio(self.voxel_size, img.dims.voxel_size)
+
+    def _dz_limit_to_ratio(self, img: ReconVolumeOrFile, previous: list) -> list:
+        """[Calculates the z-axis resampling ratio based on slice thickness limit]
+
+        Args:
+            img (ReconVolumeOrFile): [Image volume or file]
+            prevoius: (list): [Previous list of resampling ratios]
+
+        Returns:
+            list: [Resampling ratio]
+        """
+        if self.dz_exact is not None:
+            if img.dims.dz != self.dz_exact:
+                previous[-1] = img.dims.dz / self.dz_exact
+        elif img.dims.dz > self.dz_limit:
+            print(f'{img.PatientID} {img.dims.dz}, {previous}')
+            if self.dz_goal is not None:
+                previous[-1] = img.dims.dz / self.dz_goal
+            else:
+                previous[-1] = 2
+                current = img.dims.dz / previous[-1]
+                while current > self.dz_limit:
+                    previous[-1] += 2
+                    current = img.dims.dz / previous[-1]
+            print(f'{img.PatientID} {previous}')
+        return previous
 
 
 class Crop(ImgHandler):

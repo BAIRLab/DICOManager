@@ -178,12 +178,10 @@ class VolumeDimensions:
     rows: int = None
     cols: int = None
     slices: int = None
-    dims: list = None
     dx: float = None
     dy: float = None
     dz: float = None
     ipp: list = None
-    vox_size: list = None
     flipped: bool = False
     multi_thick: bool = False
 
@@ -205,9 +203,7 @@ class VolumeDimensions:
         self.rows = ds.Rows
         self.cols = ds.Columns
         self.dx, self.dy = map(float, ds.PixelSpacing)
-        self.dims = [self.rows, self.cols, self.slices]
         self.position = ds.PatientPosition
-        self.vox_size = [self.dx, self.dy, self.dz]
         self.dicoms = None
 
     def _calculate_dz(self, zlocations):
@@ -278,8 +274,23 @@ class VolumeDimensions:
         return ds
 
     @property
+    def voxel_size(self):
+        return [self.dx, self.dy, self.dz]
+
+    # TODO: probably should be removed to reduce confusion...
+    @property
+    def dims(self):
+        return [self.rows, self.cols, self.slices]
+
+    @property
     def shape(self):
-        return (self.rows, self.cols, self.slices)
+        return [self.rows, self.cols, self.slices]
+
+    @property
+    def field_of_view(self):
+        shape = np.array(self.shape)
+        voxel_size = np.array(self.voxel_size)
+        return shape * voxel_size
 
     def as_dict(self):
         temp = vars(self)
@@ -343,15 +354,13 @@ class VolumeDimensions:
         if type(ratio) is list:
             ratio = np.array(ratio)
 
-        self.dx *= ratio[0]
-        self.dy *= ratio[1]
-        self.dz *= ratio[2]
-        self.vox_size = [self.dx, self.dy, self.dz]
+        self.dx /= ratio[0]
+        self.dy /= ratio[1]
+        self.dz /= ratio[2]
 
-        self.rows *= ratio[0]
-        self.cols *= ratio[1]
-        self.slices *= ratio[2]
-        self.dims = [self.rows, self.cols, self.slices]
+        self.rows = int(round(self.rows * ratio[0]))
+        self.cols = int(round(self.cols * ratio[1]))
+        self.slices = int(round(self.slices * ratio[2]))
 
 
 def check_dims(func):
