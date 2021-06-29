@@ -293,7 +293,6 @@ class Resample(ImgHandler):
             for d0, d1 in zip(self.dims, img.dims.shape):
                 if d0 is None:
                     d0 = d1
-                print(d0, d1)
                 current_ratio.append(d0 / d1)
 
         for name, volume in img.volumes.items():
