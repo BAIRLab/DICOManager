@@ -1,18 +1,11 @@
 from __future__ import annotations
 import abc
-from scipy.interpolate import interpn
-from scipy.ndimage.morphology import distance_transform_edt
 from scipy.ndimage import center_of_mass
 import utils
 import numpy as np
-import pydicom
 from skimage.transform import rescale
-from typing import TYPE_CHECKING, Any, TypeVar, Union
-from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume, ReconstructedFile
-
-if TYPE_CHECKING:
-    from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume, ReconstructedFile
-
+from typing import Union
+from groupings import ReconstructedVolume, ReconstructedFile
 
 # Custom Types
 ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
@@ -41,6 +34,9 @@ def dose_max_points(dose_array: np.ndarray,
 
 
 class ImgHandler:
+    def __call__(self, img, path):
+        return self.pointer_conversion(img, path)
+
     def pointer_conversion(self, img: ReconVolumeOrFile, path: str = None) -> ReconVolumeOrFile:
         """[Handles conversion of ReconstructedFile to Volume for any tools]
 
@@ -84,9 +80,6 @@ class WindowLevel(ImgHandler):
         self.window = window
         self.level = level
 
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
-
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         if img.is_struct:
             return img
@@ -110,9 +103,8 @@ class WindowLevel(ImgHandler):
 
 
 class Normalize(ImgHandler):
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
-
+    """[Normalize the image volume]
+    """
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         if img.is_struct:
             return img
@@ -132,9 +124,8 @@ class Normalize(ImgHandler):
 
 
 class Standardize(ImgHandler):
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
-
+    """[Standardize the image volume]
+    """
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         if img.is_struct:
             return img
@@ -152,14 +143,11 @@ class Standardize(ImgHandler):
 
 
 class BiasFieldCorrection(ImgHandler):
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
-
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
-        """[MRI Bias Field Correction]
+        """[MRI N4 Bias Field Correction]
 
         Args:
-            img (ReconstructedVolume): [MRI Image Volume to be N4 bias corrected]
+            img (ReconVolumeOrFile): [MRI Image Volume to be N4 bias corrected]
 
         Returns:
             ReconstructedVolume: [N4 bias corrected image]
@@ -187,9 +175,6 @@ class BiasFieldCorrection(ImgHandler):
 class Interpolate(ImgHandler):
     """[Axial image interpolation function, currently using bilinear interpolation]
 
-    Args:
-        extrapolate (bool): [Specifies if extrapolation is permitted]. Defaults to False.
-
     Warnings:
         UserWarning: Warns if extrapolation is attempted but forbidden
         UserWarning: Warns that if path is not specified, interpolated images will be written
@@ -197,9 +182,6 @@ class Interpolate(ImgHandler):
     """
     def __init__(self, extrapolate=False):
         self.extrapolate = extrapolate
-
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         """[Actual interpolation function, obscured from user because class instance
@@ -265,6 +247,11 @@ class Interpolate(ImgHandler):
 
 # We could also resample by Field of View
 class Resample(ImgHandler):
+    """[Resample image volume]
+
+    Raises:
+        TypeError: Raised if no-resampling is specified
+    """
     def __init__(self, ratio: float = None, dims: list = None,
                  voxel_size: list = None, dz_limit: float = None,
                  dz_goal: float = None, dz_exact: float = None):
@@ -294,12 +281,6 @@ class Resample(ImgHandler):
         self.dz_limit = dz_limit
         self.dz_goal = dz_goal
         self.dz_exact = dz_exact
-        message = 'Must specify either ratio or xy-dims'
-        passes = self.ratio is not None or self.dims is not None
-        assert passes, message
-
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         """[Downsample an image by a specified ratio]
@@ -309,9 +290,6 @@ class Resample(ImgHandler):
 
         Returns:
             ReconstructedVolume: [Downsampled image array]
-
-        Notes:
-            TODO: Does not update voxel spacing yet
         """
         if self.ratio is not None:
             current_ratio = self.ratio
@@ -319,6 +297,8 @@ class Resample(ImgHandler):
             current_ratio = self._dims_to_ratio(img)
         elif self.voxel_size is not None:
             current_ratio = self._voxel_size_to_ratio(img)
+        elif self.dz_exact is not None or self.dz_limit is not None:
+            current_ratio = [1, 1, 1]  # placeholder for z resampling
         else:
             raise TypeError('Need to specify a rescaling attribute')
 
@@ -354,9 +334,6 @@ class Resample(ImgHandler):
             if x is None:
                 return True
             return x == y
-
-        if img.PatientID == '0933-638561':
-            print(f'HERE!! - {img.dims.dz}')
 
         # slice thickness resampling
         if self.dz_exact is not None:
@@ -432,33 +409,38 @@ class Resample(ImgHandler):
             if img.dims.dz != self.dz_exact:
                 previous[-1] = img.dims.dz / self.dz_exact
         elif img.dims.dz > self.dz_limit:
-            print(f'{img.PatientID} {img.dims.dz}, {previous}')
             if self.dz_goal is not None:
                 previous[-1] = img.dims.dz / self.dz_goal
             else:
                 previous[-1] = 2
-                current = img.dims.dz / previous[-1]
-                while current > self.dz_limit:
+                while (img.dims.dz / previous[-1]) > self.dz_limit:
                     previous[-1] += 2
-                    current = img.dims.dz / previous[-1]
-            print(f'{img.PatientID} {previous}')
         return previous
 
 
 class Crop(ImgHandler):
-    def __init__(self, crop_size, centroid=None, structure=None,
-                 offset=None, custom_centroid=None):
-        # Custom centroid takes ReconstructedVolume and returns a list of
-        # ints with dimensions equal to the image volume dimensions
+    def __init__(self, crop_size: list, centroid: list = None, structure: str = None,
+                 offset: list = None, custom_centroid: object = None):
+        """[Cropping function for image and rtstruct volumes]
+
+        Args:
+            crop_size (list): [N length list with int for each volume dimension]
+            centroid (list, optional): [A centroid to crop around, specified
+                in voxels]. Defaults to None.
+            structure (str, optional): [A str to declare a structure name from
+                which the structure center-of-mass defines the centroid]. Defaults to None.
+            offset (list, optional): [An N length list of ints representing the
+                offset from the centroid]. Defaults to None.
+            custom_centroid (object, optional): [A function used to compute the
+                centroid which takes ReconstructedVolume and returns a list
+                of ints with dimensions equal to the image volume dimensions]. Defaults to None.
+        """
         self.crop_size = crop_size
         self.centroid = centroid
         self.custom_centroid = custom_centroid
         self.structure = structure
         self.offset = offset
         self._centroids = {}
-
-    def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         """[Crops an image volume and updates headers accordingly]
@@ -482,7 +464,7 @@ class Crop(ImgHandler):
         patient_coords = np.zeros((2, len(imgshape)))
 
         if self.centroid is None:
-            this_centroid = self._calc_centroid(imgshape)
+            this_centroid = self._calc_centroid_from_struct(img)
         elif self.custom_centroid is not None:
             this_centroid = self.custom_centroid(img)
         else:
@@ -503,14 +485,27 @@ class Crop(ImgHandler):
             patient_coords[1, i] = coordrange[i, high]
 
         xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
-        temp = np.copy(img.array)
-        img.array = temp[xlo: xhi, ylo: yhi, zlo: zhi]
+
+        for name, volume in img.volumes.items():
+            img.volumes[name] = volume[xlo: xhi, ylo: yhi, zlo: zhi]
 
         # img.crop_update()
         img.ImgAugmentations.crop_update(img_coords, patient_coords)
+        img.dims.crop_update(img_coords)
         return img
 
-    def _calc_centroid(self, img):
+    def _calc_centroid_from_struct(self, img: ReconVolumeOrFile) -> list:
+        """[Calculates a centroid from a specified structure]
+
+        Args:
+            img (ReconVolumeOrFile): [The image to compute the centroid upon]
+
+        Raises:
+            ValueError: [Raised if structure is not found for a patient]
+
+        Returns:
+            list: [A list of centroid points]
+        """
         if self.structure is None:
             return np.array(img.dims.shape) // 2
 
@@ -534,8 +529,11 @@ class Crop(ImgHandler):
 
 
 """
-Start of Code for the interpolation of RTSTRUCTs. These will require more user specification to prevent
-the interpolation of intentional gaps within the structure sets.
+from scipy.interpolate import interpn
+from scipy.ndimage.morphology import distance_transform_edt
+
+Start of Code for the interpolation of RTSTRUCTs. These will require more user specification
+to prevent the interpolation of intentional gaps within the structure sets.
 
 @handle_pointers
 def interpolate_contour(img: ReconstructedVolume, extrapolate=False) -> ReconstructedVolume:

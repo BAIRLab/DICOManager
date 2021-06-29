@@ -221,7 +221,6 @@ class VolumeDimensions:
             self.multi_thick = True
         return min(differences)
 
-
     def _calc_n_slices(self, files: list):
         """[calculates the number of volume slices]
 
@@ -276,11 +275,6 @@ class VolumeDimensions:
     @property
     def voxel_size(self):
         return [self.dx, self.dy, self.dz]
-
-    # TODO: probably should be removed to reduce confusion...
-    @property
-    def dims(self):
-        return [self.rows, self.cols, self.slices]
 
     @property
     def shape(self):
@@ -349,6 +343,7 @@ class VolumeDimensions:
         return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
     def resampled_update(self, ratio: float) -> None:
+        # Updates the volume dimensions when the volume is resampled
         if type(ratio) is int or type(ratio) is float:
             ratio = np.array([ratio, ratio, ratio])
         if type(ratio) is list:
@@ -361,6 +356,13 @@ class VolumeDimensions:
         self.rows = int(round(self.rows * ratio[0]))
         self.cols = int(round(self.cols * ratio[1]))
         self.slices = int(round(self.slices * ratio[2]))
+
+    def crop_update(self, values: list) -> None:
+        # Updates the volume dimensions when volume is cropped
+        xlo, xhi, ylo, yhi, zlo, zhi = values.T.flatten()
+        self.rows = xhi - xlo
+        self.cols = yhi - ylo
+        self.slices = zhi - zlo
 
 
 def check_dims(func):
@@ -527,12 +529,6 @@ def insert_into_tree(tree: NodeMixin, mod_ptr_pairs: list) -> None:
             node = anytree.search.findall(node, filter_=lambda x: x.name == a.name)[-1]
         node._add_file(pointer)
 
-"""
-def recon_fn(path: str = None) -> list:
-    def nested(tree: NodeMixin) -> list:
-        return tree._recon_to_disk(return_mods=True, path=path)
-    return nested
-"""
 
 class ReconToPath:
     """[For reconstruction of a tree]

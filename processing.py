@@ -5,14 +5,13 @@ import pydicom
 import groupings
 import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
-from skimage.transform import rescale
 from dataclasses import dataclass
 from utils import VolumeDimensions, check_dims
 from deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from groupings import Cohort, FrameOfRef, Modality, ReconstructedVolume, ReconstructedFile
+    from groupings import Cohort, FrameOfRef, Modality
 
 
 @dataclass
@@ -286,7 +285,6 @@ class Reconstruction:
                 message = f'Empty slices in: {ds.PatientID}, interpolation recommended'
                 source = 'DICOManager/processing.py'
                 utils.colorwarn(message, source)
-                #utils.colorwarn(f'Empty slices in: {ds.PatientID}, interpolation recommended')
                 ct_set.ImgAugmentations.empty_slices = empty_slices
 
             if not self.in_memory:
@@ -523,4 +521,3 @@ class Deconstruction:
 
     def sort_rt(self, source_rt):
         self.tree._add_file(source_rt)
-
