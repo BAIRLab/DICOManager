@@ -207,9 +207,6 @@ class Reconstruction:
                     self.dims = VolumeDimensions(mod.dicoms_data)
                     break
             if not hasattr(self, 'dims'):
-                print(frame_of_ref.name)
-                for patient in frame_of_ref:
-                    print(patient.name)
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
     def struct(self, modality: Modality) -> None:

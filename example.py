@@ -31,14 +31,18 @@ cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
 cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data/rtog_project/built/')
 
 # Apply interpolation function
-# Working: extrapolate, normalize, standardize, window level, resampling
-# Untested: BiasFieldCorrection, cropping
+# Working: extrapolate, normalize, standardize, window level, resampling, cropping
+# Untested: BiasFieldCorrection
+
+centroids = tools.compute_centroids(tree=cohort, structure='hippo_avoid', method='center_of_mass')
+# Can also have custom method, will ignore structure parameter
+# Custom method is given a frame of reference, returns a list of the centroid voxel indicies as integers
 
 toolset = [tools.Interpolate(extrapolate=True),
            tools.Resample(dims=[512, 512, None], dz_limit=2.39),
-           tools.Crop(crop_size=[100, 100, 100], centroid=[256, 256, 50])]
+           tools.Crop(crop_size=[100, 100, 50], centroids=centroids)]
+
 cohort.apply_tools(toolset)
-print(cohort)
 
 for f in cohort.iter_modalities():
     print(type(f))

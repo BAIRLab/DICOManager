@@ -568,6 +568,7 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
 
     with ProcessPool(max_workers=ncpus//4) as P:
         results = list(P.map(recon_fn, trees))
+    ProcessPool().shutdown()
 
     primary = combine_trees(primary, trees)
 

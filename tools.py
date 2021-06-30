@@ -1,5 +1,7 @@
 from __future__ import annotations
 import abc
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor as ThreadPool
 from scipy.ndimage import center_of_mass
 import utils
 import numpy as np
@@ -419,8 +421,8 @@ class Resample(ImgHandler):
 
 
 class Crop(ImgHandler):
-    def __init__(self, crop_size: list, centroid: list = None, structure: str = None,
-                 offset: list = None, custom_centroid: object = None):
+    def __init__(self, crop_size: list, centroid: list = None,
+                 offset: list = None, centroids: list = None):
         """[Cropping function for image and rtstruct volumes]
 
         Args:
@@ -437,8 +439,7 @@ class Crop(ImgHandler):
         """
         self.crop_size = crop_size
         self.centroid = centroid
-        self.custom_centroid = custom_centroid
-        self.structure = structure
+        self.centroids = centroids
         self.offset = offset
         self._centroids = {}
 
@@ -463,12 +464,13 @@ class Crop(ImgHandler):
         img_coords = np.zeros((2, len(imgshape)), dtype=np.int)
         patient_coords = np.zeros((2, len(imgshape)), dtype=np.float)
 
-        if self.centroid is None:
-            this_centroid = self._calc_centroid_from_struct(img)
-        elif self.custom_centroid is not None:
-            this_centroid = self.custom_centroid(img)
-        else:
+        if self.centroid is not None:
             this_centroid = self.centroid
+        elif self.centroids is not None:
+            frame = img._parent.ancestors[-1]
+            this_centroid = self.centroids[frame.name]
+        else:
+            this_centroid = np.array(img.dims.shape) // 2
 
         for i, (point, size) in enumerate(zip(this_centroid, self.crop_size)):
             low = max(0, point - size // 2)
@@ -496,38 +498,55 @@ class Crop(ImgHandler):
         img.dims.crop_update(img_coords)
         return img
 
-    def _calc_centroid_from_struct(self, img: ReconVolumeOrFile) -> list:
-        """[Calculates a centroid from a specified structure]
-
-        Args:
-            img (ReconVolumeOrFile): [The image to compute the centroid upon]
-
-        Raises:
-            ValueError: [Raised if structure is not found for a patient]
-
-        Returns:
-            list: [A list of centroid points]
-        """
-        if self.structure is None:
-            return np.array(img.dims.shape) // 2
-
-        frame = img.ancestors[-1]
-        if frame.name in self._centroids:
-            return self._centroids[frame.name]
-
-        for mod in frame.iter_modalities:
-            if mod.name == 'RTSTRUCT':
-                for name, volume in mod.volumes_data.items():
-                    if name in self.structure:
-                        centroid = center_of_mass(volume)
-                        self._centroids.update({frame.name: centroid})
-                        return centroid
-
-        raise ValueError(f'Structure not found for patient {img.PatientID}')
-
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
         passes = [x == y for x, y in zip(self.crop_size, img.dims.shape)]
         return not all(passes)
+
+
+def compute_centroids(tree, structure=None, method='center_of_mass'):
+    def name_check(name):
+        if type(structure) is dict:
+            for key, values in structure.items():
+                if name == key or name in values:
+                    return True
+        return name in structure
+
+    def compute_com(frame):
+        it = frame.iter_struct_volume_files()
+        for volfile in it:
+            volfile.load_array()
+            for name, volume in volfile.volumes.items():
+                if name_check(name):
+                    CoM = np.array(np.round(center_of_mass(volume)), dtype=np.int)
+                    return (frame.name, CoM)
+        return (frame.name, None)
+
+    if type(structure) is dict or type(structure) is list:
+        pass
+    elif type(structure) is str:
+        structure = [structure]
+    else:
+        raise TypeError('Structure must be str, list or dict')
+
+    centroids = {}
+    if method != 'center_of_mass':
+        for frame in tree.iter_frames():
+            centroids.update({frame.name: method(frame)})
+        return centroids
+    elif structure is None:
+        raise TypeError('Must specify structure name or dict with method center_of_mass')
+    else:
+        nthreads = multiprocessing.cpu_count() // 2
+        with ThreadPool(max_workers=nthreads) as P:
+            points = list(P.map(compute_com, tree.iter_frames()))
+        ThreadPool().shutdown()
+
+        for name, centroid in points:
+            if centroid is not None:
+                centroids.update({name: centroid})
+
+    return centroids
+
 
 
 """
