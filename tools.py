@@ -460,8 +460,8 @@ class Crop(ImgHandler):
         """
         # Need to update the VolumeDimensions header and dicom header too
         imgshape = np.array(img.dims.shape)
-        img_coords = np.zeros((2, len(imgshape)))
-        patient_coords = np.zeros((2, len(imgshape)))
+        img_coords = np.zeros((2, len(imgshape)), dtype=np.int)
+        patient_coords = np.zeros((2, len(imgshape)), dtype=np.float)
 
         if self.centroid is None:
             this_centroid = self._calc_centroid_from_struct(img)
@@ -471,18 +471,20 @@ class Crop(ImgHandler):
             this_centroid = self.centroid
 
         for i, (point, size) in enumerate(zip(this_centroid, self.crop_size)):
-            low = min(0, point - size // 2)
+            low = max(0, point - size // 2)
             high = low + size
             if high > (imgshape[i] - 1):
-                high = (imgshape[i] - 1)
+                high = imgshape[i] - 1
                 low = high - size
-                img_coords[0, i] = low
-                img_coords[1, i] = high
+                if low < 0:
+                    utils.colorwarn(f'Crop size is larger than volume array for {img.PatientID}')
+            img_coords[0, i] = low
+            img_coords[1, i] = high
 
         coordrange = img.dims.coordrange()
         for i, (low, high) in enumerate(img_coords.T):
-            patient_coords[0, i] = coordrange[i, low]
-            patient_coords[1, i] = coordrange[i, high]
+            patient_coords[0, i] = coordrange[i][low]
+            patient_coords[1, i] = coordrange[i][high]
 
         xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
 

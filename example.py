@@ -35,9 +35,18 @@ cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data
 # Untested: BiasFieldCorrection, cropping
 
 toolset = [tools.Interpolate(extrapolate=True),
-           tools.Resample(dims=[512, 512, None], dz_limit=2.39)]
+           tools.Resample(dims=[512, 512, None], dz_limit=2.39),
+           tools.Crop(crop_size=[100, 100, 100], centroid=[256, 256, 50])]
 cohort.apply_tools(toolset)
 print(cohort)
+
+for f in cohort.iter_modalities():
+    print(type(f))
+    for v in f.volumes_data.values():
+        v = v[0]
+        v.load_array()
+        for name, volume in v.volumes.items():
+            print(name, ': ', volume.shape)
 
 print('elapsed:', time.time() - start)
 print(len(cohort))

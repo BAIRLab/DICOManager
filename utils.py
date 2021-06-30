@@ -298,7 +298,7 @@ class VolumeDimensions:
         pts_z = self.origin[2] + np.arange(self.slices) * self.dz
         if self.flipped:
             pts_z = pts_z[..., ::-1]
-        return (pts_x, pts_y, pts_z)
+        return [pts_x, pts_y, pts_z]
 
     def coordgrid(self):
         pts_x, pts_y, pts_z = self.coordrange()
