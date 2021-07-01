@@ -1,5 +1,6 @@
+pip>=19.3
 anytree==2.8.0
-dataclasses==0.8
+dataclasses==0.6
 matplotlib==3.4.1
 numpy==1.20.2
 pathos==0.2.7
@@ -7,5 +8,6 @@ pydicom==2.1.2
 scikit-image==0.0
 scipy==1.6.3
 SimpleITK==2.0.2
+scikit-image==0.17.2
 opencv-python==4.4.0.46
 uuid==1.30
