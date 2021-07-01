@@ -11,6 +11,7 @@ filter_list = {'PatientID': [...],
                'SeriesDate': [...],
                'StructName': [...]}
 '''
+# StructName of dict will rename structures in the value to the key
 filter_list = {'StructName': {'hippocampus': ['hippocampus'],
                               'hippo_avoid': ['hippoavoid', 'hippo_avoid']},
                'Modality': ['CT', 'RTSTRUCT']}

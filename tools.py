@@ -145,6 +145,9 @@ class Standardize(ImgHandler):
 
 
 class BiasFieldCorrection(ImgHandler):
+    def __init__(self, histogram_bins: int = 200):
+        self.histogram_bins = histogram_bins
+
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         """[MRI N4 Bias Field Correction]
 
@@ -163,11 +166,10 @@ class BiasFieldCorrection(ImgHandler):
 
         for name, volume in img.volumes.items():
             sitk_image = sitk.GetImageFromArray(volume)
-            sitk_mask = sitk.OtsuThreshold(sitk_image, 0, 1, 200)
+            sitk_mask = sitk.OtsuThreshold(sitk_image, 0, 1, self.histogram_bins)
             corrector = sitk.N4BiasFieldCorrectionImageFilter()
             output = corrector.Execute(sitk_image, sitk_mask)
             img.volumes[name] = sitk.GetArrayFromImage(output)
-
         return img
 
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
@@ -498,7 +500,6 @@ class Crop(ImgHandler):
             datatype = volume.dtype
             img.volumes[name] = np.array(volume[xlo: xhi, ylo: yhi, zlo: zhi], dtype=datatype)
 
-        # img.crop_update()
         img.ImgAugmentations.crop_update(img_coords, patient_coords)
         img.dims.crop_update(img_coords)
         return img
@@ -552,7 +553,7 @@ def compute_centroids(tree: NodeMixin, structure: str = None,
         raise TypeError('Structure must be str, list or dict')
 
     centroids = {}
-    if method != 'center_of_mass':
+    if method is not None:
         for frame in tree.iter_frames():
             centroids.update({frame.name: method(frame)})
         return centroids
