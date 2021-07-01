@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pathlib
 import pydicom
-import utils
+from . import utils
 import multiprocessing
 from anytree import RenderTree, NodeMixin
 from anytree.iterators.levelordergroupiter import LevelOrderGroupIter
@@ -11,7 +11,7 @@ from copy import deepcopy, copy
 from dataclasses import dataclass
 from datetime import datetime
 from pathos.pools import ProcessPool
-from processing import Reconstruction, Deconstruction, ImgAugmentations
+from .processing import Reconstruction, Deconstruction, ImgAugmentations
 from typing import Any, TypeVar, Union
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
 

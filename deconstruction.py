@@ -13,7 +13,7 @@ from matplotlib import cm
 from scipy import spatial
 from scipy.ndimage.morphology import binary_erosion, binary_dilation
 from skimage import measure as skm
-from utils import VolumeDimensions
+from .utils import VolumeDimensions
 
 
 class RTStructConstructor:

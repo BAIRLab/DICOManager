@@ -2,12 +2,12 @@ from __future__ import annotations
 import cv2
 import numpy as np
 import pydicom
-import groupings
-import utils
+from . import groupings
+from . import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
 from dataclasses import dataclass
-from utils import VolumeDimensions, check_dims
-from deconstruction import RTStructConstructor
+from .utils import VolumeDimensions, check_dims
+from .deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
