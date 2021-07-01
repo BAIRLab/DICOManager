@@ -2,10 +2,9 @@ from __future__ import annotations
 import abc
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
-from scipy.ndimage import center_of_mass
+from scipy.ndimage import center_of_mass, zoom
 import utils
 import numpy as np
-from skimage.transform import rescale
 from typing import Union
 from groupings import ReconstructedVolume, ReconstructedFile
 
@@ -53,11 +52,11 @@ class ImgHandler:
             utils.colorwarn('Will write over reconstructed volume files')
             if type(img) is ReconstructedFile:
                 img.load_array()
-                results = self._function(img)
-                results.convert_to_pointer(path=path)
+                img = self._function(img)
+                img.convert_to_pointer(path=path)
             else:
-                results = self._function(img)
-            return results
+                img = self._function(img)
+            return img
         return img
 
     @abc.abstractmethod
@@ -294,7 +293,10 @@ class Resample(ImgHandler):
             ReconstructedVolume: [Downsampled image array]
         """
         if self.ratio is not None:
-            current_ratio = self.ratio
+            if type(self.ratio) is int or type(self.ratio) is float:
+                current_ratio = [self.ratio for _ in range(3)]
+            else:
+                current_ratio = self.ratio
         elif self.dims is not None:
             current_ratio = self._dims_to_ratio(img)
         elif self.voxel_size is not None:
@@ -308,7 +310,8 @@ class Resample(ImgHandler):
             current_ratio = self._dz_limit_to_ratio(img, previous=current_ratio)
 
         for name, volume in img.volumes.items():
-            img.volumes[name] = rescale(np.copy(volume), current_ratio)
+            datatype = volume.dtype
+            img.volumes[name] = np.array(zoom(volume, current_ratio, order=1), dtype=datatype)
 
         if not img.ImgAugmentations.resampled:
             img.ImgAugmentations.resampled_update(img.dims.voxel_size, current_ratio)
@@ -491,7 +494,8 @@ class Crop(ImgHandler):
         xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
 
         for name, volume in img.volumes.items():
-            img.volumes[name] = volume[xlo: xhi, ylo: yhi, zlo: zhi]
+            datatype = volume.dtype
+            img.volumes[name] = np.array(volume[xlo: xhi, ylo: yhi, zlo: zhi], dtype=datatype)
 
         # img.crop_update()
         img.ImgAugmentations.crop_update(img_coords, patient_coords)
@@ -503,26 +507,30 @@ class Crop(ImgHandler):
         return not all(passes)
 
 
-def compute_centroids(tree, structure=None, method='center_of_mass'):
-    def name_check(name):
-        if type(structure) is dict:
-            for key, values in structure.items():
+class PoolFn:
+    def __init__(self, structure):
+        self.structure = structure
+
+    def name_check(self, name):
+        if type(self.structure) is dict:
+            for key, values in self.structure.items():
                 if name == key or name in values:
                     return True
-        return name in structure
+        return name in self.structure
 
-    def compute_com(frame):
+    def compute_com(self, frame):
         it = frame.iter_struct_volume_files()
         for volfile in it:
             volfile.load_array()
             for name, volume in volfile.volumes.items():
-                if name_check(name):
+                if self.name_check(name):
                     CoM = np.array(np.round(center_of_mass(volume)), dtype=np.int)
-                    break
-            volfile.convert_to_pointer()  # TODO: Check the implementation on save=False
-            return (frame.name, CoM)
+                    volfile.convert_to_pointer()  # TODO: Check the implementation on save=False
+                    return (frame.name, CoM)
         return (frame.name, None)
 
+
+def compute_centroids(tree, structure=None, method='center_of_mass', nthreads: int = None):
     if type(structure) is dict or type(structure) is list:
         pass
     elif type(structure) is str:
@@ -538,10 +546,13 @@ def compute_centroids(tree, structure=None, method='center_of_mass'):
     elif structure is None:
         raise TypeError('Must specify structure name or dict with method center_of_mass')
     else:
-        nthreads = multiprocessing.cpu_count() // 2
+        if not nthreads:
+            nthreads = multiprocessing.cpu_count() // 2
+
         with ThreadPool(max_workers=nthreads) as P:
-            points = list(P.map(compute_com, tree.iter_frames()))
-        ThreadPool().shutdown()
+            fn = PoolFn(structure)
+            points = list(P.map(fn.compute_com, tree.iter_frames()))
+            P.shutdown()
 
         for name, centroid in points:
             if centroid is not None:

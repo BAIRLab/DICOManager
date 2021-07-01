@@ -508,7 +508,7 @@ class GroupUtils(NodeMixin):
         """
         for frame in self.iter_frames():
             vols = {}
-            for vol in frame.iter_volumes(): # iter_volume_data
+            for vol in frame.iter_volumes():  # iter_volume_data
                 vols.update(vol)
             yield vols
 
@@ -608,7 +608,9 @@ class GroupUtils(NodeMixin):
         iterator = self.iter_frames()
         with ProcessPool(nodes=4) as P:
             frame_group = list(P.map(recon_fn, iterator))
-        ProcessPool().clear()
+            P.close()
+            P.join()
+            P.clear()
 
         mods_ptrs = utils.flatten_list(frame_group)
         if return_mods:
@@ -723,7 +725,7 @@ class GroupUtils(NodeMixin):
         def toolfn(toolset, path):
             def wrapper(mod):
                 self.apply_tool(toolset=toolset, path=path, mod=mod, warn=False)
-                return mod
+                return None
             return wrapper
 
         message = 'Applied tools will overwrite volumes unless path is specified'
