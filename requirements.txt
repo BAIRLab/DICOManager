@@ -1,3 +1,4 @@
+pip>=19.3
 anytree==2.8.0
 dataclasses==0.6
 matplotlib==3.4.1
