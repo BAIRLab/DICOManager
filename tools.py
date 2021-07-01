@@ -1,9 +1,10 @@
 from __future__ import annotations
 import abc
-from scipy.ndimage import center_of_mass
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor as ThreadPool
+from scipy.ndimage import center_of_mass, zoom
 import utils
 import numpy as np
-from skimage.transform import rescale
 from typing import Union
 from groupings import ReconstructedVolume, ReconstructedFile
 
@@ -51,11 +52,11 @@ class ImgHandler:
             utils.colorwarn('Will write over reconstructed volume files')
             if type(img) is ReconstructedFile:
                 img.load_array()
-                results = self._function(img)
-                results.convert_to_pointer(path=path)
+                img = self._function(img)
+                img.convert_to_pointer(path=path)
             else:
-                results = self._function(img)
-            return results
+                img = self._function(img)
+            return img
         return img
 
     @abc.abstractmethod
@@ -292,7 +293,10 @@ class Resample(ImgHandler):
             ReconstructedVolume: [Downsampled image array]
         """
         if self.ratio is not None:
-            current_ratio = self.ratio
+            if type(self.ratio) is int or type(self.ratio) is float:
+                current_ratio = [self.ratio for _ in range(3)]
+            else:
+                current_ratio = self.ratio
         elif self.dims is not None:
             current_ratio = self._dims_to_ratio(img)
         elif self.voxel_size is not None:
@@ -306,7 +310,8 @@ class Resample(ImgHandler):
             current_ratio = self._dz_limit_to_ratio(img, previous=current_ratio)
 
         for name, volume in img.volumes.items():
-            img.volumes[name] = rescale(np.copy(volume), current_ratio)
+            datatype = volume.dtype
+            img.volumes[name] = np.array(zoom(volume, current_ratio, order=1), dtype=datatype)
 
         if not img.ImgAugmentations.resampled:
             img.ImgAugmentations.resampled_update(img.dims.voxel_size, current_ratio)
@@ -419,8 +424,8 @@ class Resample(ImgHandler):
 
 
 class Crop(ImgHandler):
-    def __init__(self, crop_size: list, centroid: list = None, structure: str = None,
-                 offset: list = None, custom_centroid: object = None):
+    def __init__(self, crop_size: list, centroid: list = None,
+                 offset: list = None, centroids: list = None):
         """[Cropping function for image and rtstruct volumes]
 
         Args:
@@ -437,8 +442,7 @@ class Crop(ImgHandler):
         """
         self.crop_size = crop_size
         self.centroid = centroid
-        self.custom_centroid = custom_centroid
-        self.structure = structure
+        self.centroids = centroids
         self.offset = offset
         self._centroids = {}
 
@@ -460,72 +464,101 @@ class Crop(ImgHandler):
         """
         # Need to update the VolumeDimensions header and dicom header too
         imgshape = np.array(img.dims.shape)
-        img_coords = np.zeros((2, len(imgshape)))
-        patient_coords = np.zeros((2, len(imgshape)))
+        img_coords = np.zeros((2, len(imgshape)), dtype=np.int)
+        patient_coords = np.zeros((2, len(imgshape)), dtype=np.float)
 
-        if self.centroid is None:
-            this_centroid = self._calc_centroid_from_struct(img)
-        elif self.custom_centroid is not None:
-            this_centroid = self.custom_centroid(img)
-        else:
+        if self.centroid is not None:
             this_centroid = self.centroid
+        elif self.centroids is not None:
+            frame = img._parent.ancestors[-1]
+            this_centroid = self.centroids[frame.name]
+        else:
+            this_centroid = np.array(img.dims.shape) // 2
 
         for i, (point, size) in enumerate(zip(this_centroid, self.crop_size)):
-            low = min(0, point - size // 2)
+            low = max(0, point - size // 2)
             high = low + size
             if high > (imgshape[i] - 1):
-                high = (imgshape[i] - 1)
+                high = imgshape[i] - 1
                 low = high - size
-                img_coords[0, i] = low
-                img_coords[1, i] = high
+                if low < 0:
+                    utils.colorwarn(f'Crop size is larger than volume array for {img.PatientID}')
+            img_coords[0, i] = low
+            img_coords[1, i] = high
 
         coordrange = img.dims.coordrange()
         for i, (low, high) in enumerate(img_coords.T):
-            patient_coords[0, i] = coordrange[i, low]
-            patient_coords[1, i] = coordrange[i, high]
+            patient_coords[0, i] = coordrange[i][low]
+            patient_coords[1, i] = coordrange[i][high]
 
         xlo, xhi, ylo, yhi, zlo, zhi = img_coords.T.flatten()
 
         for name, volume in img.volumes.items():
-            img.volumes[name] = volume[xlo: xhi, ylo: yhi, zlo: zhi]
+            datatype = volume.dtype
+            img.volumes[name] = np.array(volume[xlo: xhi, ylo: yhi, zlo: zhi], dtype=datatype)
 
         # img.crop_update()
         img.ImgAugmentations.crop_update(img_coords, patient_coords)
         img.dims.crop_update(img_coords)
         return img
 
-    def _calc_centroid_from_struct(self, img: ReconVolumeOrFile) -> list:
-        """[Calculates a centroid from a specified structure]
-
-        Args:
-            img (ReconVolumeOrFile): [The image to compute the centroid upon]
-
-        Raises:
-            ValueError: [Raised if structure is not found for a patient]
-
-        Returns:
-            list: [A list of centroid points]
-        """
-        if self.structure is None:
-            return np.array(img.dims.shape) // 2
-
-        frame = img.ancestors[-1]
-        if frame.name in self._centroids:
-            return self._centroids[frame.name]
-
-        for mod in frame.iter_modalities:
-            if mod.name == 'RTSTRUCT':
-                for name, volume in mod.volumes_data.items():
-                    if name in self.structure:
-                        centroid = center_of_mass(volume)
-                        self._centroids.update({frame.name: centroid})
-                        return centroid
-
-        raise ValueError(f'Structure not found for patient {img.PatientID}')
-
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
         passes = [x == y for x, y in zip(self.crop_size, img.dims.shape)]
         return not all(passes)
+
+
+class PoolFn:
+    def __init__(self, structure):
+        self.structure = structure
+
+    def name_check(self, name):
+        if type(self.structure) is dict:
+            for key, values in self.structure.items():
+                if name == key or name in values:
+                    return True
+        return name in self.structure
+
+    def compute_com(self, frame):
+        it = frame.iter_struct_volume_files()
+        for volfile in it:
+            volfile.load_array()
+            for name, volume in volfile.volumes.items():
+                if self.name_check(name):
+                    CoM = np.array(np.round(center_of_mass(volume)), dtype=np.int)
+                    volfile.convert_to_pointer()  # TODO: Check the implementation on save=False
+                    return (frame.name, CoM)
+        return (frame.name, None)
+
+
+def compute_centroids(tree, structure=None, method='center_of_mass', nthreads: int = None):
+    if type(structure) is dict or type(structure) is list:
+        pass
+    elif type(structure) is str:
+        structure = [structure]
+    else:
+        raise TypeError('Structure must be str, list or dict')
+
+    centroids = {}
+    if method != 'center_of_mass':
+        for frame in tree.iter_frames():
+            centroids.update({frame.name: method(frame)})
+        return centroids
+    elif structure is None:
+        raise TypeError('Must specify structure name or dict with method center_of_mass')
+    else:
+        if not nthreads:
+            nthreads = multiprocessing.cpu_count() // 2
+
+        with ThreadPool(max_workers=nthreads) as P:
+            fn = PoolFn(structure)
+            points = list(P.map(fn.compute_com, tree.iter_frames()))
+            P.shutdown()
+
+        for name, centroid in points:
+            if centroid is not None:
+                centroids.update({name: centroid})
+
+    return centroids
 
 
 """

@@ -416,7 +416,7 @@ class GroupUtils(NodeMixin):
         Returns:
             [bool]: [True if tree contains volumes]
         """
-        return bool(next(self.iter_volumes(), False))
+        return bool(next(self.iter_volumes(), False))  # iter_volume_data
 
     def iter_modalities(self) -> object:
         """[Iterates through each Modality]
@@ -480,7 +480,19 @@ class GroupUtils(NodeMixin):
                     for vols in mod.volumes_data.values():
                         for vol in vols:
                             yield vol
+                else:
+                    yield mod.volumes_data
+
+    def iter_volume_data(self) -> dict:
+        for mod in self.iter_modalities():
+            if mod.volumes_data:
                 yield mod.volumes_data
+
+    def iter_volumes2(self) -> Union['ReconstructedVolume', 'ReconstructedFile']:
+        for mod in self.iter_modalities():
+            for vols in mod.volumes_data.values():
+                for vol in vols:
+                    yield vol
 
     def iter_volume_frames(self) -> list:
         """[Iterates through the frame of references]
@@ -496,9 +508,21 @@ class GroupUtils(NodeMixin):
         """
         for frame in self.iter_frames():
             vols = {}
-            for vol in frame.iter_volumes():
+            for vol in frame.iter_volumes():  # iter_volume_data
                 vols.update(vol)
             yield vols
+
+    def iter_struct_volume_files(self):
+        """[Iterates through RTSTRUCT volume files]
+
+        Yields:
+            Union[ReconVolume, ReconFile]: [Reconstructed volume or file of RTSTRUCT]
+        """
+        for mod in self.iter_modalities():
+            if mod.name == 'RTSTRUCT':
+                for volfiles in mod.volumes_data.values():
+                    for volfile in volfiles:
+                        yield volfile
 
     def clear_dicoms(self) -> None:
         """[Clears the dicoms from the tree]
@@ -558,7 +582,7 @@ class GroupUtils(NodeMixin):
     def volumes_to_pointers(self) -> None:
         """[Converts all volumes to pointers]
         """
-        for vol in self.iter_volumes(flat=True):
+        for vol in self.iter_volumes(flat=True):  # iter_volumes
             if type(vol) is ReconstructedVolume:
                 vol.convert_to_pointer()
 
@@ -568,7 +592,7 @@ class GroupUtils(NodeMixin):
         Notes:
             This may require a large amount of memory
         """
-        for vol in self.iter_volumes(flat=True):
+        for vol in self.iter_volumes(flat=True):  # iter_volumes
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
@@ -584,7 +608,9 @@ class GroupUtils(NodeMixin):
         iterator = self.iter_frames()
         with ProcessPool(nodes=4) as P:
             frame_group = list(P.map(recon_fn, iterator))
-        ProcessPool().clear()
+            P.close()
+            P.join()
+            P.clear()
 
         mods_ptrs = utils.flatten_list(frame_group)
         if return_mods:
@@ -656,9 +682,9 @@ class GroupUtils(NodeMixin):
             path = self.writepath
 
         if mod is None:
-            it = self.iter_volumes()
+            it = self.iter_volumes()  # iter_volume_data
         else:
-            it = mod.iter_volumes()
+            it = mod.iter_volumes()   # iter_volume_data
 
         for volume in it:
             for name, reconfiles in volume.items():
@@ -699,7 +725,7 @@ class GroupUtils(NodeMixin):
         def toolfn(toolset, path):
             def wrapper(mod):
                 self.apply_tool(toolset=toolset, path=path, mod=mod, warn=False)
-                return mod
+                return None
             return wrapper
 
         message = 'Applied tools will overwrite volumes unless path is specified'
@@ -729,7 +755,8 @@ class ReconstructedVolume(GroupUtils):
         self.dims = deepcopy(dims)
         self.volumes = {}
         self.ImgAugmentations = ImgAugmentations()
-        self._parent = parent  # We don't want to actually add it to the tree
+        self._parent = deepcopy(parent)  # We don't want to actually add it to the tree
+        self.remove_parent_data()
         self._digest()
 
     def __getitem__(self, name: str):
@@ -827,6 +854,12 @@ class ReconstructedVolume(GroupUtils):
         names[0] += '_volumes'
         return '/'.join(names) + '/'
 
+    def remove_parent_data(self) -> None:
+        if self._parent.has_dicoms():
+            self._parent.clear_dicoms()
+        if self._parent.has_volumes():
+            self._parent.clear_volumes()
+
     def add_vol(self, name: str, volume: np.ndarray):
         """[Add a volume array to the data structure]
 
@@ -883,7 +916,7 @@ class ReconstructedVolume(GroupUtils):
             export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def convert_to_pointer(self, path=None) -> None:
+    def convert_to_pointer(self, path: str = None, save: bool = True) -> None:
         """[Converts ReconstructedVolume to ReconstructedFile and saves
             the volume array to ~/tree/format/SeriesInstanceUID.npy]
         """
@@ -892,26 +925,31 @@ class ReconstructedVolume(GroupUtils):
                     'header': self._pull_header(),
                     'augmentations': self.ImgAugmentations.export(),
                     'DateTime': self.DateTime.export()}
-        parent = self._parent
-        filepath = self.save_file(save_dir=path, return_loc=True)
+        filepath = self.save_file(save_dir=path, return_loc=True, save=save)
         self.volumes = None
         self.__class__ = ReconstructedFile
-        self.__init__(filepath, parent, populate)
+        self.__init__(filepath, self._parent, populate)
+        self.remove_parent_data()
 
     def save_file(self, save_dir: str = None, filepath: str = None,
-                  return_loc: bool = False) -> Union[None, pathlib.PosixPath]:
+                  return_loc: bool = False, save: bool = True) -> Union[None, pathlib.PosixPath]:
         """[Save the reconstructed volume and associated information to a .npy pickled file]
 
         Args:
             save_dir (str, optional): [Directory to save file to, defaults to ~]. Defaults to None.
             filepath (str, optional): [Filepath to save file tree]. Defaults to None.
             return_loc (bool, optional): [Returns saved filepath location]. Defaults to False.
+            save (bool, optional): [Determines if the file is actually saved or just converted]
 
         Raises:
             TypeError: [Raised if save_dir and filepath are specified]
 
         Returns:
             [None, pathlib.Path]: [None or pathlib.Path to saved file location]
+
+        Notes:
+            In some cases, we simply want to load the array, read it and not rewrite it to disk,
+                in those instances, we should use save=False to reduce needless disk I/O
         """
         if save_dir and filepath:
             raise TypeError('Either a save directory or a full filepath')
@@ -924,7 +962,9 @@ class ReconstructedVolume(GroupUtils):
 
         pathlib.Path(fullpath).mkdir(parents=True, exist_ok=True)
         output = copy(self.export())
-        np.save(fullpath / self.SeriesInstanceUID, output)
+
+        if save:
+            np.save(fullpath / self.SeriesInstanceUID, output)
 
         if return_loc:
             return fullpath / (self.SeriesInstanceUID + '.npy')
@@ -942,6 +982,7 @@ class ReconstructedFile(GroupUtils):
         self.filepath = filepath
         self.populate = populate
         self._parent = parent
+        self.remove_parent_data()
         self._digest()
 
     def __getitem__(self, name: str):
@@ -973,6 +1014,12 @@ class ReconstructedFile(GroupUtils):
         for name, value in self.populate['header'].items():
             self[name] = value
 
+    def remove_parent_data(self) -> None:
+        if self._parent.has_dicoms():
+            self._parent.clear_dicoms()
+        if self._parent.has_volumes():
+            self._parent.clear_volumes()
+
     def load_array(self):
         """[Loads volume array from disk into memory, converts type to ReconstructedVolume]
         """
@@ -983,6 +1030,7 @@ class ReconstructedFile(GroupUtils):
         self.volumes = ds['volumes']
         self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
         self.ImgAugmentations = ImgAugmentations().from_dict(ds['augmentations'])
+        self.remove_parent_data()
 
 
 class DicomFile(GroupUtils):

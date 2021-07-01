@@ -16,7 +16,6 @@ filter_list = {'StructName': {'hippocampus': ['hippocampus'],
                'Modality': ['CT', 'RTSTRUCT']}
 
 start = time.time()
-
 # Glob all unsorted files
 files = glob('/home/eporter/eporter_data/rtog_project/MIMExport/**/*.dcm', recursive=True)
 
@@ -30,14 +29,24 @@ cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
 # Reconstruct dicoms into arrays at specified path
 cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data/rtog_project/built/')
 
-# Apply interpolation function
-# Working: extrapolate, normalize, standardize, window level, resampling
-# Untested: BiasFieldCorrection, cropping
+# Calculate the centroids based on center of mass of hippo_avoid
+centroids = tools.compute_centroids(tree=cohort, structure='hippo_avoid')
 
+# Apply interpolation, resampling and then cropping
 toolset = [tools.Interpolate(extrapolate=True),
-           tools.Resample(dims=[512, 512, None], dz_limit=2.39)]
+           tools.Resample(dims=[512, 512, None], dz_limit=2.39),
+           tools.WindowLevel(window=500, level=250),
+           tools.Normalize(),
+           tools.Crop(crop_size=[100, 100, 50], centroids=centroids)]
+
 cohort.apply_tools(toolset)
-print(cohort)
+
+"""
+for vol in cohort.iter_volumes(flat=True):
+    vol.load_array()
+    for name, volume in vol.volumes.items():
+        print(f'{name} : {volume.shape}')
+"""
 
 print('elapsed:', time.time() - start)
 print(len(cohort))

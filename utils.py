@@ -298,7 +298,7 @@ class VolumeDimensions:
         pts_z = self.origin[2] + np.arange(self.slices) * self.dz
         if self.flipped:
             pts_z = pts_z[..., ::-1]
-        return (pts_x, pts_y, pts_z)
+        return [pts_x, pts_y, pts_z]
 
     def coordgrid(self):
         pts_x, pts_y, pts_z = self.coordrange()
@@ -568,6 +568,8 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
 
     with ProcessPool(max_workers=ncpus//4) as P:
         results = list(P.map(recon_fn, trees))
+        P.shutdown()
+    ProcessPool().shutdown()
 
     primary = combine_trees(primary, trees)
 
