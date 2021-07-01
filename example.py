@@ -30,27 +30,20 @@ cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
 # Reconstruct dicoms into arrays at specified path
 cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data/rtog_project/built/')
 
-# Apply interpolation function
-# Working: extrapolate, normalize, standardize, window level, resampling, cropping
-# Untested: BiasFieldCorrection
-
+# Calculate the centroids based on center of mass of hippo_avoid
 centroids = tools.compute_centroids(tree=cohort, structure='hippo_avoid', method='center_of_mass')
-# Can also have custom method, will ignore structure parameter
-# Custom method is given a frame of reference, returns a list of the centroid voxel indicies as integers
-
+# Apply interpolation, resampling and then cropping
 toolset = [tools.Interpolate(extrapolate=True),
            tools.Resample(dims=[512, 512, None], dz_limit=2.39),
            tools.Crop(crop_size=[100, 100, 50], centroids=centroids)]
 
 cohort.apply_tools(toolset)
 
-for f in cohort.iter_modalities():
-    print(type(f))
-    for v in f.volumes_data.values():
-        v = v[0]
-        v.load_array()
-        for name, volume in v.volumes.items():
-            print(name, ': ', volume.shape)
+# Make iter volumes less of a pain
+for vol in cohort.iter_volumes(flat=True):
+    vol.load_array()
+    for name, volume in vol.volumes.items():
+        print(f'{name} : {volume.shape}')
 
 print('elapsed:', time.time() - start)
 print(len(cohort))

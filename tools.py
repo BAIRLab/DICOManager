@@ -518,7 +518,9 @@ def compute_centroids(tree, structure=None, method='center_of_mass'):
             for name, volume in volfile.volumes.items():
                 if name_check(name):
                     CoM = np.array(np.round(center_of_mass(volume)), dtype=np.int)
-                    return (frame.name, CoM)
+                    break
+            volfile.convert_to_pointer()  # TODO: Check the implementation on save=False
+            return (frame.name, CoM)
         return (frame.name, None)
 
     if type(structure) is dict or type(structure) is list:
@@ -546,7 +548,6 @@ def compute_centroids(tree, structure=None, method='center_of_mass'):
                 centroids.update({name: centroid})
 
     return centroids
-
 
 
 """
