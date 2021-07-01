@@ -735,7 +735,7 @@ class GroupUtils(NodeMixin):
         it = self.iter_modalities()
         with ThreadPool(max_workers=nthreads) as P:
             _ = list(P.map(fn, it))
-        ThreadPool().shutdown()
+            ThreadPool().shutdown()
 
 
 class ReconstructedVolume(GroupUtils):

@@ -41,13 +41,6 @@ toolset = [tools.Interpolate(extrapolate=True),
 
 cohort.apply_tools(toolset)
 
-"""
-for vol in cohort.iter_volumes(flat=True):
-    vol.load_array()
-    for name, volume in vol.volumes.items():
-        print(f'{name} : {volume.shape}')
-"""
-
 print('elapsed:', time.time() - start)
 print(len(cohort))
 sys.stdout.flush()

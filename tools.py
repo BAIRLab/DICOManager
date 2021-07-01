@@ -7,6 +7,7 @@ import utils
 import numpy as np
 from typing import Union
 from groupings import ReconstructedVolume, ReconstructedFile
+from anytree import NodeMixin
 
 # Custom Types
 ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
@@ -507,30 +508,42 @@ class Crop(ImgHandler):
         return not all(passes)
 
 
-class PoolFn:
-    def __init__(self, structure):
-        self.structure = structure
+def compute_centroids(tree: NodeMixin, structure: str = None,
+                      method: object = None, nthreads: int = None) -> dict:
+    """[Multithreaded computation of the centroid for each frame of reference]
 
-    def name_check(self, name):
-        if type(self.structure) is dict:
-            for key, values in self.structure.items():
+    Args:
+        tree (NodeMixin): [Tree to iterate through]
+        structure (str, optional): [Structure name to use for center of mass]. Defaults to None.
+        method (object, optional): [Method used to calculate centeroid]. Defaults to center of mass.
+        nthreads (int, optional): [Number of threads to use, with higher thread
+            counts using greater system memory]. Defaults to 1/2 CPU cores.
+
+    Returns:
+        dict: [Keyed to Frame Of Reference UID with centroid voxel location as value]
+    """
+    def name_check(name):
+        """[Inner function to check name ]
+        """
+        if type(structure) is dict:
+            for key, values in structure.items():
                 if name == key or name in values:
                     return True
-        return name in self.structure
+        return name in structure
 
-    def compute_com(self, frame):
+    def compute_com(frame):
+        """[Inner function to compute center of mass]
+        """
         it = frame.iter_struct_volume_files()
         for volfile in it:
             volfile.load_array()
             for name, volume in volfile.volumes.items():
-                if self.name_check(name):
+                if name_check(name):
                     CoM = np.array(np.round(center_of_mass(volume)), dtype=np.int)
                     volfile.convert_to_pointer()  # TODO: Check the implementation on save=False
                     return (frame.name, CoM)
         return (frame.name, None)
 
-
-def compute_centroids(tree, structure=None, method='center_of_mass', nthreads: int = None):
     if type(structure) is dict or type(structure) is list:
         pass
     elif type(structure) is str:
@@ -550,8 +563,7 @@ def compute_centroids(tree, structure=None, method='center_of_mass', nthreads: i
             nthreads = multiprocessing.cpu_count() // 2
 
         with ThreadPool(max_workers=nthreads) as P:
-            fn = PoolFn(structure)
-            points = list(P.map(fn.compute_com, tree.iter_frames()))
+            points = list(P.map(compute_com, tree.iter_frames()))
             P.shutdown()
 
         for name, centroid in points:

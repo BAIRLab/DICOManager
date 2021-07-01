@@ -65,7 +65,7 @@ class RTStructConstructor:
         self._unpack_ct_hdrs()
 
     def _define_vol_dims(self):
-        for mod in self.frame_of_ref.iter_modalities:
+        for mod in self.frame_of_ref.iter_modalities():
             print(mod, mod.name)
             if mod.name == 'CT':
                 self.dims = VolumeDimensions(mod.data)
