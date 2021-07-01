@@ -1,8 +1,8 @@
 import time
 import sys
-import tools
-from groupings import Cohort
 from glob import glob
+from . import tools
+from .groupings import Cohort
 
 '''
 # in the format of:
@@ -35,7 +35,6 @@ centroids = tools.compute_centroids(tree=cohort, structure='hippo_avoid')
 # Apply interpolation, resampling and then cropping
 toolset = [tools.Interpolate(extrapolate=True),
            tools.Resample(dims=[512, 512, None], dz_limit=2.39),
-           tools.WindowLevel(window=500, level=250),
            tools.Normalize(),
            tools.Crop(crop_size=[100, 100, 50], centroids=centroids)]
 

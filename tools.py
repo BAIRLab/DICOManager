@@ -1,13 +1,13 @@
 from __future__ import annotations
 import abc
 import multiprocessing
+import numpy as np
+from anytree import NodeMixin
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
 from scipy.ndimage import center_of_mass, zoom
-import utils
-import numpy as np
 from typing import Union
-from groupings import ReconstructedVolume, ReconstructedFile
-from anytree import NodeMixin
+from . import utils
+from .groupings import ReconstructedVolume, ReconstructedFile
 
 # Custom Types
 ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
