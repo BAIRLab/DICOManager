@@ -1,6 +1,6 @@
 pip>=19.3
+python>=3.7.0
 anytree==2.8.0
-dataclasses==0.6
 matplotlib==3.4.1
 numpy==1.20.2
 pathos==0.2.7
