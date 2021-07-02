@@ -736,6 +736,12 @@ class GroupUtils(NodeMixin):
         with ThreadPool(max_workers=nthreads) as P:
             _ = list(P.map(fn, it))
             ThreadPool().shutdown()
+"""
+    def check_for_complete_frames(self):
+        frames =
+
+    def check_for_complete_patients(self):
+"""
 
 
 class ReconstructedVolume(GroupUtils):
@@ -1111,7 +1117,7 @@ class DicomFile(GroupUtils):
 
 
 class Cohort(GroupUtils):
-    """[Group level for Cohort]
+    """[Group level for Cohort with child of Patient]
 
     Args:
         name (str): A string declaring the group name
@@ -1128,26 +1134,11 @@ class Cohort(GroupUtils):
 
 
 class Patient(GroupUtils):
-    """[Group level for Patient, specified by PatientUID]
+    """[Group level for Patient, specified by PatientUID with child of FrameOfRef]
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
-            Series (True) or Modality (False)]. Defaults to False.
-    """
-    def __init__(self, name, *args, **kwargs):
-        super().__init__(name, *args, **kwargs)
-        self._child_type = Study
-        self._organize_by = 'StudyUID'
-        self._digest()
-
-
-class Study(GroupUtils):
-    """[Group level for Study, specified by StudyUID]
-
-    Args:
-        name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
+        include_series (bool, optional): [specifies if Study points to
             Series (True) or Modality (False)]. Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
@@ -1158,11 +1149,12 @@ class Study(GroupUtils):
 
 
 class FrameOfRef(GroupUtils):
-    """[Group level for FrameOfReference, specified by FrameOfReferenceUID]
+    """[Group level for FrameOfReference, specified by FrameOfReferenceUID
+        with child of Study]
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
+        include_series (bool, optional): [specifies if Study points to
             Series (True) or Modality (False)]. Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
@@ -1172,7 +1164,25 @@ class FrameOfRef(GroupUtils):
             self._reconstruct = Reconstruction(filter_structs=self.filter_by['StructName'])
         else:
             self._reconstruct = Reconstruction()
+        self._child_type = Study
+        self._organize_by = 'StudyUID'
+        self._digest()
 
+    def recon(self, in_memory: bool = False, path: str = None):
+        return self._reconstruct(self, in_memory=in_memory, path=path)
+
+
+class Study(GroupUtils):
+    """[Group level for Study, specified by StudyUID with child of
+        Series or Modality]
+
+    Args:
+        name (str): A string declaring the group name
+        include_series (bool, optional): [specifies if Study points to
+            Series (True) or Modality (False)]. Defaults to False.
+    """
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
         if self.include_series:
             self._child_type = Series
             self._organize_by = 'SeriesUID'
@@ -1180,9 +1190,6 @@ class FrameOfRef(GroupUtils):
             self._child_type = Modality
             self._organize_by = 'Modality'
         self._digest()
-
-    def recon(self, in_memory: bool = False, path: str = None):
-        return self._reconstruct(self, in_memory=in_memory, path=path)
 
 
 class Series(GroupUtils):

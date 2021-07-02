@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor as ThreadPool
 from scipy.ndimage import center_of_mass, zoom
 from typing import Union
 from . import utils
-from .groupings import ReconstructedVolume, ReconstructedFile
+from .groupings import ReconstructedVolume, ReconstructedFile, FrameOfRef
 
 # Custom Types
 ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
@@ -473,7 +473,10 @@ class Crop(ImgHandler):
         if self.centroid is not None:
             this_centroid = self.centroid
         elif self.centroids is not None:
-            frame = img._parent.ancestors[-1]
+            ancestors = img._parent.ancestors
+            for ancestor in ancestors:
+                if type(ancestor) is FrameOfRef:
+                    frame = ancestor
             this_centroid = self.centroids[frame.name]
         else:
             this_centroid = np.array(img.dims.shape) // 2
@@ -559,6 +562,7 @@ def compute_centroids(tree: NodeMixin, structure: str = None,
     centroids = {}
     if method is not None:
         for frame in tree.iter_frames():
+            print(type(frame))
             centroids.update({frame.name: method(frame)})
         return centroids
     elif structure is None:
