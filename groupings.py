@@ -736,6 +736,12 @@ class GroupUtils(NodeMixin):
         with ThreadPool(max_workers=nthreads) as P:
             _ = list(P.map(fn, it))
             ThreadPool().shutdown()
+"""
+    def check_for_complete_frames(self):
+        frames =
+
+    def check_for_complete_patients(self):
+"""
 
 
 class ReconstructedVolume(GroupUtils):
@@ -1137,22 +1143,8 @@ class Patient(GroupUtils):
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
-        self._child_type = Study
-        self._organize_by = 'StudyUID'
-        self._digest()
-
-
-class Study(GroupUtils):
-    """[Group level for Study, specified by StudyUID]
-
-    Args:
-        name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
-            Series (True) or Modality (False)]. Defaults to False.
-    """
-    def __init__(self, name, *args, **kwargs):
-        super().__init__(name, *args, **kwargs)
         self._child_type = FrameOfRef
+        #self._organize_by = 'StudyUID'
         self._organize_by = 'FrameOfRefUID'
         self._digest()
 
@@ -1172,17 +1164,41 @@ class FrameOfRef(GroupUtils):
             self._reconstruct = Reconstruction(filter_structs=self.filter_by['StructName'])
         else:
             self._reconstruct = Reconstruction()
-
+        """
         if self.include_series:
             self._child_type = Series
             self._organize_by = 'SeriesUID'
         else:
             self._child_type = Modality
             self._organize_by = 'Modality'
+        """
+        self._child_type = Study
+        self._organize_by = 'StudyUID'
         self._digest()
 
     def recon(self, in_memory: bool = False, path: str = None):
         return self._reconstruct(self, in_memory=in_memory, path=path)
+
+
+class Study(GroupUtils):
+    """[Group level for Study, specified by StudyUID]
+
+    Args:
+        name (str): A string declaring the group name
+        include_series (bool, optional): [specifies if FrameOfRef points to
+            Series (True) or Modality (False)]. Defaults to False.
+    """
+    def __init__(self, name, *args, **kwargs):
+        super().__init__(name, *args, **kwargs)
+        if self.include_series:
+            self._child_type = Series
+            self._organize_by = 'SeriesUID'
+        else:
+            self._child_type = Modality
+            self._organize_by = 'Modality'
+        #self._child_type = FrameOfRef
+        #self._organize_by = 'FrameOfRefUID'
+        self._digest()
 
 
 class Series(GroupUtils):

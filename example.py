@@ -12,9 +12,12 @@ filter_list = {'PatientID': [...],
                'StructName': [...]}
 '''
 # StructName of dict will rename structures in the value to the key
+"""
 filter_list = {'StructName': {'hippocampus': ['hippocampus'],
                               'hippo_avoid': ['hippoavoid', 'hippo_avoid']},
                'Modality': ['CT', 'RTSTRUCT']}
+"""
+filter_list = {'Modality': ['CT', 'RTSTRUCT']}
 
 start = time.time()
 # Glob all unsorted files
@@ -29,6 +32,7 @@ cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
 
 # Reconstruct dicoms into arrays at specified path
 cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data/rtog_project/built/')
+print(cohort)
 
 # Calculate the centroids based on center of mass of hippo_avoid
 centroids = tools.compute_centroids(tree=cohort, structure='hippo_avoid')
