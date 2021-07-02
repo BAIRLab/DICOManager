@@ -1117,7 +1117,7 @@ class DicomFile(GroupUtils):
 
 
 class Cohort(GroupUtils):
-    """[Group level for Cohort]
+    """[Group level for Cohort with child of Patient]
 
     Args:
         name (str): A string declaring the group name
@@ -1134,27 +1134,27 @@ class Cohort(GroupUtils):
 
 
 class Patient(GroupUtils):
-    """[Group level for Patient, specified by PatientUID]
+    """[Group level for Patient, specified by PatientUID with child of FrameOfRef]
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
+        include_series (bool, optional): [specifies if Study points to
             Series (True) or Modality (False)]. Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self._child_type = FrameOfRef
-        #self._organize_by = 'StudyUID'
         self._organize_by = 'FrameOfRefUID'
         self._digest()
 
 
 class FrameOfRef(GroupUtils):
-    """[Group level for FrameOfReference, specified by FrameOfReferenceUID]
+    """[Group level for FrameOfReference, specified by FrameOfReferenceUID
+        with child of Study]
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
+        include_series (bool, optional): [specifies if Study points to
             Series (True) or Modality (False)]. Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
@@ -1164,14 +1164,6 @@ class FrameOfRef(GroupUtils):
             self._reconstruct = Reconstruction(filter_structs=self.filter_by['StructName'])
         else:
             self._reconstruct = Reconstruction()
-        """
-        if self.include_series:
-            self._child_type = Series
-            self._organize_by = 'SeriesUID'
-        else:
-            self._child_type = Modality
-            self._organize_by = 'Modality'
-        """
         self._child_type = Study
         self._organize_by = 'StudyUID'
         self._digest()
@@ -1181,11 +1173,12 @@ class FrameOfRef(GroupUtils):
 
 
 class Study(GroupUtils):
-    """[Group level for Study, specified by StudyUID]
+    """[Group level for Study, specified by StudyUID with child of
+        Series or Modality]
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
+        include_series (bool, optional): [specifies if Study points to
             Series (True) or Modality (False)]. Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
@@ -1196,8 +1189,6 @@ class Study(GroupUtils):
         else:
             self._child_type = Modality
             self._organize_by = 'Modality'
-        #self._child_type = FrameOfRef
-        #self._organize_by = 'FrameOfRefUID'
         self._digest()
 
 
