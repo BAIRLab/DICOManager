@@ -577,3 +577,9 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
         insert_into_tree(primary, mod_ptr_pairs)
 
     return primary
+
+
+def decendant_types(group):
+    heiarchy = ['Cohort', 'Patient', 'FrameOfRef', 'Study', 'Series', 'Modality']
+    index = heiarchy.index(group)
+    return heiarchy[index:]

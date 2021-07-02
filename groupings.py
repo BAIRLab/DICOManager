@@ -53,6 +53,20 @@ class GroupUtils(NodeMixin):
         if children:
             self.children = children
 
+    def __copy__(self) -> NodeMixin:
+        """[Creates copy of the current node, whereas deepcopy copies all desendants]
+
+        Returns:
+            NodeMixin: [A copy of the current node]
+        """
+        new = type(self)('')
+        for key, value in self.__dict__.items():
+            if key == '_NodeMixin__children':
+                new.__dict__.update({key: []})
+            else:
+                new.__dict__.update({key: value})
+        return new
+
     def __len__(self):
         return len(self.children)
 
@@ -319,6 +333,35 @@ class GroupUtils(NodeMixin):
         """
         child.parent = self
 
+    def abandon(self) -> None:
+        self._NodeMixin__children = []
+
+    def integrate(self, child: NodeMixin) -> None:
+        print('integrating')
+        # Builds familial history for new child added to tree
+        current = self
+        previous = None
+
+        for anc in child.ancestors:
+            if current is not None and current._child_type is type(child):
+                print('pre-adopting')
+                # If child can be adopted, do so
+                child.parent = current
+            else:
+                # Find nearest ancestor
+                previous = current
+                try:
+                    current = anytree.search.findall(current, filter_=lambda x: x.name == anc.name)[-1]
+                except Exception:
+                    current = anytree.search.find(current, filter_=lambda x: x.name == anc.name)
+
+                # Add nearest ancestor to tree or adopt
+                if current is None:
+                    new = copy(anc)
+                    new.parent = previous
+                elif current._child_type is type(child):
+                    child.parent = previous
+
     def flatten(self) -> None:
         """[flatten results in each parent having one child, except for
             the Modality group. Flattened with specified group as root]
@@ -418,18 +461,19 @@ class GroupUtils(NodeMixin):
         """
         return bool(next(self.iter_volumes(), False))  # iter_volume_data
 
-    def iter_modalities(self) -> object:
-        """[Iterates through each Modality]
+    def iter_patients(self) -> object:
+        def filterpatient(node):
+            return type(node) is Patient
+        iterer = LevelOrderGroupIter(self, filter_=filterpatient)
+        patients = [t for t in iterer if t]
+        return iter(*patients)
 
-        Returns:
-            object: [Modality object iterator]
-        """
-        def filtermod(node):
-            return type(node) is Modality
-        iterer = LevelOrderGroupIter(self, filter_=filtermod)
-        mods = [t for t in iterer if t]
-        if not mods == [None] * len(mods):
-            return iter(*mods)
+    def iter_studies(self) -> object:
+        def filterstudy(node):
+            return type(node) is Study
+        iterer = LevelOrderGroupIter(self, filter_=filterstudy)
+        studies = [t for t in iterer if t]
+        return iter(*studies)
 
     def iter_frames(self, return_count: bool = False) -> object:
         """[Iterates through each FrameOfRef]
@@ -447,6 +491,26 @@ class GroupUtils(NodeMixin):
         if return_count:
             return (len(*frames), iter(*frames))
         return iter(*frames)
+
+    def iter_series(self) -> object:
+        def filterseries(node):
+            return type(node) is Series
+        iterer = LevelOrderGroupIter(self, filter_=filterseries)
+        series = [t for t in iterer if t]
+        return iter(*series)
+
+    def iter_modalities(self) -> object:
+        """[Iterates through each Modality]
+
+        Returns:
+            object: [Modality object iterator]
+        """
+        def filtermod(node):
+            return type(node) is Modality
+        iterer = LevelOrderGroupIter(self, filter_=filtermod)
+        mods = [t for t in iterer if t]
+        if not mods == [None] * len(mods):
+            return iter(*mods)
 
     def iter_dicoms(self) -> dict:
         """[Iterates over dicom groups]
@@ -736,12 +800,73 @@ class GroupUtils(NodeMixin):
         with ThreadPool(max_workers=nthreads) as P:
             _ = list(P.map(fn, it))
             ThreadPool().shutdown()
-"""
-    def check_for_complete_frames(self):
-        frames =
 
-    def check_for_complete_patients(self):
-"""
+    def _incomplete(self, group, exact=False, contains=None):
+        if contains is None:
+            contains = self.fitler_by
+        decendant_types = utils.decendant_types(group)
+        passes_dtype = []  # Checks each decendant level to confirm passes
+        for dtype in decendant_types:
+            if dtype not in contains:
+                passes_dtype.append(True)
+                continue
+            needed = copy(contains[dtype])
+            fields = []
+            for modality in self.iter_modalities():
+                f = modality.dicoms[0]
+                if dtype == 'Patient':
+                    fields.append(f.PatientID)
+                elif dtype == 'FrameOfRef':
+                    fields.append(f.FrameOfRefUID)
+                elif dtype == 'Study':
+                    fields.append(f.StudyUID)
+                elif dtype == 'Series':
+                    fields.append(f.SeriesUID)
+                else:
+                    fields.append(modality.name)
+            if exact:
+                if len(fields) != len(needed):
+                    passes = False
+                else:
+                    passes = sorted(fields) == sorted(needed)
+            else:
+                fields = set(fields)
+                passes = set(needed) in fields
+            passes_dtype.append(passes)
+        print(not all(passes_dtype))
+        return not all(passes_dtype)
+
+    def pull_incompletes(self, group: str = 'Patient', exact: bool = False,
+                         contains: dict = None) -> NodeMixin:
+        # fliter_by will default to the original grouping, if specified, otherwise will warn
+        if self.filter_by is None and contains is None:
+            raise AttributeError('No <tree>.filter_by or specified filter_by')
+
+        incomplete_tree = copy(self)
+        incomplete_tree.name += '_excluded'
+
+        if group == 'Patient':
+            for patient in self.iter_patients():
+                if patient._incomplete(group, exact, contains):
+                    incomplete_tree.integrate(patient)
+        elif group == 'FrameOfRef':
+            for frame in self.iter_frames():
+                if frame._incomplete(group, exact, contains):
+                    incomplete_tree.integrate(frame)
+        elif group == 'Study':
+            for study in self.iter_studies():
+                if study._incomplete(group, exact, contains):
+                    incomplete_tree.integrate(study)
+        elif group == 'Series':
+            for series in self.iter_series():
+                if series._incomplete(group, exact, contains):
+                    incomplete_tree.integrate(series)
+        else:
+            types = 'Patient, FrameOfRef, Study or Series'
+            message = f'Group level must be specified as {types} to check for completeness'
+            raise AttributeError(message)
+
+        return incomplete_tree
 
 
 class ReconstructedVolume(GroupUtils):
