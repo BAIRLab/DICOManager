@@ -1,6 +1,5 @@
 import time
 import sys
-from copy import copy
 from glob import glob
 from . import tools
 from .groupings import Cohort
@@ -24,19 +23,21 @@ start = time.time()
 files = glob('/home/eporter/eporter_data/rtog_project/MIMExport/**/*.dcm', recursive=True)
 
 # Sort files into tree
-cohort = Cohort(name='RTOG_Hippocampus', files=files, include_series=False)#, filter_by=filter_list)
-#print(cohort)
+cohort = Cohort(name='RTOG_Hippocampus', files=files, include_series=False)   #, filter_by=filter_list)
+print(cohort)
 
-#filter_list = {'Modality': ['CT', 'RTSTRUCT']}   # Without exact
-#excluded = cohort.pull_incompletes(group='FrameOfRef', exact=False, contains=filter_list)  # rename to contains
+# Filter test 1
+filter_list = {'Modality': ['CT', 'RTSTRUCT']}   # Without exact
+excluded = cohort.pull_incompletes(group='FrameOfRef', exact=False, contains=filter_list)  # rename to contains
 
-filter_list = {'Modality': ['CT', 'RTSTRUCT', 'MR', 'MR']}  # With exact
-excluded = cohort.pull_incompletes(group='Patient', exact=True, contains=filter_list)  # rename to contains
+# Filter test 2
+#filter_list = {'Modality': ['CT', 'RTSTRUCT', 'MR', 'MR']}  # With exact
+#excluded = cohort.pull_incompletes(group='Patient', exact=True, contains=filter_list)  # rename to contains
+
 print('excluded: ', excluded)
 print('\n\n\n\n')
 print('cohort: ', cohort)
 print(len(cohort), len(excluded))
-raise TypeError
 
 # Save sorted dicom files
 cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')

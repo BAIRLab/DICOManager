@@ -334,33 +334,37 @@ class GroupUtils(NodeMixin):
         child.parent = self
 
     def abandon(self) -> None:
+        """[Parent abandons all children, alternative to prune]
+        """
         self._NodeMixin__children = []
 
     def integrate(self, child: NodeMixin) -> None:
-        print('integrating')
-        # Builds familial history for new child added to tree
-        current = self
-        previous = None
+        """[Integrates a child into a tree. If the node ancestors do not exist, they are created]
 
-        for anc in child.ancestors:
-            if current is not None and current._child_type is type(child):
-                print('pre-adopting')
-                # If child can be adopted, do so
-                child.parent = current
-            else:
-                # Find nearest ancestor
+        Args:
+            child (NodeMixin): [Node to integrate into tree]
+        """
+        if self._child_type is type(child):  # Child is directly adoptable
+            child.parent = self
+        else:
+            current = self
+            previous = None
+            for a in child.ancestors[1:]:
+                # find matching ancestor
                 previous = current
                 try:
-                    current = anytree.search.findall(current, filter_=lambda x: x.name == anc.name)[-1]
+                    current = anytree.search.findall(current, filter_=lambda x: x.name == a.name)[-1]
                 except Exception:
-                    current = anytree.search.find(current, filter_=lambda x: x.name == anc.name)
+                    current = anytree.search.find(current, filter_=lambda x: x.name == a.name)
 
-                # Add nearest ancestor to tree or adopt
-                if current is None:
-                    new = copy(anc)
+                if current is None:  # ancestor not in tree
+                    new = copy(a)
+                    new._NodeMixin__parent = None
                     new.parent = previous
-                elif current._child_type is type(child):
-                    child.parent = previous
+                    new.integrate(child)
+                elif current._child_type is type(child):  # adopt to ancestor
+                    child.parent = current
+                    break  # Stop iteration now that its adopted
 
     def flatten(self) -> None:
         """[flatten results in each parent having one child, except for
@@ -801,7 +805,23 @@ class GroupUtils(NodeMixin):
             _ = list(P.map(fn, it))
             ThreadPool().shutdown()
 
-    def _incomplete(self, group, exact=False, contains=None):
+    def _incomplete(self, group: str, exact: bool = False, contains: dict = None) -> bool:
+        """[Determines if group is incomplete as defined by contains]
+
+        Args:
+            group (str): [Group to determine completeness]
+            exact (bool, optional): [Group must contain extactly what is specified in contains,
+                otherwise the group can contain more than contains and be valid]. Defaults to False.
+            contains (dict, optional): [A dictionary with keys of the group type and the
+                corresponding features. For example:
+                        contains = {'Modality': ['CT', 'MR', 'MR', 'RTSTRUCT']}
+                would mean with exact=True, the group must contain exactly 1 CT, 2 MR and
+                1 RTSTRUCT. With exact=False, the group could contain any number of CT, MR,
+                RTSTRUCT as long as at least one of each file type is present]. Defaults to None.
+
+        Returns:
+            bool: [Returns if the group is complete]
+        """
         if contains is None:
             contains = self.fitler_by
         decendant_types = utils.decendant_types(group)
@@ -830,20 +850,41 @@ class GroupUtils(NodeMixin):
                 else:
                     passes = sorted(fields) == sorted(needed)
             else:
-                fields = set(fields)
-                passes = set(needed) in fields
+                passes = set(needed) == set(fields)
             passes_dtype.append(passes)
-        print(not all(passes_dtype))
         return not all(passes_dtype)
 
     def pull_incompletes(self, group: str = 'Patient', exact: bool = False,
                          contains: dict = None) -> NodeMixin:
+        """[Determines if group is incomplete as defined by contains, returns the excluded
+            groups from the tree. Original tree is modified in place]
+
+        Args:
+            group (str): [Group to determine completeness, valid groups are Patient, FrameOfRef,
+                Study, Series]. Defaults to Patient.
+            exact (bool, optional): [Group must contain extactly what is specified in contains,
+                otherwise the group can contain more than contains and be valid]. Defaults to False.
+            contains (dict, optional): [A dictionary with keys of the group type and the
+                corresponding features. For example:
+                        contains = {'Modality': ['CT', 'MR', 'MR', 'RTSTRUCT']}
+                would mean with exact=True, the group must contain exactly 1 CT, 2 MR and
+                1 RTSTRUCT. With exact=False, the group could contain any number of CT, MR,
+                RTSTRUCT as long as at least one of each file type is present. If contaius is
+                not specified, the filter_by parameter of the parent group will be used, as
+                defined at group creation. If that parameter is None, an AttributeError
+                will be raised]. Defaults to None.
+
+        Returns:
+            NodeMixin: [Tree of the excluded groups from the original tree]
+
+        Raises:
+            AttributeError: [Raised if both self.filter_by and contains are None]
+        """
         # fliter_by will default to the original grouping, if specified, otherwise will warn
         if self.filter_by is None and contains is None:
             raise AttributeError('No <tree>.filter_by or specified filter_by')
 
         incomplete_tree = copy(self)
-        incomplete_tree.name += '_excluded'
 
         if group == 'Patient':
             for patient in self.iter_patients():
