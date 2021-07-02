@@ -1168,9 +1168,8 @@ class FrameOfRef(GroupUtils):
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.decon = Deconstruction(tree=self)
-        if self.filter_by:
-            structs = self.filter_by['StructName']
-            self._reconstruct = Reconstruction(filter_structs=structs)
+        if 'StructName' in self.filter_by:
+            self._reconstruct = Reconstruction(filter_structs=self.filter_by['StructName'])
         else:
             self._reconstruct = Reconstruction()
 
@@ -1267,9 +1266,10 @@ class Modality(GroupUtils):
                 data.update({key: [item]})
 
     def _filter_check(self, dicomfile: 'DicomFile') -> bool:
-        if 'Modality' in self.filter_by:
-            if dicomfile.Modality not in self.filter_by['Modality']:
-                return False
+        if self.filter_by is not None:
+            if 'Modality' in self.filter_by:
+                if dicomfile.Modality not in self.filter_by['Modality']:
+                    return False
         return True
 
     def recon(self):

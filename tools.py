@@ -478,6 +478,10 @@ class Crop(ImgHandler):
         else:
             this_centroid = np.array(img.dims.shape) // 2
 
+        if this_centroid is None:
+            utils.colorwarn(f'Cannot crop {img.name}, no centroid')
+            return img
+
         for i, (point, size) in enumerate(zip(this_centroid, self.crop_size)):
             low = max(0, point - size // 2)
             high = low + size
@@ -568,8 +572,9 @@ def compute_centroids(tree: NodeMixin, structure: str = None,
             P.shutdown()
 
         for name, centroid in points:
-            if centroid is not None:
-                centroids.update({name: centroid})
+            if centroid is None:
+                utils.colorwarn(f'Frame Of Reference {name} has no centroid')
+            centroids.update({name: centroid})
 
     return centroids
 
