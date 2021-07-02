@@ -230,9 +230,15 @@ class Reconstruction:
                     name = contour.ROIName.lower()
                     valid, name = self._struct_filter_check(name)
                     if valid:
-                        contour_data = ds.ROIContourSequence[index].ContourSequence
-                        built = np.array(self._build_contour(contour_data), dtype='bool')
-                        structs.update({name: built})
+                        try:
+                            contour_data = ds.ROIContourSequence[index].ContourSequence
+                        except AttributeError:
+                            utils.colorwarn(f'Contour {name} for {struct} is emtpy')
+                            built = None
+                        else:
+                            built = np.array(self._build_contour(contour_data), dtype='bool')
+                        finally:
+                            structs.update({name: built})
 
             struct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             struct_set.add_structs(structs)

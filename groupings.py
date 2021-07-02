@@ -1168,7 +1168,7 @@ class FrameOfRef(GroupUtils):
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
         self.decon = Deconstruction(tree=self)
-        if 'StructName' in self.filter_by:
+        if self.filter_by is not None and 'StructName' in self.filter_by:
             self._reconstruct = Reconstruction(filter_structs=self.filter_by['StructName'])
         else:
             self._reconstruct = Reconstruction()
