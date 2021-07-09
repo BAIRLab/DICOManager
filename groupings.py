@@ -463,7 +463,7 @@ class GroupUtils(NodeMixin):
         Returns:
             [bool]: [True if tree contains volumes]
         """
-        return bool(next(self.iter_volumes(), False))  # iter_volume_data
+        return bool(next(self.iter_volume_data(), False))  # iter_volume_data
 
     def iter_patients(self) -> object:
         def filterpatient(node):
@@ -529,36 +529,27 @@ class GroupUtils(NodeMixin):
             if mod.dicoms_data:
                 yield mod.dicoms_data
 
-    def iter_volumes(self, flat: bool = False) -> dict:
+    def iter_volume_data(self) -> dict:
         """[Iterates over the reconstructed volumes]
 
-        Args:
-            flat (bool, optional): [Returns type ReconstructedVolume if True, dict
-                of volumes if False]. Defaults to False.
-
         Returns:
-            dict: [dict of volume data from each modality]
+            dict: [dict of volume data for each modality]
 
         Yields:
-            Iterator[dict]: [returns dict of ReconstructedVolume]
+            Iterator[dict]: [returns dict of ReconstructedVolume or ReconstructedFile]
         """
-        for mod in self.iter_modalities():
-            if mod.volumes_data:
-                if flat:
-                    for vols in mod.volumes_data.values():
-                        for vol in vols:
-                            yield vol
-                else:
-                    yield mod.volumes_data
-
-    def iter_volume_data(self) -> dict:
         for mod in self.iter_modalities():
             if mod.volumes_data:
                 yield mod.volumes_data
 
-    def iter_volumes2(self) -> Union['ReconstructedVolume', 'ReconstructedFile']:
-        for mod in self.iter_modalities():
-            for vols in mod.volumes_data.values():
+    def iter_volumes(self) -> Union['ReconstructedVolume', 'ReconstructedFile']:
+        """[Iterates over each individual volume in a cohort]
+
+        Yields:
+            Union[ReconstructedVolume, ReconstructedFile]: [Returns each volume file]
+        """
+        for vol_data in self.iter_volume_data():
+            for vols in vol_data.values():
                 for vol in vols:
                     yield vol
 
@@ -576,7 +567,7 @@ class GroupUtils(NodeMixin):
         """
         for frame in self.iter_frames():
             vols = {}
-            for vol in frame.iter_volumes():  # iter_volume_data
+            for vol in frame.iter_volume_data():
                 vols.update(vol)
             yield vols
 
@@ -650,7 +641,7 @@ class GroupUtils(NodeMixin):
     def volumes_to_pointers(self) -> None:
         """[Converts all volumes to pointers]
         """
-        for vol in self.iter_volumes(flat=True):  # iter_volumes
+        for vol in self.iter_volumes():
             if type(vol) is ReconstructedVolume:
                 vol.convert_to_pointer()
 
@@ -660,7 +651,7 @@ class GroupUtils(NodeMixin):
         Notes:
             This may require a large amount of memory
         """
-        for vol in self.iter_volumes(flat=True):  # iter_volumes
+        for vol in self.iter_volumes():
             if type(vol) is ReconstructedFile:
                 vol.load_array()
 
@@ -750,9 +741,9 @@ class GroupUtils(NodeMixin):
             path = self.writepath
 
         if mod is None:
-            it = self.iter_volumes()  # iter_volume_data
+            it = self.iter_volume_data()
         else:
-            it = mod.iter_volumes()   # iter_volume_data
+            it = mod.iter_volume_data()
 
         for volume in it:
             for name, reconfiles in volume.items():
