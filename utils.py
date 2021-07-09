@@ -12,6 +12,7 @@ from anytree import NodeMixin
 from anytree.iterators.levelorderiter import LevelOrderIter
 from datetime import datetime
 from pathlib import Path
+from skimage import measure
 from dataclasses import dataclass
 from copy import copy
 from concurrent.futures import ProcessPoolExecutor as ProcessPool
@@ -579,7 +580,55 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
     return primary
 
 
-def decendant_types(group):
+def decendant_types(group: NodeMixin) -> list:
+    """[Declare the decendant types for a group, could
+        also use group.decendant]
+
+    Args:
+        group (NodeMixin): [The group to determine decendants]
+
+    Returns:
+        list: [List of decendant types]
+    """
     heiarchy = ['Cohort', 'Patient', 'FrameOfRef', 'Study', 'Series', 'Modality']
     index = heiarchy.index(group)
     return heiarchy[index:]
+
+
+def structure_voxel_count(tree: NodeMixin, structure: str) -> dict:
+    """[The count of voxels in each occurance of a structure]
+
+    Args:
+        tree (NodeMixin): [The tree to iterate through]
+        structure (str): [String corresponding to structure name]
+
+    Returns:
+        dict: [Dict of SeriesInstanceUID and counts]
+    """
+    it = tree.iter_struct_volume_files()
+    counts = {}
+    for volfile in it:
+        if volfile.Modality == 'RTSTRUCT':
+            volfile.load_array()
+            for name, volume in volfile.volumes.items():
+                if name == structure:
+                    counts.update({volfile.name: np.sum(volume)})
+            volfile.convert_to_pointer()
+    return counts
+
+
+def clean_up(arr: np.ndarray) -> np.ndarray:
+    """[clean an array by removing any discontinuities]
+
+    Args:
+        arr (np.ndarray): [boolean array to be cleaned]
+
+    Returns:
+        np.ndarray: [cleaned boolean array]
+    """
+    encoded, n_labels = measure.label(arr, connectivity=3, return_num=True)
+    if n_labels >= 2:
+        value, count = np.unique(encoded, return_counts=True)
+        encoded[encoded != value[np.argmax(count[1:]) + 1]] = 0
+        arr = arr * encoded
+    return np.array(arr, dtype='bool')

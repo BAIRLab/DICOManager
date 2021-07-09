@@ -78,6 +78,18 @@ class ImgHandler:
 
 
 class WindowLevel(ImgHandler):
+    """[Applies window and level to the CT image volume]
+
+    Args:
+        window (int): [Window width]
+        level (int): [Level value]
+
+    Notes:
+        Default reconstruction of the images yields volumes with
+            values of HU. Window and level values should correspond to
+            HU unless normalization / standardization has been previously
+            applied.
+    """
     def __init__(self, window, level):
         self.window = window
         self.level = level
@@ -427,8 +439,7 @@ class Resample(ImgHandler):
 
 
 class Crop(ImgHandler):
-    def __init__(self, crop_size: list, centroid: list = None,
-                 offset: list = None, centroids: list = None):
+    def __init__(self, crop_size: list, centroid: list = None, centroids: list = None):
         """[Cropping function for image and rtstruct volumes]
 
         Args:
@@ -437,8 +448,6 @@ class Crop(ImgHandler):
                 in voxels]. Defaults to None.
             structure (str, optional): [A str to declare a structure name from
                 which the structure center-of-mass defines the centroid]. Defaults to None.
-            offset (list, optional): [An N length list of ints representing the
-                offset from the centroid]. Defaults to None.
             custom_centroid (object, optional): [A function used to compute the
                 centroid which takes ReconstructedVolume and returns a list
                 of ints with dimensions equal to the image volume dimensions]. Defaults to None.
@@ -446,7 +455,6 @@ class Crop(ImgHandler):
         self.crop_size = crop_size
         self.centroid = centroid
         self.centroids = centroids
-        self.offset = offset
         self._centroids = {}
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
@@ -516,63 +524,88 @@ class Crop(ImgHandler):
         return not all(passes)
 
 
-def compute_centroids(tree: NodeMixin, structure: str = None,
-                      method: object = None, nthreads: int = None) -> dict:
+def calculate_centroids(tree: NodeMixin, modalities: list = None,
+                        structures: list = None, method: object = None,
+                        struct_filter: object = None, nthreads: int = None,
+                        volume_filter: object = None, offset_fn: object = None) -> dict:
     """[Multithreaded computation of the centroid for each frame of reference]
 
     Args:
         tree (NodeMixin): [Tree to iterate through]
-        structure (str, optional): [Structure name to use for center of mass]. Defaults to None.
-        method (object, optional): [Method used to calculate centeroid]. Defaults to center of mass.
-        nthreads (int, optional): [Number of threads to use, with higher thread
-            counts using greater system memory]. Defaults to 1/2 CPU cores.
+        modalities (list, optional): [Structure name to use for centroid]. Defaults to None.
+        structures (list, optional): [List of str to calculate the centroid]. Defaults to None.
+        method (object, optional): [Function to calculate centroid. Takes an array, returns
+            a list of N items corresponding to the centroid in each axis]. Defaults to None.
+        struct_filter (object, optional): [A custom filtering function to pick structures, this is
+            overriden if the paremeter structures is also specified. Function should accept a
+            structure name and return a boolean for calculation of centroid.]. Defaults to None.
+        volume_filter (object, optional): [A custom filtering function to pick volumes, this is
+            overriden if the parameter structures is also specified. Function should accept a
+            ReconstructedVolume object and return a boolean for calculation of
+            centroid.]. Defaults to None.
+        nthreads (int, optional): [Number of threads to use for the computation. Higher
+            threads may run faster with higher memroy usage.]. Defaults to CPU count // 2.
+        offset_fn (object, optional): [A function to offset the centroid. Should accept a the
+            centroid and a ReconstructedVolume object and return a centroid of
+            equivalent dimensions.]. Defaults to None.
 
     Returns:
         dict: [Keyed to Frame Of Reference UID with centroid voxel location as value]
     """
-    def name_check(name):
-        """[Inner function to check name ]
-        """
-        if type(structure) is dict:
-            for key, values in structure.items():
-                if name == key or name in values:
-                    return True
-        return name in structure
+    def name_check(structures: list) -> object:
+        def fn(name):
+            if structures is None:
+                return True
+            if type(structures) is dict:
+                for key, values in structures.items():
+                    if name == key or name in values:
+                        return True
+            return name in structures
+        return fn
 
-    def compute_com(frame):
-        """[Inner function to compute center of mass]
-        """
-        it = frame.iter_struct_volume_files()
-        for volfile in it:
-            volfile.load_array()
-            for name, volume in volfile.volumes.items():
-                if name_check(name):
-                    CoM = np.array(np.round(center_of_mass(volume)), dtype=np.int)
-                    volfile.convert_to_pointer()  # TODO: Check the implementation on save=False
-                    return (frame.name, CoM)
-        return (frame.name, None)
+    def only_modality(modalities: list) -> object:
+        def fn(volfile):
+            return volfile.header['Modality'] in modalities
+        return fn
 
-    if type(structure) is dict or type(structure) is list:
-        pass
-    elif type(structure) is str:
-        structure = [structure]
-    else:
-        raise TypeError('Structure must be str, list or dict')
+    if modalities is not None:
+        if type(modalities) is str:
+            modalities = [modalities]
+        volume_filter = only_modality(modalities)
+    elif modalities is None and structures is not None:
+        modalities = ['RSTRUCT']
 
-    centroids = {}
-    if method is not None:
-        for frame in tree.iter_frames():
-            print(type(frame))
-            centroids.update({frame.name: method(frame)})
-        return centroids
-    elif structure is None:
-        raise TypeError('Must specify structure name or dict with method center_of_mass')
+    if structures is not None:
+        if type(structures) is str:
+            structures = [structures]
+        struct_filter = name_check(structures)
+
+    def method_wrapper(method, offset_fn=None):
+        def fn(frame):
+            for volfile in frame.iter_volumes():
+                if volume_filter is None or volume_filter(volfile):
+                    volfile.load_array()
+                    for name, volume in volfile.volumes.items():
+                        if struct_filter is None or struct_filter(name):
+                            CoM = np.array(np.round(method(volume)), dtype=np.int)
+                            if offset_fn is not None:
+                                CoM = offset_fn(CoM, volfile)
+                            volfile.convert_to_pointer()
+                            return (frame.name, CoM)
+                    volfile.convert_to_pointer()
+            return (frame.name, None)
+        return fn
+
+    if method is None:
+        raise TypeError('Must specify method to compute centroids')
     else:
         if not nthreads:
             nthreads = multiprocessing.cpu_count() // 2
 
+        centroids = {}
+        compute_fn = method_wrapper(method, offset_fn)
         with ThreadPool(max_workers=nthreads) as P:
-            points = list(P.map(compute_com, tree.iter_frames()))
+            points = list(P.map(compute_fn, tree.iter_frames()))
             P.shutdown()
 
         for name, centroid in points:
