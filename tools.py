@@ -4,7 +4,7 @@ import multiprocessing
 import numpy as np
 from anytree import NodeMixin
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
-from scipy.ndimage import center_of_mass, zoom
+from scipy.ndimage import zoom
 from typing import Union
 from . import utils
 from .groupings import ReconstructedVolume, ReconstructedFile, FrameOfRef
@@ -15,24 +15,6 @@ ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
 # Tools are used to process reconstructed arrays
 # DicomUtils are for DICOM reconstruction utilities
 # Should probably unnest from the class and move to a seperate file
-
-
-def dose_max_points(dose_array: np.ndarray,
-                    dose_coords: np.ndarray = None) -> np.ndarray:
-    """[Calculates the dose maximum point in an array, returns index or coordinates]
-
-    Args:
-        dose_array (np.ndarray): [A reconstructed dose array]
-        dose_coords (np.ndarray, optional): [Associated patient coordinates]. Defaults to None.
-
-    Returns:
-        np.ndarray: [The dose max index, or patient coordinates, if given]
-    """
-    index = np.unravel_index(np.argmax(dose_array), dose_array.shape)
-
-    if dose_coords:
-        return dose_coords[index]
-    return index
 
 
 class ImgHandler:
@@ -439,18 +421,16 @@ class Resample(ImgHandler):
 
 
 class Crop(ImgHandler):
-    def __init__(self, crop_size: list, centroid: list = None, centroids: list = None):
+    def __init__(self, crop_size: list, centroid: list = None, centroids: dict = None):
         """[Cropping function for image and rtstruct volumes]
 
         Args:
             crop_size (list): [N length list with int for each volume dimension]
             centroid (list, optional): [A centroid to crop around, specified
                 in voxels]. Defaults to None.
-            structure (str, optional): [A str to declare a structure name from
-                which the structure center-of-mass defines the centroid]. Defaults to None.
-            custom_centroid (object, optional): [A function used to compute the
-                centroid which takes ReconstructedVolume and returns a list
-                of ints with dimensions equal to the image volume dimensions]. Defaults to None.
+            centroids (dict, optional): [A dictionary with FrameOfReferenceUID as key
+                and the corresponding voxel centroid location as value. Overridden by a specified
+                centroid value]. Defaults to None.
         """
         self.crop_size = crop_size
         self.centroid = centroid
@@ -524,18 +504,18 @@ class Crop(ImgHandler):
         return not all(passes)
 
 
-def calculate_centroids(tree: NodeMixin, modalities: list = None,
-                        structures: list = None, method: object = None,
-                        struct_filter: object = None, nthreads: int = None,
-                        volume_filter: object = None, offset_fn: object = None) -> dict:
+def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None,
+                        structures: list = None, struct_filter: object = None,
+                        volume_filter: object = None, nthreads: int = None,
+                        offset_fn: object = None) -> dict:
     """[Multithreaded computation of the centroid for each frame of reference]
 
     Args:
         tree (NodeMixin): [Tree to iterate through]
+        method (object): [Function to calculate centroid. Takes an array, returns
+            a list of N items corresponding to the centroid in each axis].
         modalities (list, optional): [Structure name to use for centroid]. Defaults to None.
         structures (list, optional): [List of str to calculate the centroid]. Defaults to None.
-        method (object, optional): [Function to calculate centroid. Takes an array, returns
-            a list of N items corresponding to the centroid in each axis]. Defaults to None.
         struct_filter (object, optional): [A custom filtering function to pick structures, this is
             overriden if the paremeter structures is also specified. Function should accept a
             structure name and return a boolean for calculation of centroid.]. Defaults to None.

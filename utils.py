@@ -632,3 +632,21 @@ def clean_up(arr: np.ndarray) -> np.ndarray:
         encoded[encoded != value[np.argmax(count[1:]) + 1]] = 0
         arr = arr * encoded
     return np.array(arr, dtype='bool')
+
+
+def dose_max_points(dose_array: np.ndarray,
+                    dose_coords: np.ndarray = None) -> np.ndarray:
+    """[Calculates the dose maximum point in an array, returns index or coordinates]
+
+    Args:
+        dose_array (np.ndarray): [A reconstructed dose array]
+        dose_coords (np.ndarray, optional): [Associated patient coordinates]. Defaults to None.
+
+    Returns:
+        np.ndarray: [The dose max index, or patient coordinates, if given]
+    """
+    index = np.unravel_index(np.argmax(dose_array), dose_array.shape)
+
+    if dose_coords:
+        return dose_coords[index]
+    return index

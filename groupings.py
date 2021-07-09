@@ -1053,6 +1053,10 @@ class ReconstructedVolume(GroupUtils):
     def is_struct(self):
         return self.Modality == 'RTSTRUCT'
 
+    def load_array(self):
+        # Included to prevent unnecessary errors
+        pass
+
     def export(self, include_augmentations: bool = True, include_dims: bool = True,
                include_header: bool = True, include_datetime: bool = True) -> dict:
         """[Export the ReconstructedVolume array]
@@ -1176,6 +1180,10 @@ class ReconstructedFile(GroupUtils):
             self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
         for name, value in self.populate['header'].items():
             self[name] = value
+
+    def convert_to_pointer(self):
+        # Included to prevent unnecessary errors
+        pass
 
     def remove_parent_data(self) -> None:
         if self._parent.has_dicoms():
