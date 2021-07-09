@@ -277,7 +277,9 @@ class Reconstruction:
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept
-                fill_array = np.array(fill_array * slope + intercept, dtype='float32')
+                hu_array = np.array(fill_array * slope + intercept, dtype='float32')
+                hu_array[hu_array < -1000] = -1000
+                fill_array = hu_array
 
             ct_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
             ct_set.add_vol(ds.SOPInstanceUID, fill_array)
