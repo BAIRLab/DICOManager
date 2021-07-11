@@ -345,6 +345,7 @@ class GroupUtils(NodeMixin):
             child (NodeMixin): [Node to integrate into tree]
         """
         if self._child_type is type(child):  # Child is directly adoptable
+            print('auto adopting')
             child.parent = self
         else:
             current = self
@@ -352,6 +353,9 @@ class GroupUtils(NodeMixin):
             for a in child.ancestors[1:]:
                 # find matching ancestor
                 previous = current
+                if current is None:
+                    break
+
                 try:
                     current = anytree.search.findall(current, filter_=lambda x: x.name == a.name)[-1]
                 except Exception:
@@ -693,7 +697,7 @@ class GroupUtils(NodeMixin):
             frame.recon(in_memory=True)
 
     def recon(self, in_memory: bool = False, parallelize: bool = True,
-              path: str = None, *args, **kwargs) -> None:
+              path: str = None, filter_by: dict = None, *args, **kwargs) -> None:
         """[Reconstruction of a patient or cohort]
 
         Args:
@@ -708,6 +712,18 @@ class GroupUtils(NodeMixin):
         """
         if path:
             self.writepath = path
+
+        if filter_by is not None:
+            if type(filter_by) is list:
+                filter_by = {'StructName': filter_by}
+            elif 'StructName' not in filter_by:
+                raise TypeError('Either a list, or dict with key \'StructName\' must be given')
+
+            if type(self) is FrameOfRef:
+                self.add_name_filter(names=filter_by['StructName'])
+            else:
+                for frame in self.iter_frames():
+                    frame.add_name_filter(names=filter_by['StructName'])
 
         if in_memory and not parallelize:
             self._recon_to_memory()
@@ -846,7 +862,7 @@ class GroupUtils(NodeMixin):
         return not all(passes_dtype)
 
     def pull_incompletes(self, group: str = 'Patient', exact: bool = False,
-                         contains: dict = None) -> NodeMixin:
+                         contains: dict = None, clean: bool = False) -> NodeMixin:
         """[Determines if group is incomplete as defined by contains, returns the excluded
             groups from the tree. Original tree is modified in place]
 
@@ -898,7 +914,31 @@ class GroupUtils(NodeMixin):
             message = f'Group level must be specified as {types} to check for completeness'
             raise AttributeError(message)
 
+        if clean:
+            self.remove_emtpy_branches()
+
         return incomplete_tree
+
+    def remove_empty_branches(self, prune_modalities: bool = False) -> None:
+        """[Removes any empty branches from a tree. An emtpy branch is defined
+            as a branch with no children. By default, modalities are excluded.]
+
+        Args:
+            prune_modalities (bool, optional): [If specified as True, modalities
+                with no dicoms and no volumes will be pruned as well.]. Defaults to False.
+        """
+        for child in self.children:
+            if type(child) is Modality:
+                if prune_modalities:
+                    if not child.dicoms_data and not child.volumes_data:
+                        self.prune(child.name)
+                else:
+                    break
+            elif len(child.children) == 0:
+                self.prune(child.name)
+            else:
+                print(child)
+                child.remove_empty_branches()
 
 
 class ReconstructedVolume(GroupUtils):
@@ -1332,6 +1372,9 @@ class FrameOfRef(GroupUtils):
         self._child_type = Study
         self._organize_by = 'StudyUID'
         self._digest()
+
+    def add_name_filter(self, names):
+        self._reconstruct = Reconstruction(filter_structs=names)
 
     def recon(self, in_memory: bool = False, path: str = None):
         return self._reconstruct(self, in_memory=in_memory, path=path)
