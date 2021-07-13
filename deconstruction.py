@@ -97,6 +97,12 @@ class RTStructConstructor:
         In-line references follow the format of Part (P) and Chapter (C) as P.#.C.#
         Common names references are provided with the byte location (XXXX, XXXX),
             and therein referred to with the byte locations
+        The prefix '1.2.826.0.1.3680043.10.771' is a unqiuely given subset obtained from
+            https://www.medicalconnections.co.uk/Free_UID
+            As per the use agreements:
+                1. Users of this software are not licensed to duplicate
+                   subordinate prefixes
+                2. Any sub-delegates of this prefix must obtain prior approval
         """
         # Read the ct to build the header from
         ct_dcm = pydicom.dcmread(self.ct_series[0], stop_before_pixels=True)
@@ -106,7 +112,9 @@ class RTStructConstructor:
 
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-        instance_uid = generate_instance_uid()
+        uid_prefix = '1.2.826.0.1.3680043.10.771'
+        sop_instance_uid = pydicom.uid.generate_uid(prefix=uid_prefix)
+        series_instance_uid = pydicom.uid.generate_uid(prefix=uid_prefix)
 
         # P.3.C.7.1.1 Patient Module
         if hasattr(ct_dcm, 'PatientName'):
@@ -161,7 +169,7 @@ class RTStructConstructor:
 
         # P.3.C.8.8.1 RT Series Module
         rt_dcm.Modality = 'RTSTRUCT'
-        rt_dcm.SeriesInstanceUID = instance_uid
+        rt_dcm.SeriesInstanceUID = series_instance_uid
 
         if hasattr(ct_dcm, 'SeriesNumber'):
             rt_dcm.SeriesNumber = ct_dcm.SeriesNumber
@@ -215,7 +223,7 @@ class RTStructConstructor:
 
         # P.3.C.12.1 SOP Common Module Attributes
         rt_dcm.SOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
-        rt_dcm.SOPInstanceUID = instance_uid
+        rt_dcm.SOPInstanceUID = sop_instance_uid
         rt_dcm.InstanceCreationDate = date
         rt_dcm.InstanceCreationTime = time
 
@@ -225,7 +233,7 @@ class RTStructConstructor:
         file_meta.FileMetaInformationVersion = b'\x00\x01'
         file_meta.TransferSyntaxUID = pydicom.uid.ImplicitVRLittleEndian
         file_meta.MediaStorageSOPClassUID = pydicom.uid.UID('1.2.840.10008.5.1.4.1.1.481.3')
-        file_meta.MediaStorageSOPInstanceUID = instance_uid
+        file_meta.MediaStorageSOPInstanceUID = sop_instance_uid
         file_meta.ImplementationClassUID = pydicom.uid.UID('1.2.276.0.7230010.3.0.3.6.2')
         file_meta.ImplementationVersionName = 'OFFIS_DCMTK_362'
         file_meta.SourceApplicationEntityTitle = 'RO_AE_MIM'
@@ -277,7 +285,9 @@ class RTStructConstructor:
 
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-        instance_uid = generate_instance_uid()
+        uid_prefix = '1.2.826.0.1.3680043.10.771'
+        sop_instance_uid = pydicom.uid.generate_uid(prefix=uid_prefix)
+        series_instance_uid = pydicom.uid.generate_uid(prefix=uid_prefix)
 
         # P.3.C.7.5.1 General Equipment Module
         self.new_rt.Manufacturer = 'Beaumont Health'
@@ -286,7 +296,7 @@ class RTStructConstructor:
         self.new_rt.SoftwareVersions = ['0.1.0']
 
         # P.3.C.8.8.1 RT Series Module
-        self.new_rt.SeriesInstanceUID = instance_uid
+        self.new_rt.SeriesInstanceUID = series_instance_uid
         self.new_rt.SeriesDate = date
         self.new_rt.SeriesTime = time
 
@@ -297,12 +307,12 @@ class RTStructConstructor:
         self.new_rt.StructureSetTime = time
 
         # P.3.C.12.1 SOP Common Module Attributes
-        self.new_rt.SOPInstanceUID = instance_uid
+        self.new_rt.SOPInstanceUID = sop_instance_uid
         self.new_rt.InstanceCreationDate = date
         self.new_rt.InstanceCreationTime = time
 
         # P.10.C.7.1 DICOM File Meta Information
-        self.new_rt.file_meta.MediaStorageSOPInstanceUID = instance_uid
+        self.new_rt.file_meta.MediaStorageSOPInstanceUID = sop_instance_uid
 
     def append_masks(self, masks, roi_names=None):
         """
@@ -1193,43 +1203,3 @@ def key_list_creator(key_list: list, *args) -> object:
         return key_list.index(*args)
 
     return new_key
-
-
-def generate_instance_uid() -> str:
-    """
-    Function
-    ----------
-    Creates a randomly generated, MIM formatted instance UID string
-
-    Parameters
-    ----------
-    None
-
-    Returns
-    ----------
-    instance_uid : string
-        An instance UID string which fits the format for MIM generated RTSTRUCTS
-
-    Notes
-    ----------
-    The prefix of '2.16.840.1.' is MIM standard, the remainder is a
-        randomly generated hash value
-
-    References
-    ----------
-    Based on pydicom.uid.generate_uid() and documentation from MIM Software Inc.
-    https://pydicom.github.io/pydicom/dev/reference/generated/pydicom.uid.generate_uid.html
-    """
-    entropy_srcs = [
-        str(uuid.uuid1()),  # 128-bit from MAC/time/randomness
-        str(os.getpid()),  # Current process ID
-        hex(random.getrandbits(64))  # 64 bits randomness
-    ]
-
-    # Create UTF-8 hash value
-    hash_val = hashlib.sha512(''.join(entropy_srcs).encode('utf-8'))
-    hv = str(int(hash_val.hexdigest(), 16))
-
-    # Format all the SOP Instance UID stops properly
-    terms = hv[:6], hv[6], hv[7:15], hv[15:26], hv[26:35], hv[35:38], hv[38:41]
-    return '2.16.840.1.' + '.'.join(terms)
