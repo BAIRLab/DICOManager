@@ -1,15 +1,28 @@
 # DICOM Pre-processing Library
 
-Rewriting DICOManager to work without write-access. Designed to build a file tree and reconstruct patients entirely with a python package.
+## Installation
+For the required packages to use this toolkit, please refer to requirements.txt. These can be batch installed with pip using `pip install -r requirements.txt`. Python version >= 3.8 is recommended for the local environmant.
 
-See tutorial.ipynb for a notebook tutorial on functionality and example.py for an example reconstruction function.
+## Overview
+A DICOM management toolkit designed around the construction and operation upon DICOM file trees. File groupings can be created using any of the grouping classes. The heirarchy used in this library is:
 
-Reference branch v0.1 to see the prior version of DICOManager with file_sorting and reconstruction functions.
+1. Cohort
+2. PatientID
+3. FrameOfReferenceUID
+4. StudyInstanceUID
+5. SeriesInstanceUID
+6. Modality (contains individual dicom and reconstructed files)
 
-Remaining tasks:
+## Resources
+Reconstruction operations occur at the FrameOfReference level using the same coordiante system to reconstruct all files within the frame of reference. By default the library performs most operations using a multithreaded workflow with a bais towards storing data on disk. Function calls can be modified to store reconstructed volumes in memory if read-write access is limited on the system. For additional explination of functions and tools, please refer to tutorial.ipynb and an example workflow, please refer to example.py. The example workflow can be used via the call `python -m DICOManager.example`.
+
+Note: This is currently a work in progress. Any isses encountered please submit an issue or pull request.
+
+## Remaining Tasks
 * Support for data generators for pytorch / tensorflow
 * Reading saved directory trees without re-sorting
+* Checking loaded tree for validitity
 * Updating deconstruction for new data structures
-* Saving as either .npy or NIFTI format
-* Improving documentation
+* Saving as either .npy or NIFTI format or x-array
+* Improving documentation and creation of wiki
 * Formatting for pip install

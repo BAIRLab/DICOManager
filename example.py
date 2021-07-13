@@ -3,14 +3,51 @@ import sys
 from glob import glob
 from . import tools
 from . import utils
-from .groupings import Cohort
+from .groupings import Cohort, ReconstructedVolume
 import numpy as np
 from scipy.ndimage import center_of_mass
-import optparse
+
+
+"""
+Overview
+---------
+A full image processing pipeline to take the images form raw
+DICOM files to a series of read-to-train numpy arrays which
+can be given to a data generator. (Note: future work will be
+able to yield a data generator function at the end of this example)
+
+Steps
+---------
+The purpose of this example is to load DICOM files from MIMExport/,
+sort them into a tree and save them to dicoms/.
+
+Then to remove any incomplete studies (those without CT and RTSTRUCT)
+and to reconstruct only the complete leaves.
+
+Then the reconstructed volumes are interpolated, resampled to 512x512
+in the axial dimensions and a maximum of 2.39mm slice thickness.
+
+A custom centroid is then computed using the functions defined below.
+
+From that centroid the images are normalized and then cropped to 200x200x35
+voxels. The tool application function changes the already saved volumes,
+therefore saving is not required again.
+"""
 
 
 # Custom functions for center of mass calculation
-def surface_centroid(img):
+# User can implement these themselves or use scipy.ndimage.center_of_mass
+# It entirely depends on their specific worfklow
+def surface_centroid(img: np.ndarray) -> list:
+    """[Computes a centroid based on the bone HU range. XY-axis is center of mass
+        while the Z-axis is the top of the skull]
+
+    Args:
+        img ([type]): [A 3D-CT encoded as a 32-bit numpy array of HU values]
+
+    Returns:
+        list: [The center of mass values]
+    """
     losurface = img > 650  # HU > 500 to get bone and metal
     hisurface = img < 2000  # HU < 3000 to exclude metal
     only_bones = losurface * hisurface
@@ -22,100 +59,64 @@ def surface_centroid(img):
     return np.array([xy_com[0], xy_com[1], z_top])
 
 
-def offset_centroid(offset):
-    def fn(CoM, volfile):
+def offset_centroid(offset: list) -> object:
+    """[A function used to offset the center of mass by a specified distance,
+        given in milimeters]
+
+    Args:
+        offset (list): [The offset center of mass, in mm]
+
+    Returns:
+        object: [A function which takes a center of mass and ReconstructedVolume
+            type object and returns a list of equal dimensions offset by a given
+            offset distance.]
+    """
+    def fn(CoM: list, volfile: ReconstructedVolume) -> list:
         dist_mm = np.array(offset)  # in mm
         dist_vox = np.array(np.round(dist_mm / volfile.dims.voxel_size), dtype=np.int)
         return CoM + dist_vox
     return fn
 
 
-def calc_z(x_dim, y_dim):
-    return int(round((200*200*35)/(x_dim*y_dim)))
+if __name__ == '__main__':
+    start = time.time()
+    # Glob all unsorted files
+    files = glob('/home/eporter/eporter_data/rtog_project/MIMExport/**/*.dcm', recursive=True)
 
+    # Sort files into tree of type Cohort
+    cohort = Cohort(name='RTOG_Hippocampus', files=files, include_series=False)
+    print(cohort)
 
-usage = "example -x # -y #"
-parser = optparse.OptionParser(usage)
+    # Save sorted dicom files
+    cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
 
-parser.add_option('-x', '--xaxis', action='store', dest='x_dim', help='x voxel size', default=200)
-parser.add_option('-y', '--yaxis', action='store', dest='y_dim', help='y voxel size', default=200)
-options, args = parser.parse_args()
+    # Filter to remove and MR from the tree
+    modalities = {'Modality': ['CT', 'RTSTRUCT']}   # Without exact
+    excluded = cohort.pull_incompletes(group='Study', exact=False,
+                                       contains=modalities, cleaned=True)
+    print(cohort)
 
-X_DIM = int(options.x_dim)
-Y_DIM = int(options.y_dim)
-Z_DIM = calc_z(X_DIM, Y_DIM)
+    # Reconstruct dicoms into arrays onto disk at the specified path
+    filter_rt = {'StructName': {'hippocampus': ['hippocampus'],
+                                'hippo_avoid': ['hippoavoid', 'hippo_avoid']}}
+    cohort.recon(parallelize=True, in_memory=False,
+                 path='/home/eporter/eporter_data/rtog_project/built/', filter_by=filter_rt)
+    print(cohort)
 
-'''
-# in the format of:
-filter_list = {'PatientID': [...],
-               'StudyDate': [...],
-               'SeriesDate': [...],
-               'StructName': [...]}
-'''
-# StructName of dict will rename structures in the value to the key
-filter_list = {'StructName': {'hippocampus': ['hippocampus'],
-                              'hippo_avoid': ['hippoavoid', 'hippo_avoid']},
-               'Modality': ['CT', 'RTSTRUCT']}
+    # Apply interpolation, resampling
+    toolset = [tools.Interpolate(extrapolate=True),
+               tools.Resample(dims=[512, 512, None], dz_limit=2.39)]
+    cohort.apply_tools(toolset)
 
-start = time.time()
-# Glob all unsorted files
-files = glob('/home/eporter/eporter_data/rtog_project/dicoms/*/Patient_0933-*/**/*.dcm', recursive=True)
+    # Calculate the centroids based on center of mass of hippocampus
+    centroids = tools.calculate_centroids(tree=cohort, modalities=['CT'], method=surface_centroid,
+                                          offset_fn=offset_centroid([3.61, -1.04, 93.2]))
 
-# Sort files into tree
-cohort = Cohort(name='RTOG_Hippocampus', files=files, include_series=False, filter_by=filter_list)
-print(cohort)
+    # Normalize the images and then crop the volumes
+    toolset = [tools.Normalize(),
+               tools.Crop(crop_size=[200, 200, 35], centroids=centroids)]
+    cohort.apply_tools(toolset)
 
-# Filter test 1
-#filter_list = {'Modality': ['CT', 'RTSTRUCT']}   # Without exact
-#excluded = cohort.pull_incompletes(group='FrameOfRef', exact=False, contains=filter_list)  # rename to contains
-
-# Filter test 2
-#filter_list = {'Modality': ['CT', 'RTSTRUCT', 'MR', 'MR']}  # With exact
-#excluded = cohort.pull_incompletes(group='Patient', exact=True, contains=filter_list)  # rename to contains
-
-# Save sorted dicom files
-#cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')
-
-# Reconstruct dicoms into arrays at specified path
-cohort.recon(parallelize=True, in_memory=False, path='/home/eporter/eporter_data/rtog_project/built/')
-#print(cohort)
-
-# Apply interpolation, resampling
-toolset = [tools.Interpolate(extrapolate=True),
-           tools.Resample(dims=[512, 512, None], dz_limit=2.39)]
-
-cohort.apply_tools(toolset)
-
-# Calculate the centroids based on center of mass of hippocampus
-centroids = tools.calculate_centroids(tree=cohort, modalities=['CT'], method=surface_centroid,
-                                      offset_fn=offset_centroid([3.61, -1.04, 93.2]))
-
-pre_crop = utils.structure_voxel_count(cohort, 'hippocampus')
-
-toolset = [tools.Normalize(),
-           tools.Crop(crop_size=[X_DIM, Y_DIM, Z_DIM], centroids=centroids)]
-
-# Need to:
-# - remove extra functions above
-# - integrate those into tools.py
-# - add in parser
-# - print the coverage and the parameters at end of file
-# - cue up a bunch of them with task spooler
-# - do a [100:220:5] grid search with z floating to the nearest, smaller int
-#   using z = int(round((200*200*35)/(x*y)))
-# - automate the queing process using a script
-
-cohort.apply_tools(toolset)
-post_crop = utils.structure_voxel_count(cohort, 'hippocampus')
-
-bulks = []
-for name, presum in pre_crop.items():
-    postsum = post_crop[name]
-    ratio = postsum / presum
-    bulks.append(ratio)
-
-print(f'Dimensions: [{X_DIM}, {Y_DIM}, {Z_DIM}]')
-print(f'Included hippocampus: {np.mean(bulks)} +/- {np.std(bulks)}')
-print('elapsed:', time.time() - start)
-print(len(cohort))
-sys.stdout.flush()
+    # Report elapsed computational time
+    print('elapsed:', time.time() - start)
+    sys.stdout.flush()
