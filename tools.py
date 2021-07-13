@@ -421,7 +421,8 @@ class Resample(ImgHandler):
 
 
 class Crop(ImgHandler):
-    def __init__(self, crop_size: list, centroid: list = None, centroids: dict = None):
+    def __init__(self, crop_size: list, centroid: list = None, centroids: dict = None,
+                 in_patient_coords: bool = False):
         """[Cropping function for image and rtstruct volumes]
 
         Args:
@@ -431,11 +432,30 @@ class Crop(ImgHandler):
             centroids (dict, optional): [A dictionary with FrameOfReferenceUID as key
                 and the corresponding voxel centroid location as value. Overridden by a specified
                 centroid value]. Defaults to None.
+            in_patient_coords (bool, optional): [Specifies if the provided centroids are in
+                the patient coordinate system, in mm. Default behavior is image coordinates,
+                in voxels.] Defaults to False.
         """
         self.crop_size = crop_size
         self.centroid = centroid
         self.centroids = centroids
+        self.in_patient_coords = in_patient_coords
         self._centroids = {}
+
+    def _convert_to_voxels(self, centroid_mm: np.ndarray,
+                           volfile: ReconstructedVolume) -> np.ndarray:
+        """[When given a centroid in patient coordinates (mm), convert to voxels]
+
+        Args:
+            centroid_mm (np.ndarray): [Centroid location in patient coordinates]
+            volfile (ReconstructedVolume): [Associated reconstructed volume file]
+
+        Returns:
+            np.ndarray: [Numpy array of integer voxel locations]
+        """
+        centroid_mm_diff = abs(centroid_mm - volfile.dims.origin)
+        centroid_vox = centroid_mm_diff / volfile.dims.voxel_size
+        return np.array(np.round(centroid_vox), dtype=np.int)
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         """[Crops an image volume and updates headers accordingly]
@@ -472,6 +492,9 @@ class Crop(ImgHandler):
         if this_centroid is None:
             utils.colorwarn(f'Cannot crop {img.name}, no centroid')
             return img
+
+        if self.in_patient_coords:
+            this_centroid = self._convert_to_voxels(this_centroid, img)
 
         for i, (point, size) in enumerate(zip(this_centroid, self.crop_size)):
             low = max(0, point - size // 2)
@@ -564,15 +587,22 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
         def fn(frame):
             for volfile in frame.iter_volumes():
                 if volume_filter is None or volume_filter(volfile):
-                    volfile.load_array()
+                    original_fmt = type(volfile)
+                    if original_fmt is ReconstructedFile:
+                        volfile.load_array()
+
                     for name, volume in volfile.volumes.items():
                         if struct_filter is None or struct_filter(name):
                             CoM = np.array(np.round(method(volume)), dtype=np.int)
+                            CoM = CoM * volfile.dims.voxel_size
                             if offset_fn is not None:
                                 CoM = offset_fn(CoM, volfile)
-                            volfile.convert_to_pointer()
+                            if original_fmt is ReconstructedFile:
+                                volfile.convert_to_pointer()
                             return (frame.name, CoM)
-                    volfile.convert_to_pointer()
+
+                    if original_fmt is ReconstructedFile:
+                        volfile.convert_to_pointer()
             return (frame.name, None)
         return fn
 

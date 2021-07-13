@@ -609,11 +609,14 @@ def structure_voxel_count(tree: NodeMixin, structure: str) -> dict:
     counts = {}
     for volfile in it:
         if volfile.Modality == 'RTSTRUCT':
-            volfile.load_array()
+            original_ptr = volfile.is_pointer()
+            if original_ptr:
+                volfile.load_array()
             for name, volume in volfile.volumes.items():
                 if name == structure:
                     counts.update({volfile.name: np.sum(volume)})
-            volfile.convert_to_pointer()
+            if original_ptr:
+                volfile.convert_to_pointer()
     return counts
 
 
