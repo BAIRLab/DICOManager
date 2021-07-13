@@ -345,7 +345,6 @@ class GroupUtils(NodeMixin):
             child (NodeMixin): [Node to integrate into tree]
         """
         if self._child_type is type(child):  # Child is directly adoptable
-            print('auto adopting')
             child.parent = self
         else:
             current = self
@@ -575,11 +574,28 @@ class GroupUtils(NodeMixin):
                 vols.update(vol)
             yield vols
 
+    def iter_image_volume_files(self, modality: str):
+        """[Iterates through image volume files]
+
+        Args:
+            modality (str): [Modality type to iterate through]
+
+        Yields:
+            Union[ReconstructedVolume, ReconstructedFile]: [Reconstructed volume or
+                file of specified image]
+        """
+        for mod in self.iter_modalities():
+            if mod.name == modality:
+                for volfiles in mod.volumes_data.values():
+                    for volfile in volfiles:
+                        yield volfile
+
     def iter_struct_volume_files(self):
         """[Iterates through RTSTRUCT volume files]
 
         Yields:
-            Union[ReconVolume, ReconFile]: [Reconstructed volume or file of RTSTRUCT]
+            Union[ReconstructedVolume, ReconstructedFile]: [Reconstructed volume or
+                file of RTSTRUCT]
         """
         for mod in self.iter_modalities():
             if mod.name == 'RTSTRUCT':
@@ -730,7 +746,7 @@ class GroupUtils(NodeMixin):
         elif parallelize:
             self = utils.threaded_recon(self, path=path)
             if in_memory:
-                self.pointers_to_volumes(path=path)
+                self.pointers_to_volumes()
         else:
             return self._recon_to_disk(path=path)
 
@@ -857,12 +873,14 @@ class GroupUtils(NodeMixin):
                 else:
                     passes = sorted(fields) == sorted(needed)
             else:
-                passes = set(needed) == set(fields)
+                setneeded = set(needed)
+                setfields = set(fields)
+                passes = setneeded.issubset(setfields)
             passes_dtype.append(passes)
         return not all(passes_dtype)
 
     def pull_incompletes(self, group: str = 'Patient', exact: bool = False,
-                         contains: dict = None, clean: bool = False) -> NodeMixin:
+                         contains: dict = None, cleaned: bool = False) -> NodeMixin:
         """[Determines if group is incomplete as defined by contains, returns the excluded
             groups from the tree. Original tree is modified in place]
 
@@ -880,6 +898,7 @@ class GroupUtils(NodeMixin):
                 not specified, the filter_by parameter of the parent group will be used, as
                 defined at group creation. If that parameter is None, an AttributeError
                 will be raised]. Defaults to None.
+            cleaned (bool, optional): [Applies remove_empty_branches() following splitting]
 
         Returns:
             NodeMixin: [Tree of the excluded groups from the original tree]
@@ -914,8 +933,8 @@ class GroupUtils(NodeMixin):
             message = f'Group level must be specified as {types} to check for completeness'
             raise AttributeError(message)
 
-        if clean:
-            self.remove_emtpy_branches()
+        if cleaned:
+            self.remove_empty_branches()
 
         return incomplete_tree
 
@@ -937,7 +956,6 @@ class GroupUtils(NodeMixin):
             elif len(child.children) == 0:
                 self.prune(child.name)
             else:
-                print(child)
                 child.remove_empty_branches()
 
 
@@ -1057,6 +1075,9 @@ class ReconstructedVolume(GroupUtils):
         names[0] += '_volumes'
         return '/'.join(names) + '/'
 
+    def is_pointer(self):
+        return False
+
     def remove_parent_data(self) -> None:
         if self._parent.has_dicoms():
             self._parent.clear_dicoms()
@@ -1164,6 +1185,9 @@ class ReconstructedVolume(GroupUtils):
             filepath = self._generate_filepath()
         if save_dir:
             fullpath = pathlib.Path(save_dir) / filepath
+            self._prior_save_dir = save_dir
+        elif self._prior_save_dir:
+            fullpath = pathlib.Path(self._prior_save_dir) / filepath
         else:
             fullpath = pathlib.Path.home() / filepath
 
@@ -1220,6 +1244,9 @@ class ReconstructedFile(GroupUtils):
             self.DateTime = DicomDateTime().from_dict(ds['DateTime'])
         for name, value in self.populate['header'].items():
             self[name] = value
+
+    def is_pointer(self):
+        return True
 
     def convert_to_pointer(self):
         # Included to prevent unnecessary errors
