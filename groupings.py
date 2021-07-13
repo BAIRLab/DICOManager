@@ -664,6 +664,8 @@ class GroupUtils(NodeMixin):
         for vol in self.iter_volumes():
             if type(vol) is ReconstructedVolume:
                 vol.convert_to_pointer()
+            else:
+                utils.colorwarn(f'{vol.name} already {type(vol)}')
 
     def pointers_to_volumes(self) -> None:
         """[Converts all pointers to volumes]
@@ -674,6 +676,8 @@ class GroupUtils(NodeMixin):
         for vol in self.iter_volumes():
             if type(vol) is ReconstructedFile:
                 vol.load_array()
+            else:
+                utils.colorwarn(f'{vol.name} already {type(vol)}')
 
     def _recon_to_disk(self, return_mods: bool = False, path: str = None) -> None:
         """[Reconstructs self, writes volumes to disk]

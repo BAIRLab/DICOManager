@@ -594,7 +594,6 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
                     for name, volume in volfile.volumes.items():
                         if struct_filter is None or struct_filter(name):
                             CoM = np.array(np.round(method(volume)), dtype=np.int)
-                            CoM = CoM * volfile.dims.voxel_size
                             if offset_fn is not None:
                                 CoM = offset_fn(CoM, volfile)
                             if original_fmt is ReconstructedFile:
