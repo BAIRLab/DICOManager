@@ -1,30 +1,166 @@
 import xarray as xr
 import numpy as np
+import pydicom
 
-def create_dataarray(volume, dcm):
-    x_lo, y_lo, z_lo = dcm.ImagePositionPatient
-    dx, dy, dz = [dcm.PixelSpacing, dcm.SliceThickness]
-    nx, ny, nz = [dcm.Columns, dcm.Rows, dcm.Slices]
-    x_hi = x_lo + dx*nx
-    y_hi = y_lo + dy*ny
-    z_hi = z_lo + dz*nz
+# Can either create data array with function, or feed the dcm_header and volume
+# into data array and use the backend accessor to compute those things.
+# I'm leaning towards using the create function method to save from extra baggage
+# in the xarray objects
 
-    coords = {'x_ipp': np.linspace(x_lo, x_hi, nx),
-              'y_ipp': np.linspace(y_lo, y_hi, ny),
-              'z_ipp': np.linspace(z_lo, z_hi, nz),
-              'dx': dx,
-              'dy': dy,
-              'dz': dz,
-              'columns': nx,
-              'rows': ny,
-              'slices': nz
-              }
+@dataclass
+class VolumeDimensions:
+    dicoms: list
+    origin: list = None
+    rows: int = None
+    cols: int = None
+    slices: int = None
+    dx: float = None
+    dy: float = None
+    dz: float = None
+    ipp: list = None
+    flipped: bool = False
+    multi_thick: bool = False
+    # If I want to get fancy I could make the fields below dynamic, reading from another
+    # list of fields, but that is poor form
+    PatientID: set = field(default_factory=set)
+    Modality: set = field(defualt_factory=set)
+    SOPInstanceUID: set = field(default_factory=set)
+    StudyInstanceUID: set = field(defualt_factory=set)
+    SeriesInstanceUID: set = field(defualt_factory=set)
+    FrameOfReferenceUID: set = field(defualt_factory=set)
+    SeriesDescription: set = field(defualt_factory=set)
+    StudyDescription: set = field(defualt_factory=set)
 
-    attr_fields = ['PatientID', 'StudyUID', 'SeriesUID', 'FrameOfReferenceUID',
-                   'StudyDescription', 'SeriesDescription', 'Modality', 'SOPInstanceUID']
-    attrs = {}
-    for field in attr_fields:
-        attrs.update({field: dcm.getattr(field)})
+    def __post_init__(self):
+        # TODO: INTEGRATE DATETIME
+        # TODO: ACCOUNT FOR THIS!
+        if 'RTDOSE' in self.dicoms:
+            filepath = self.dicoms['RTDOSE'][0].filepath
+            ds = pydicom.dcmread(filepath)
+            self.slices = ds.NumberOfFrames
+            self.origin = ds.ImagePositionPatient
+            self.dz = float(ds.SliceThickness)
+        else:
+            if 'CT' in self.dicoms:
+                files = self.dicoms['CT']
+            elif 'MR' in self.dicoms:
+                files = self.dicoms['MR']
+
+            ds = self._calc_n_slices(files)
+
+        self.rows = ds.Rows
+        self.cols = ds.Columns
+        self.dx, self.dy = map(float, ds.PixelSpacing)
+        self.position = ds.PatientPosition
+        self.dicoms = None
+
+    def _pull_header_info(self, dicom):
+        for field in self.__dataclass_fields__:
+            if field == 'FrameOfReferenceUID':
+                if hasattr(ds, 'FrameOfReferenceUID'):
+                    frame = ds.FrameOfReferenceUID
+                elif hasattr(ds, 'ReferencedFrameOfReferenceSequence'):
+                    ref_seq = ds.ReferencedFrameOfReferenceSequence
+                    frame = ref_seq[0].FrameOfReferenceUID
+                else:
+                    frame = None
+                self.FrameOfReferenceUID = frame
+            elif hasattr(dicom, field):
+                value = getattr(dicom, field)
+                setattr(self, field, value)
+
+    def _calculate_dz(self, zlocations):
+        zlocations.sort()
+        differences = np.zeros((len(zlocations) - 1))
+        previous = min(zlocations)
+
+        for i in range(1, len(zlocations)):
+            differences[i - 1] = round(abs(previous - zlocations[i]), 2)
+            previous = zlocations[i]
+
+        differences = list(set(differences))
+
+        if len(differences) > 1:
+            self.multi_thick = True
+        return min(differences)
+
+    def _calc_n_slices(self, files: list):
+        """[calculates the number of volume slices]
+
+        Args:
+            files ([DicomFile]): [A list of DicomFile objects]
+
+        Notes:
+            Creating the volume by the difference in slice location at high and
+            low instances ensures proper registration to rstructs, even if
+            images slices are missing. We can interpolate to the lowest
+            instance if we do not have instance 1, but we cannot extrapolate
+            if higher instances are missing
+        """
+        z0, z1 = (np.inf, -np.inf)
+        low_inst = np.inf
+        low_thickness = None
+        header_thicknesses = []
+        zlocations = []
+
+        for dcm in files:
+            ds = pydicom.dcmread(dcm.filepath, stop_before_pixels=True)
+            self._pull_header_info(ds)
+            self.ipp = ds.ImagePositionPatient
+            self.iop = ds.ImageOrientationPatient
+            header_thicknesses.append(float(ds.SliceThickness))
+            zloc = float(self.ipp[-1])
+            zlocations.append(zloc)
+
+            if zloc < z0:
+                z0 = zloc
+            if zloc > z1:
+                z1 = zloc
+
+            if hasattr(ds, 'InstanceNumber'):
+                inst = int(ds.InstanceNumber)
+                if inst < low_inst:
+                    low_inst = inst
+                    low_thickness = ds.SliceThickness
+
+        if 1 < low_inst < 5 and low_inst != np.inf:  # For extrapolation of missing slices
+            # Need to make it the slice thickness of the lowest slice
+            # in case the image has mixed thicknesses
+            z0 -= low_thickness * (low_inst - 1)
+            low_inst = 1
+
+        self.dz = self._calculate_dz(zlocations)
+        self.zlohi = (z0, z1)
+        self.origin = np.array([*self.ipp[:2], max(z0, z1)])
+        self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
+
+        return ds
+
+    def report_coords(self):
+        shape = [self.rows, self.cols, self.slices]
+        voxel_size = [self.dx, self.dy, self.dz]
+        lo = self.origin
+        hi = self.origin + voxel_size * shape
+        output = {'x_ipp': np.linspace(lo[0], hi[0], self.dx),
+                  'y_ipp': np.linspace(lo[1], hi[1], self.dy),
+                  'z_ipp': np.linspace(lo[2], hi[2], self.dz)
+                  }
+        return output
+
+    def report_attrs(self):
+        output = {}
+        for field in self.__dataclass_fields__:
+            value = getattr(self, field)
+            if type(value) is set:
+                value = list(value)
+            output.update({field: value})
+        return output
+
+
+def create_dataarray(volume, dicom_files):
+    volume_dimensions = VolumeDimensions(dicom_files)
+    attrs = volume_dimensions.report_attrs()
+    coords = volume_dimensions.report_coords()
 
     new_da = xr.DataArray(volume, coords=coords, dims=['x_ipp', 'y_ipp', 'z_ipp'])
     new_da.attrs = attrs
@@ -32,27 +168,17 @@ def create_dataarray(volume, dcm):
     return new_da
 
 
-@xr.registered_dataset_accessor("_backend")
-class Backend:
-    def __init__(self, xarray_obj):
-        self._obj = xarray_obj
-        self._files = self._obj._files
-        self._obj.slices = self._calc_n_slices()
-        self._obj.dz = self._calculate_dz()
-        del self._obj._files
-
-    def _calculate_n_slices(self):
-        return 1
-
-    def _calculate_dz(self):
-        return 1
-
-
 @xr.registered_dataset_accessor("dims")
 class ImageDims:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
-        self._obj.attrs = {'NewlyComputedAttrsGoHere': 1}
+        self._obj.attr
+
+    @property
+    def field_of_view(self):
+        shape = np.array(self.shape)
+        voxel_size = np.array(self.voxel_size)
+        return shape * voxel_size
 
     @property
     def shape(self):
