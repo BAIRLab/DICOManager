@@ -17,18 +17,18 @@ from concurrent.futures import ThreadPoolExecutor as ThreadPool
 
 
 class GroupUtils(NodeMixin):
-    """[General utilities for all groups]
+    """General utilities for all groups
 
     Args:
-        NodeMixin ([NodeMixin]): [AnyTree node mixin]
-        name (str, optional): [name of the group]. Defaults to None.
-        files (list, optional): [list of absolute paths
-            to *.dcm files]. Defaults to None.
-        parent (Node, optional): [the parent Node]. Defaults to None.
-        children (tuple, optional): [a tuple of Nodes which are the
-            children of the current Node]. Defaults to None.
-        include_series (bool, optional): [specifies if FrameOfRef points to
-            Series (True) or Modality (False)]. Defaults to False.
+        NodeMixin (NodeMixin): AnyTree node mixin
+        name (str, optional): name of the group. Defaults to None.
+        files (list, optional): list of absolute paths
+            to *.dcm files. Defaults to None.
+        parent (Node, optional): The parent Node. Defaults to None.
+        children (tuple, optional): A tuple of Nodes which are the
+            children of the current Node. Defaults to None.
+        include_series (bool, optional): Specifies if FrameOfRef points to
+            Series (True) or Modality (False). Defaults to False.
 
     Methods:
         merge (NodeMixin): merges another group into current
@@ -54,10 +54,10 @@ class GroupUtils(NodeMixin):
             self.children = children
 
     def __copy__(self) -> NodeMixin:
-        """[Creates copy of the current node, whereas deepcopy copies all desendants]
+        """Creates copy of the current node, whereas deepcopy copies all desendants
 
         Returns:
-            NodeMixin: [A copy of the current node]
+            NodeMixin: A copy of the current node
         """
         new = type(self)('')
         for key, value in self.__dict__.items():
@@ -96,7 +96,7 @@ class GroupUtils(NodeMixin):
         return sorted(items, key=lambda item: item.name)
 
     def _digest(self):
-        """[digests the file paths, building the tree]
+        """Digests the file paths, building the tree
         """
         while self.files:
             f = self.files.pop()
@@ -105,13 +105,13 @@ class GroupUtils(NodeMixin):
             self._add_file(f)
 
     def _digestfn(self, dicomfile: 'DicomFile') -> NodeMixin:
-        """[Function to digest a dicom file, sorting it into the tree]
+        """Function to digest a dicom file, sorting it into the tree
 
         Args:
-            dicomfile (DicomFile): [Dicom file to add to the tree]
+            dicomfile (DicomFile): Dicom file to add to the tree
 
         Returns:
-            NodeMixin: [Child type of the root node]
+            NodeMixin: Child type of the root node
         """
         if dicomfile.__class__ is not DicomFile:
             dicomfile = DicomFile(dicomfile)
@@ -137,14 +137,14 @@ class GroupUtils(NodeMixin):
                 return self._child_type(**child_params)
 
     def _find_leaf(self, combined: NodeMixin, modality: 'Modality') -> NodeMixin:
-        """[When merging into a unified tree, the proper leaf must be identified]
+        """When merging into a unified tree, the proper leaf must be identified
 
         Args:
-            combined (NodeMixin): [The combined or unified tree]
-            modality (Modality): [A modality to add or merge into the tree]
+            combined (NodeMixin): The combined or unified tree
+            modality (Modality): A modality to add or merge into the tree
 
         Returns:
-            NodeMixin: [The combined or unifed tree]
+            NodeMixin: The combined or unifed tree
         """
         current = combined
         previous = None
@@ -171,13 +171,13 @@ class GroupUtils(NodeMixin):
         return combined
 
     def _clean_up_children(self, children: list) -> NodeMixin:
-        """[Following multithreaded sorting, trees need to be merged into one]
+        """Following multithreaded sorting, trees need to be merged into one
 
         Args:
-            children (list): [A list of trees with reocnstructed volumes or pointers]
+            children (list): A list of trees with reocnstructed volumes or pointers
 
         Returns:
-            NodeMixin: [A unified tree]
+            NodeMixin: A unified tree
         """
         combined = self.__class__(self.name)
         for child in children:
@@ -190,7 +190,7 @@ class GroupUtils(NodeMixin):
         return combined
 
     def _multithread_digest(self) -> None:
-        """[Multithreaded tree digestion for greater IOPs and faster tree construction]
+        """Multithreaded tree digestion for greater IOPs and faster tree construction
         """
         with ProcessPool() as P:
             children = [x for x in list(P.map(self._digestfn, self.files)) if x]
@@ -204,13 +204,13 @@ class GroupUtils(NodeMixin):
         self.files = None
 
     def _filter_check(self, dicomfile: object) -> bool:
-        """[Function to identify if the node is unique or existing]
+        """Function to identify if the node is unique or existing
 
         Args:
-            dicomfile (object): [Dicom file to check uniqueness]
+            dicomfile (object): Dicom file to check uniqueness
 
         Returns:
-            bool: [Returns if the file is uniuqe, needing a new node, or not]
+            bool: Returns if the file is uniuqe, needing a new node, or not
         """
         def date_check(date, dtype):
             condition0 = str(date) in self.filter_by[dtype]
@@ -239,10 +239,10 @@ class GroupUtils(NodeMixin):
         return True
 
     def _add_file(self, dicomfile: object, volumes: bool = False) -> None:
-        """[adds a file to the file tree]
+        """Adds a file to the file tree
 
         Args:
-            dicomfile (DicomFile): [a DicomFile object]
+            dicomfile (DicomFile): A DicomFile object
         """
         if type(dicomfile) is pydicom.dataset.Dataset:
             dicomfile = DicomFile(dicomfile.SOPInstanceUID, dcm_obj=dicomfile)
@@ -288,18 +288,18 @@ class GroupUtils(NodeMixin):
         self._datename = name
 
     def merge(self, other: NodeMixin) -> None:
-        """[merges two groups]
+        """Merges two groups
 
         Args:
-            other (NodeMixin): [merged into primary group]
+            other (NodeMixin): Merged into primary group
         """
         other.parent = self.parent
 
     def steal(self, other: NodeMixin) -> None:
-        """[steals children from one parent]
+        """Steals children from one parent
 
         Args:
-            other (NodeMixin): [parent who loses children]
+            other (NodeMixin): Parent who loses children
 
         Notes:
             Porter et al. do not condone kidnapping
@@ -307,42 +307,42 @@ class GroupUtils(NodeMixin):
         self.children += other.children
 
     def append(self, others: NodeMixin) -> None:
-        """[appends children onto parent]
+        """Appends children onto parent
 
         Args:
-            others (NodeMixin): [children to be appended]
+            others (NodeMixin): Children to be appended
         """
         for other in others:
             other.parent = self
 
     def prune(self, childname: str) -> None:
-        """[prunes branch from tree]
+        """Prunes branch from tree
 
         Args:
-            childname (str): [name of branch to prune]
+            childname (str): Name of branch to prune
         """
         for child in self.children:
             if child.name in childname:
                 child.parent = None
 
     def adopt(self, child: NodeMixin) -> None:
-        """[Adopts a child from one tree to the current tree]
+        """Adopts a child from one tree to the current tree
 
         Args:
-            child (NodeMixin): [Node to adopt to tree]
+            child (NodeMixin): Node to adopt to tree
         """
         child.parent = self
 
     def abandon(self) -> None:
-        """[Parent abandons all children, alternative to prune]
+        """Parent abandons all children, alternative to prune
         """
         self._NodeMixin__children = []
 
     def integrate(self, child: NodeMixin) -> None:
-        """[Integrates a child into a tree. If the node ancestors do not exist, they are created]
+        """Integrates a child into a tree. If the node ancestors do not exist, they are created
 
         Args:
-            child (NodeMixin): [Node to integrate into tree]
+            child (NodeMixin): Node to integrate into tree
         """
         if self._child_type is type(child):  # Child is directly adoptable
             child.parent = self
@@ -370,8 +370,8 @@ class GroupUtils(NodeMixin):
                     break  # Stop iteration now that its adopted
 
     def flatten(self) -> None:
-        """[flatten results in each parent having one child, except for
-            the Modality group. Flattened with specified group as root]
+        """Flatten results in each parent having one child, except for
+            the Modality group. Flattened with specified group as root
         """
         if self.include_series:
             limit = 'Series'
@@ -388,10 +388,10 @@ class GroupUtils(NodeMixin):
                         child.parent.prune(child.name)
 
     def pop(self) -> NodeMixin:
-        """[Pops a child from the parent]
+        """Pops a child from the parent
 
         Returns:
-            NodeMixin: [Returns the first child]
+            NodeMixin: Returns the first child
 
         Notes:
             The item is not deleted, instead its parent is
@@ -413,58 +413,58 @@ class GroupUtils(NodeMixin):
         utils.save_tree(self, path, prefix)
 
     def save_dicoms(self, path: str, prefix: str = 'group') -> None:
-        """[Saves a copy of the dicom tree to a specified location,
-            orderd the same as the tree layout]
+        """Saves a copy of the dicom tree to a specified location,
+            orderd the same as the tree layout
 
         Args:
-            path (str): [absolute path to write to the file tree]
-            prefix (str, optional): [Specifies directory prefix as 'group'.
-                'date' or None]. Defaults to 'group'.
+            path (str): Absolute path to write to the file tree
+            prefix (str, optional): Specifies directory prefix as 'group'.
+                'date' or None. Defaults to 'group'.
         """
         dicoms = self.split_dicoms()
         dicoms.save_tree(path, prefix)
 
     def save_volumes(self, path: str, prefix: str = 'group') -> None:
-        """[Saves a copy of the volume tree to a specified location,
-            orderd the same as the tree layout]
+        """Saves a copy of the volume tree to a specified location,
+            orderd the same as the tree layout
 
         Args:
-            path (str): [absolute path to write to the file tree]
-            prefix (str, optional): [Specifies directory prefix as 'group'.
-                'date' or None]. Defaults to 'group'.
+            path (str): Absolute path to write to the file tree
+            prefix (str, optional): Specifies directory prefix as 'group'.
+                'date' or None. Defaults to 'group'.
         """
         volumes = self.split_volumes()
         volumes.save_tree(path, prefix)
 
     def only_dicoms(self) -> bool:
-        """[True if tree only contains dicom leaves]
+        """True if tree only contains dicom leaves
 
         Returns:
-            bool: [True if tree only contains dicom leaves]
+            bool: True if tree only contains dicom leaves
         """
         return not self.has_volumes()
 
     def only_volumes(self) -> bool:
-        """[True if tree only contains volume leaves]
+        """True if tree only contains volume leaves
 
         Returns:
-            bool: [True if tree only contains volume leaves]
+            bool: True if tree only contains volume leaves
         """
         return not self.has_dicoms()
 
     def has_dicoms(self):
-        """[Determines if tree contains dicoms]
+        """Determines if tree contains dicoms
 
         Returns:
-            [bool]: [True if tree contains dicoms]
+            bool: True if tree contains dicoms
         """
         return bool(next(self.iter_dicoms(), False))
 
     def has_volumes(self):
-        """[Determines if tree contains volumes]
+        """Determines if tree contains volumes
 
         Returns:
-            [bool]: [True if tree contains volumes]
+            bool: True if tree contains volumes
         """
         return bool(next(self.iter_volume_data(), False))  # iter_volume_data
 
@@ -483,13 +483,13 @@ class GroupUtils(NodeMixin):
         return iter(*studies)
 
     def iter_frames(self, return_count: bool = False) -> object:
-        """[Iterates through each FrameOfRef]
+        """Iterates through each FrameOfRef
 
         Args:
-            return_count (bool, optional): [Returns number of frames]. Defaults to False.
+            return_count (bool, optional): Returns number of frames. Defaults to False.
 
         Returns:
-            object: [FrameOfRef object iterator]
+            object: FrameOfRef object iterator
         """
         def filterframe(node):
             return type(node) is FrameOfRef
@@ -507,10 +507,10 @@ class GroupUtils(NodeMixin):
         return iter(*series)
 
     def iter_modalities(self) -> object:
-        """[Iterates through each Modality]
+        """Iterates through each Modality
 
         Returns:
-            object: [Modality object iterator]
+            object: Modality object iterator
         """
         def filtermod(node):
             return type(node) is Modality
@@ -520,13 +520,13 @@ class GroupUtils(NodeMixin):
             return iter(*mods)
 
     def iter_dicoms(self) -> dict:
-        """[Iterates over dicom groups]
+        """Iterates over dicom groups
 
         Returns:
-            dict: [dicom data dict from each modality]
+            dict: dicom data dict from each modality
 
         Yields:
-            Iterator[dict]: [iterator for each modality]
+            Iterator[dict]: iterator for each modality
         """
         for mod in self.iter_modalities():
             if mod.dicoms_data:
@@ -546,10 +546,10 @@ class GroupUtils(NodeMixin):
                 yield mod.volumes_data
 
     def iter_volumes(self) -> Union['ReconstructedVolume', 'ReconstructedFile']:
-        """[Iterates over each individual volume in a cohort]
+        """Iterates over each individual volume in a cohort
 
         Yields:
-            Union[ReconstructedVolume, ReconstructedFile]: [Returns each volume file]
+            Union[ReconstructedVolume, ReconstructedFile]: Returns each volume file
         """
         for vol_data in self.iter_volume_data():
             for vols in vol_data.values():
@@ -557,13 +557,13 @@ class GroupUtils(NodeMixin):
                     yield vol
 
     def iter_volume_frames(self) -> list:
-        """[Iterates through the frame of references]
+        """Iterates through the frame of references
 
         Returns:
-            list: [list of all volumes in a FrameOfRef]
+            list: list of all volumes in a FrameOfRef
 
         Yields:
-            Iterator[list]: [returns a list of all volumes]
+            Iterator[list]: returns a list of all volumes
 
         Notes:
             TODO: Decide if a different data structure is better
@@ -575,14 +575,14 @@ class GroupUtils(NodeMixin):
             yield vols
 
     def iter_image_volume_files(self, modality: str):
-        """[Iterates through image volume files]
+        """Iterates through image volume files
 
         Args:
-            modality (str): [Modality type to iterate through]
+            modality (str): Modality type to iterate through
 
         Yields:
-            Union[ReconstructedVolume, ReconstructedFile]: [Reconstructed volume or
-                file of specified image]
+            Union[ReconstructedVolume, ReconstructedFile]: Reconstructed volume or
+                file of specified image
         """
         for mod in self.iter_modalities():
             if mod.name == modality:
@@ -631,10 +631,10 @@ class GroupUtils(NodeMixin):
         return (tree1, tree2)
 
     def split_dicoms(self) -> object:
-        """[Split the dicom tree from the volume tree]
+        """Split the dicom tree from the volume tree
 
         Returns:
-            object: [Returns a tree with only dicoms at the leaves]
+            object: Returns a tree with only dicoms at the leaves
 
         Notes:
             Inefficient to copy twice, fix in the future
@@ -645,10 +645,10 @@ class GroupUtils(NodeMixin):
         return dicomtree
 
     def split_volumes(self) -> object:
-        """[Split the volume tree from the dicom tree]
+        """Split the volume tree from the dicom tree
 
         Returns:
-            object: [Returns a tree with only volumes at the leaves]
+            object: Returns a tree with only volumes at the leaves
 
         Notes:
             Inefficient to copy twice, fix in the future
@@ -659,7 +659,7 @@ class GroupUtils(NodeMixin):
         return voltree
 
     def volumes_to_pointers(self) -> None:
-        """[Converts all volumes to pointers]
+        """Converts all volumes to pointers
         """
         for vol in self.iter_volumes():
             if type(vol) is ReconstructedVolume:
@@ -668,7 +668,7 @@ class GroupUtils(NodeMixin):
                 utils.colorwarn(f'{vol.name} already {type(vol)}')
 
     def pointers_to_volumes(self) -> None:
-        """[Converts all pointers to volumes]
+        """Converts all pointers to volumes
 
         Notes:
             This may require a large amount of memory
@@ -680,7 +680,7 @@ class GroupUtils(NodeMixin):
                 utils.colorwarn(f'{vol.name} already {type(vol)}')
 
     def _recon_to_disk(self, return_mods: bool = False, path: str = None) -> None:
-        """[Reconstructs self, writes volumes to disk]
+        """Reconstructs self, writes volumes to disk
 
         Args:
             return_mods (bool, optional): [Returns the modality pairs]. Defaults to False.
@@ -702,7 +702,7 @@ class GroupUtils(NodeMixin):
             utils.insert_into_tree(self, mods_ptrs)
 
     def _recon_to_memory(self):
-        """[Reconstructs volumes and stores in memory]
+        """Reconstructs volumes and stores in memory
 
         Notes:
             Not recommended for large data sets (N>10), only useful for
@@ -718,13 +718,14 @@ class GroupUtils(NodeMixin):
 
     def recon(self, in_memory: bool = False, parallelize: bool = True,
               path: str = None, filter_by: dict = None, *args, **kwargs) -> None:
-        """[Reconstruction of a patient or cohort]
+        """Reconstruction of a patient or cohort
 
         Args:
-            in_memory (bool, optional): [Saves the volumes into memory if True
-                and onto disk if False]. Defaults to False.
-            parallelize (bool, optional): [Parallelize onto additional CPU cores,
-                runs faster this way]. Defaults to True.
+            in_memory (bool, optional): Saves the volumes into memory if True
+                and onto disk if False. Defaults to False.
+            parallelize (bool, optional): Parallelize onto additional CPU cores,
+                runs faster this way. Defaults to True.
+
         Notes:
             in_memory=True is only recommended for small datasets or uses where the
                 hardware is write-limited. Loading large amounts of data into memory
@@ -756,13 +757,13 @@ class GroupUtils(NodeMixin):
 
     def apply_tool(self, toolset: list, path: str = None,
                    mod: 'Modality' = None, warn: bool = True) -> None:
-        """[A single threaded application of a list of tool functions]
+        """A single threaded application of a list of tool functions
 
         Args:
-            toolset (list): [List of tool functions]
-            path (str, optional): [Path to write volumes]. Defaults to None.
-            mod (Modality, optional): [Moadlity to apply function to]. Defaults to self.
-            warn (bool, optional): [Raise warning when applied]. Defaults to True.
+            toolset (list): List of tool functions
+            path (str, optional): Path to write volumes. Defaults to None.
+            mod (Modality, optional): Moadlity to apply function to. Defaults to self.
+            warn (bool, optional): Raise warning when applied. Defaults to True.
 
         Warnings:
             If path is not specified, the previously reconstructed volumes will be
@@ -791,15 +792,15 @@ class GroupUtils(NodeMixin):
                 volume[name] = newfiles
 
     def apply_tools(self, toolset: list, path: str = None, nthreads: int = None) -> None:
-        """[Multithreaded application of a list of tool functions applied]
+        """Multithreaded application of a list of tool functions applied
 
         Args:
-            toolset (list): [List of tool functions]
-            path (str, optional): [Path to write volumes]. Defaults to previous save path.
-            nthreads (int, optional): [Number of concurrent threads]. Defaults to nCPUs // 2.
+            toolset (list): List of tool functions
+            path (str, optional): Path to write volumes. Defaults to previous save path.
+            nthreads (int, optional): Number of concurrent threads. Defaults to nCPUs // 2.
 
         Returns:
-            [None]: [Changes to the cohort are completed in place]
+            None: Changes to the cohort are completed in place]
 
         Warnings:
             If path is not specified, the previously reconstructed volumes will be
@@ -833,21 +834,21 @@ class GroupUtils(NodeMixin):
             ThreadPool().shutdown()
 
     def _incomplete(self, group: str, exact: bool = False, contains: dict = None) -> bool:
-        """[Determines if group is incomplete as defined by contains]
+        """Determines if group is incomplete as defined by contains
 
         Args:
-            group (str): [Group to determine completeness]
-            exact (bool, optional): [Group must contain extactly what is specified in contains,
-                otherwise the group can contain more than contains and be valid]. Defaults to False.
-            contains (dict, optional): [A dictionary with keys of the group type and the
+            group (str): Group to determine completeness
+            exact (bool, optional): Group must contain extactly what is specified in contains,
+                otherwise the group can contain more than contains and be valid. Defaults to False.
+            contains (dict, optional): A dictionary with keys of the group type and the
                 corresponding features. For example:
                         contains = {'Modality': ['CT', 'MR', 'MR', 'RTSTRUCT']}
                 would mean with exact=True, the group must contain exactly 1 CT, 2 MR and
                 1 RTSTRUCT. With exact=False, the group could contain any number of CT, MR,
-                RTSTRUCT as long as at least one of each file type is present]. Defaults to None.
+                RTSTRUCT as long as at least one of each file type is present. Defaults to None.
 
         Returns:
-            bool: [Returns if the group is complete]
+            bool: Returns if the group is complete]
         """
         if contains is None:
             contains = self.fitler_by
@@ -885,15 +886,15 @@ class GroupUtils(NodeMixin):
 
     def pull_incompletes(self, group: str = 'Patient', exact: bool = False,
                          contains: dict = None, cleaned: bool = False) -> NodeMixin:
-        """[Determines if group is incomplete as defined by contains, returns the excluded
-            groups from the tree. Original tree is modified in place]
+        """Determines if group is incomplete as defined by contains, returns the excluded
+            groups from the tree. Original tree is modified in place
 
         Args:
-            group (str): [Group to determine completeness, valid groups are Patient, FrameOfRef,
-                Study, Series]. Defaults to Patient.
-            exact (bool, optional): [Group must contain extactly what is specified in contains,
-                otherwise the group can contain more than contains and be valid]. Defaults to False.
-            contains (dict, optional): [A dictionary with keys of the group type and the
+            group (str): Group to determine completeness, valid groups are Patient, FrameOfRef,
+                Study, Series. Defaults to Patient.
+            exact (bool, optional): Group must contain extactly what is specified in contains,
+                otherwise the group can contain more than contains and be valid. Defaults to False.
+            contains (dict, optional): A dictionary with keys of the group type and the
                 corresponding features. For example:
                         contains = {'Modality': ['CT', 'MR', 'MR', 'RTSTRUCT']}
                 would mean with exact=True, the group must contain exactly 1 CT, 2 MR and
@@ -901,14 +902,14 @@ class GroupUtils(NodeMixin):
                 RTSTRUCT as long as at least one of each file type is present. If contaius is
                 not specified, the filter_by parameter of the parent group will be used, as
                 defined at group creation. If that parameter is None, an AttributeError
-                will be raised]. Defaults to None.
-            cleaned (bool, optional): [Applies remove_empty_branches() following splitting]
+                will be raised. Defaults to None.
+            cleaned (bool, optional): Applies remove_empty_branches() following splitting
 
         Returns:
-            NodeMixin: [Tree of the excluded groups from the original tree]
+            NodeMixin: Tree of the excluded groups from the original tree]
 
         Raises:
-            AttributeError: [Raised if both self.filter_by and contains are None]
+            AttributeError: Raised if both self.filter_by and contains are None]
         """
         # fliter_by will default to the original grouping, if specified, otherwise will warn
         if self.filter_by is None and contains is None:
@@ -943,12 +944,12 @@ class GroupUtils(NodeMixin):
         return incomplete_tree
 
     def remove_empty_branches(self, prune_modalities: bool = False) -> None:
-        """[Removes any empty branches from a tree. An emtpy branch is defined
-            as a branch with no children. By default, modalities are excluded.]
+        """Removes any empty branches from a tree. An emtpy branch is defined
+            as a branch with no children. By default, modalities are excluded.
 
         Args:
-            prune_modalities (bool, optional): [If specified as True, modalities
-                with no dicoms and no volumes will be pruned as well.]. Defaults to False.
+            prune_modalities (bool, optional): If specified as True, modalities
+                with no dicoms and no volumes will be pruned as well. Defaults to False.
         """
         for child in self.children:
             if type(child) is Modality:
@@ -998,14 +999,14 @@ class ReconstructedVolume(GroupUtils):
         return output
 
     def _rename(self, name: str):
-        """[DICOM RTSTRUCTs can have non-unique names, so we need to rename
-            these functions to be dictionary compatiable]
+        """DICOM RTSTRUCTs can have non-unique names, so we need to rename
+            these functions to be dictionary compatiable
 
         Args:
-            name (str): [Name of the found RTSTRUCT]
+            name (str): Name of the found RTSTRUCT
 
         Returns:
-            [str]: [Name + # where number is the unique occurance]
+            str]: Name + # where number is the unique occurance
         """
         i = 0
         while True:
@@ -1016,7 +1017,7 @@ class ReconstructedVolume(GroupUtils):
         return temp
 
     def _digest(self):
-        """[Pulls relevant information into the class]
+        """Pulls relevant information into the class]
         """
         ds = self.dcm_header
         self.PatientID = ds.PatientID
@@ -1040,10 +1041,10 @@ class ReconstructedVolume(GroupUtils):
         self.dcm_header = None
 
     def _pull_header(self) -> dict:
-        """[Pulls header information from the data structure to export]
+        """Pulls header information from the data structure to export
 
         Returns:
-            [dict]: [dictionary of associated header information]
+            dict: dictionary of associated header information
         """
         fields = ['PatientID', 'StudyInstanceUID', 'SeriesInstanceUID',
                   'Modality', 'SOPInstanceUID', 'FrameOfRefUID']
@@ -1053,14 +1054,14 @@ class ReconstructedVolume(GroupUtils):
         return header
 
     def _generate_filepath(self, prefix: str = 'group') -> str:
-        """[Generates a filepath, in tree heirarchy to save the file]
+        """Generates a filepath, in tree heirarchy to save the file
 
         Args:
-            prefix (str, optional): [Directory naming convention, similar to
-                save_tree()]. Defaults to 'group'.
+            prefix (str, optional): Directory naming convention, similar to
+                save_tree(). Defaults to 'group'.
 
         Returns:
-            [str]: [the generated filepath]
+            str: the generated filepath
         """
         parents = [self._parent]
         temp = self._parent
@@ -1089,11 +1090,11 @@ class ReconstructedVolume(GroupUtils):
             self._parent.clear_volumes()
 
     def add_vol(self, name: str, volume: np.ndarray):
-        """[Add a volume array to the data structure]
+        """Add a volume array to the data structure
 
         Args:
-            name (str): [Name of the volume array]
-            volume (np.ndarray): [Array]
+            name (str): Name of the volume array
+            volume (np.ndarray): Array
         """
         if name in self.volumes:
             name = self._rename(name)
@@ -1101,11 +1102,11 @@ class ReconstructedVolume(GroupUtils):
         self.volumes.update({name: volume})
 
     def add_structs(self, structdict: dict):
-        """[Add a RTSTRUCT array to the data structure]
+        """Add a RTSTRUCT array to the data structure
 
         Args:
-            structdict (dict): [A dictionary of structure names and
-                their corresponding volume arrays]
+            structdict (dict): A dictionary of structure names and
+                their corresponding volume arrays
         """
         for name, volume in structdict.items():
             self.add_vol(name, volume)
@@ -1124,16 +1125,16 @@ class ReconstructedVolume(GroupUtils):
 
     def export(self, include_augmentations: bool = True, include_dims: bool = True,
                include_header: bool = True, include_datetime: bool = True) -> dict:
-        """[Export the ReconstructedVolume array]
+        """Export the ReconstructedVolume array
 
         Args:
-            include_augmentations (bool, optional): [Include augmentations]. Defaults to True.
-            include_dims (bool, optional): [Include dict of volume dimensions]. Defaults to True.
-            include_header (bool, optional): [Include dict of UID values]. Defaults to True.
-            include_datetime (bool, optional): [Include dict of dates and times]. Defaults to True.
+            include_augmentations (bool, optional): Include augmentations. Defaults to True.
+            include_dims (bool, optional): Include dict of volume dimensions. Defaults to True.
+            include_header (bool, optional): Include dict of UID values. Defaults to True.
+            include_datetime (bool, optional): Include dict of dates and times. Defaults to True.
 
         Returns:
-            dict: [A dictionary of volumes and specified additional information]
+            dict: A dictionary of volumes and specified additional information
         """
         export_dict = {}
         export_dict.update({'name': self.name})
@@ -1149,8 +1150,8 @@ class ReconstructedVolume(GroupUtils):
         return export_dict
 
     def convert_to_pointer(self, path: str = None, save: bool = True) -> None:
-        """[Converts ReconstructedVolume to ReconstructedFile and saves
-            the volume array to ~/tree/format/SeriesInstanceUID.npy]
+        """Converts ReconstructedVolume to ReconstructedFile and saves
+            the volume array to ~/tree/format/SeriesInstanceUID.npy
         """
         populate = {'name': self.name,
                     'dims': self.dims,
@@ -1165,19 +1166,19 @@ class ReconstructedVolume(GroupUtils):
 
     def save_file(self, save_dir: str = None, filepath: str = None,
                   return_loc: bool = False, save: bool = True) -> Union[None, pathlib.PosixPath]:
-        """[Save the reconstructed volume and associated information to a .npy pickled file]
+        """Save the reconstructed volume and associated information to a .npy pickled file
 
         Args:
-            save_dir (str, optional): [Directory to save file to, defaults to ~]. Defaults to None.
-            filepath (str, optional): [Filepath to save file tree]. Defaults to None.
-            return_loc (bool, optional): [Returns saved filepath location]. Defaults to False.
-            save (bool, optional): [Determines if the file is actually saved or just converted]
+            save_dir (str, optional): Directory to save file to, defaults to ~/. Defaults to None.
+            filepath (str, optional): Filepath to save file tree. Defaults to None.
+            return_loc (bool, optional): Returns saved filepath location. Defaults to False.
+            save (bool, optional): Determines if the file is actually saved or just converted
 
         Raises:
-            TypeError: [Raised if save_dir and filepath are specified]
+            TypeError: Raised if save_dir and filepath are specified
 
         Returns:
-            [None, pathlib.Path]: [None or pathlib.Path to saved file location]
+            [None, pathlib.Path]: None or pathlib.Path to saved file location
 
         Notes:
             In some cases, we simply want to load the array, read it and not rewrite it to disk,
@@ -1206,7 +1207,7 @@ class ReconstructedVolume(GroupUtils):
 
 
 class ReconstructedFile(GroupUtils):
-    """[A pointer to the saved file, as opposed to the file in memory (ReconstructedVolume)]
+    """A pointer to the saved file, as opposed to the file in memory (ReconstructedVolume).
 
         When reconstructing and saving to disk, we will generate the file, write to disk and
         add this leaf type within the tree. If we want to load that into memory, we will simply
@@ -1230,7 +1231,7 @@ class ReconstructedFile(GroupUtils):
         return ' [ 1 pointer to volume ]'
 
     def _digest(self):
-        """[Generates a ReconstructedFile from a ReconstructedVolume, either from a dict or loaded]
+        """Generates a ReconstructedFile from a ReconstructedVolume, either from a dict or loaded
         """
         if self.populate:
             self.name = self.populate['name']
@@ -1263,7 +1264,7 @@ class ReconstructedFile(GroupUtils):
             self._parent.clear_volumes()
 
     def load_array(self):
-        """[Loads volume array from disk into memory, converts type to ReconstructedVolume]
+        """Loads volume array from disk into memory, converts type to ReconstructedVolume
         """
         ds = np.load(self.filepath, allow_pickle=True).item()
         ds_header = utils.dict_to_dataclass(ds['header'])
@@ -1276,7 +1277,7 @@ class ReconstructedFile(GroupUtils):
 
 
 class DicomFile(GroupUtils):
-    """[Group level for individal Dicom files, pulls releveant header data out]
+    """Group level for individal Dicom files, pulls releveant header data out
 
     Args:
         filepath (str): absolute file path to the *.dcm file
@@ -1310,7 +1311,7 @@ class DicomFile(GroupUtils):
         return self.FrameOfRefUID == other.FrameOfRefUID
 
     def _pull_info(self, ds: pydicom.dataset.FileDataset) -> None:
-        """[Pulls the info from the pydicom dataset]
+        """Pulls the info from the pydicom dataset
 
         Args:
             ds (pydicom.dataset.FileDataset): [DICOM to remove relevant data from]
@@ -1343,7 +1344,7 @@ class DicomFile(GroupUtils):
         self.dcm_obj = None
 
     def _digest(self):
-        """[Digestion of the pydicom.dataset.FileDataset]
+        """Digestion of the pydicom.dataset.FileDataset
         """
         if self.dcm_obj is not None:
             self._pull_info(self.dcm_obj)
@@ -1353,12 +1354,12 @@ class DicomFile(GroupUtils):
 
 
 class Cohort(GroupUtils):
-    """[Group level for Cohort with child of Patient]
+    """Group level for Cohort with child of Patient
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if FrameOfRef points to
-            Series (True) or Modality (False)]. Defaults to False.
+        include_series (bool, optional): Specifies if FrameOfRef points to
+            Series (True) or Modality (False). Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
@@ -1370,12 +1371,12 @@ class Cohort(GroupUtils):
 
 
 class Patient(GroupUtils):
-    """[Group level for Patient, specified by PatientUID with child of FrameOfRef]
+    """Group level for Patient, specified by PatientUID with child of FrameOfRef
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if Study points to
-            Series (True) or Modality (False)]. Defaults to False.
+        include_series (bool, optional): Specifies if Study points to
+            Series (True) or Modality (False). Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
@@ -1385,13 +1386,13 @@ class Patient(GroupUtils):
 
 
 class FrameOfRef(GroupUtils):
-    """[Group level for FrameOfReference, specified by FrameOfReferenceUID
-        with child of Study]
+    """Group level for FrameOfReference, specified by FrameOfReferenceUID
+        with child of Study
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if Study points to
-            Series (True) or Modality (False)]. Defaults to False.
+        include_series (bool, optional): Specifies if Study points to
+            Series (True) or Modality (False). Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
@@ -1412,13 +1413,13 @@ class FrameOfRef(GroupUtils):
 
 
 class Study(GroupUtils):
-    """[Group level for Study, specified by StudyUID with child of
-        Series or Modality]
+    """Group level for Study, specified by StudyUID with child of
+        Series or Modality
 
     Args:
         name (str): A string declaring the group name
-        include_series (bool, optional): [specifies if Study points to
-            Series (True) or Modality (False)]. Defaults to False.
+        include_series (bool, optional): Specifies if Study points to
+            Series (True) or Modality (False). Defaults to False.
     """
     def __init__(self, name, *args, **kwargs):
         super().__init__(name, *args, **kwargs)
@@ -1432,7 +1433,7 @@ class Study(GroupUtils):
 
 
 class Series(GroupUtils):
-    """[Group level for Series, specified by SeriesUID]
+    """Group level for Series, specified by SeriesUID
 
     Args:
         name (str): A string declaring the group name
@@ -1448,18 +1449,18 @@ class Series(GroupUtils):
 
 
 class Modality(GroupUtils):
-    """[Group level for Modality, specified by Modality]
+    """Group level for Modality, specified by Modality
 
     Args:
         name (str): A string declaring the group name
 
     Attributes:
-        ct: [ct files within group]
-        nm: [nm files within group]
-        mr: [mr files within group]
-        pet: [pet files within group]
-        dose: [dose files within group]
-        struct: [structf files within group]
+        ct: ct files within group
+        nm: nm files within group
+        mr: mr files within group
+        pet: pet files within group
+        dose: dose files within group
+        struct: structf files within group
     """
     ct = property(utils.mod_getter('CT'), utils.mod_setter('CT'))
     nm = property(utils.mod_getter('NM'), utils.mod_setter('NM'))
@@ -1538,20 +1539,20 @@ class Modality(GroupUtils):
 
 @dataclass
 class DicomDateTime:
-    """[pulls the relevant date and time info from the DICOM header]
+    """Pulls the relevant date and time info from the DICOM header
 
     Attributes:
-        StudyDate: [(0008,0020) DICOM Tag]
-        SeriesDate: [(0008, 0021) DICOM Tag]
-        ContentDate: [(0008, 0023) DICOM Tag]
-        AcquisitionDate: [(0008, 0022) DICOM Tag]
-        StudyTime: [(0008,0030) DICOM Tag]
-        SeriesTime: [(0008, 0031) DICOM Tag]
-        ContentTime: [(0008, 0033) DICOM Tag]
-        AcquisitionTime: [(0008, 0032) DICOM Tag]
+        StudyDate: (0008,0020) DICOM Tag
+        SeriesDate: (0008, 0021) DICOM Tag
+        ContentDate: (0008, 0023) DICOM Tag
+        AcquisitionDate: (0008, 0022) DICOM Tag
+        StudyTime: (0008,0030) DICOM Tag
+        SeriesTime: (0008, 0031) DICOM Tag
+        ContentTime: (0008, 0033) DICOM Tag
+        AcquisitionTime: (0008, 0032) DICOM Tag
 
     Methods:
-        iso_format (str): [returns ISO 8601 format date time for group type]
+        iso_format (str): Returns ISO 8601 format date time for group type
     """
     ds: pydicom.dataset = None
 
@@ -1579,13 +1580,13 @@ class DicomDateTime:
         return self
 
     def isoformat(self, group: str) -> str:
-        """[returns ISO 8601 format date time for group type]
+        """Returns ISO 8601 format date time for group type
 
         Args:
-            group (str): [string representing group type]
+            group (str): String representing group type
 
         Returns:
-            [str]: [ISO 8601 formatted date time string with milliseconds]
+            str: ISO 8601 formatted date time string with milliseconds
         """
         # ISO 8601 formatted date time string
         date, time = (None, None)

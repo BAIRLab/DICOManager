@@ -3,6 +3,7 @@ import sys
 from glob import glob
 from . import tools
 from . import utils
+from . import dcmio
 from .groupings import Cohort, ReconstructedVolume
 import numpy as np
 from scipy.ndimage import center_of_mass
@@ -39,14 +40,14 @@ therefore saving is not required again.
 # User can implement these themselves or use scipy.ndimage.center_of_mass
 # It entirely depends on their specific worfklow
 def surface_centroid(img: np.ndarray) -> list:
-    """[Computes a centroid based on the bone HU range. XY-axis is center of mass
-        while the Z-axis is the top of the skull]
+    """Computes a centroid based on the bone HU range. XY-axis is center of mass
+        while the Z-axis is the top of the skull
 
     Args:
-        img ([type]): [A 3D-CT encoded as a 32-bit numpy array of HU values]
+        img (np.ndarray): A 3D-CT encoded as a 32-bit numpy array of HU values
 
     Returns:
-        list: [The center of mass values]
+        list: The center of mass values
     """
     losurface = img > 650  # HU > 500 to get bone and metal
     hisurface = img < 2000  # HU < 3000 to exclude metal
@@ -60,16 +61,16 @@ def surface_centroid(img: np.ndarray) -> list:
 
 
 def offset_centroid(offset: list) -> object:
-    """[A function used to offset the center of mass by a specified distance,
-        given in milimeters]
+    """A function used to offset the center of mass by a specified distance,
+        given in milimeters
 
     Args:
-        offset (list): [The offset center of mass, in mm]
+        offset (list): The offset center of mass, in mm
 
     Returns:
-        object: [A function which takes a center of mass and ReconstructedVolume
+        object: A function which takes a center of mass and ReconstructedVolume
             type object and returns a list of equal dimensions offset by a given
-            offset distance.]
+            offset distance.
     """
     def fn(CoM: list, volfile: ReconstructedVolume) -> list:
         dist_mm = np.array(offset)  # in mm
@@ -86,6 +87,9 @@ if __name__ == '__main__':
     # Sort files into tree of type Cohort
     cohort = Cohort(name='RTOG_Hippocampus', files=files, include_series=False)
     print(cohort)
+
+    dcmio.dump_tree(cohort, '/home/eporter/')
+    raise TypeError
 
     # Save sorted dicom files
     cohort.save_tree(path='/home/eporter/eporter_data/rtog_project/dicoms/')

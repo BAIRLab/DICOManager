@@ -8,7 +8,7 @@ from . import utils
 
 
 class RestrictedUnpickler(pickle.Unpickler):
-    """[An overriding of pickle loading to only allow ProtectedFile type]
+    """An overriding of pickle loading to only allow ProtectedFile type
     """
     def find_class(self, module, name):
         # Only allow safe classes from builtins.
@@ -22,7 +22,7 @@ class RestrictedUnpickler(pickle.Unpickler):
 
 
 class ProtectedFile:
-    """[A file with an SHA256 and MAC address metadata]
+    """A file with an SHA256 and MAC address metadata
 
     WARNING:
         While no pickle object can be entirely safe, short of encryption,
@@ -38,11 +38,11 @@ class ProtectedFile:
 
 
 def dump_tree(tree: object, filepath: str) -> None:
-    """[Dumps tree to a given filepath location]
+    """Dumps tree to a given filepath location
 
     Args:
-        tree (object): [DICOManager object to save to disk]
-        filepath (str): [POSIX directory to write file]
+        tree (object): DICOManager object to save to disk
+        filepath (str): POSIX directory to write file
 
     Notes:
         This function does not create directories if not otherwise present.
@@ -62,23 +62,24 @@ def dump_tree(tree: object, filepath: str) -> None:
 
 
 def load_tree(filename: str, force_mac: bool = False, force_sha: bool = False) -> object:
-    """[Load a DICOManager pickle object (.dcmpkl). By default, this will only load objects
+    """Load a DICOManager pickle object (.dcmpkl). By default, this will only load objects
         created on the local machine that are unchanged since their save state. This is to
         prevent the loading and execution of unsafe pickle objects created by other users.
         If the code is run on a scheduled compute array, the MAC address of the system
         executing the code will likely differ each submission. Therefore force_mac=True may
-        be required.]
+        be required.
 
     Args:
-        filename (str): [POSIX path and filename]
-        force_mac (bool, optional): [Overrides MAC address check]. Defaults to False.
-        force_sha (bool, optional): [Overrides SHA256 check]. Defaults to False.
+        filename (str): POSIX path and filename
+        force_mac (bool, optional): Overrides MAC address check. Defaults to False.
+        force_sha (bool, optional): Overrides SHA256 check. Defaults to False.
 
     WARNING:
         While no pickle object can be entirely safe, short of encryption,
         the user barrier when using encryption is high. Therefore this is not a
         fool-proof protection scheme and is not a replacement for local disk
         encryption, proper read-write protections and not loading files from
+        untrusted sources. Please use discretion.
     """
     def _load_protected_file(group):
         """Helper function analogous to pickle.loads()."""

@@ -85,10 +85,10 @@ class VolumeDimensions:
         return min(differences)
 
     def _calc_n_slices(self, files: list):
-        """[calculates the number of volume slices]
+        """Calculates the number of volume slices
 
         Args:
-            files ([DicomFile]): [A list of DicomFile objects]
+            files (DicomFile): A list of DicomFile objects
 
         Notes:
             Creating the volume by the difference in slice location at high and
@@ -239,7 +239,7 @@ class ImageDims:
         return np.rollaxis(np.stack(np.matmul(M, C)), 0, 3)
 
 
-@xr.registered_dataset_accessor("resample_update")
+@xr.registered_dataset_accessor("_resample_update")
 class ResampledUpdate:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
@@ -259,7 +259,7 @@ class ResampledUpdate:
         self._obj.slices = int(round(self.slices * ratio[2]))
 
 
-@xr.registared_dataset_accessor("crop_update")
+@xr.registared_dataset_accessor("_crop_update")
 class CropUpdate:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj

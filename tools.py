@@ -22,14 +22,14 @@ class ImgHandler:
         return self.pointer_conversion(img, path)
 
     def pointer_conversion(self, img: ReconVolumeOrFile, path: str = None) -> ReconVolumeOrFile:
-        """[Handles conversion of ReconstructedFile to Volume for any tools]
+        """Handles conversion of ReconstructedFile to Volume for any tools
 
         Args:
-            img (ReconVolumeOrFile): [Either ReconstructedFile or ReconstructedVolume]
-            path (str, optional): [Path to write the modified files]. Defaults to None.
+            img (ReconVolumeOrFile): Either ReconstructedFile or ReconstructedVolume
+            path (str, optional): Path to write the modified files. Defaults to None.
 
         Returns:
-            ReconVolumeOrFile: [Returns modified image of same type as img]
+            ReconVolumeOrFile: Returns modified image of same type as img
         """
         if self._check_needed(img):
             utils.colorwarn('Will write over reconstructed volume files')
@@ -44,13 +44,13 @@ class ImgHandler:
 
     @abc.abstractmethod
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
-        """[Determines if the tool should be applied to the volume]
+        """Determines if the tool should be applied to the volume
 
         Args:
-            img (ReconVolumeOrFile): [Image volume to apply tool]
+            img (ReconVolumeOrFile): Image volume to apply tool
 
         Returns:
-            bool: [Determines if tool should be applied]
+            bool: Determines if tool should be applied
 
         Notes:
             This is an abstract method and each tool class requires
@@ -60,11 +60,11 @@ class ImgHandler:
 
 
 class WindowLevel(ImgHandler):
-    """[Applies window and level to the CT image volume]
+    """Applies window and level to the CT image volume
 
     Args:
-        window (int): [Window width]
-        level (int): [Level value]
+        window (int): Window width
+        level (int): Level value
 
     Notes:
         Default reconstruction of the images yields volumes with
@@ -99,7 +99,7 @@ class WindowLevel(ImgHandler):
 
 
 class Normalize(ImgHandler):
-    """[Normalize the image volume]
+    """Normalize the image volume
     """
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         if img.is_struct:
@@ -120,7 +120,7 @@ class Normalize(ImgHandler):
 
 
 class Standardize(ImgHandler):
-    """[Standardize the image volume]
+    """Standardize the image volume
     """
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         if img.is_struct:
@@ -143,13 +143,13 @@ class BiasFieldCorrection(ImgHandler):
         self.histogram_bins = histogram_bins
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
-        """[MRI N4 Bias Field Correction]
+        """MRI N4 Bias Field Correction
 
         Args:
-            img (ReconVolumeOrFile): [MRI Image Volume to be N4 bias corrected]
+            img (ReconVolumeOrFile): MRI Image Volume to be N4 bias corrected
 
         Returns:
-            ReconstructedVolume: [N4 bias corrected image]
+            ReconstructedVolume: N4 bias corrected image
 
         Notes:
             SimpleITK is not compiled for PowerPC, therefore this function is not
@@ -171,7 +171,7 @@ class BiasFieldCorrection(ImgHandler):
 
 
 class Interpolate(ImgHandler):
-    """[Axial image interpolation function, currently using bilinear interpolation]
+    """Axial image interpolation function, currently using bilinear interpolation
 
     Warnings:
         UserWarning: Warns if extrapolation is attempted but forbidden
@@ -182,14 +182,14 @@ class Interpolate(ImgHandler):
         self.extrapolate = extrapolate
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
-        """[Actual interpolation function, obscured from user because class instance
-            call should be used instead for more efficient performance]
+        """Actual interpolation function, obscured from user because class instance
+            call should be used instead for more efficient performance
 
         Args:
-            img (ReconVolumeOrFile): [ReconstructedVolume or ReconstructedFile]
+            img (ReconVolumeOrFile): ReconstructedVolume or ReconstructedFile
 
         Returns:
-            ReconVolumeOrFile: [Modified image returned in same format as img input]
+            ReconVolumeOrFile: Modified image returned in same format as img input
         """
         # Simple linear interpolation, will use more sophisticated bilinear interpolation
         # in the second revision
@@ -229,13 +229,13 @@ class Interpolate(ImgHandler):
         return img
 
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
-        """[Checks if interpolation of the file is required]
+        """Checks if interpolation of the file is required
 
         Args:
-            img (ReconVolumeOrFile): [ReconstructedVolume or ReconstructedFile]
+            img (ReconVolumeOrFile): ReconstructedVolume or ReconstructedFile
 
         Returns:
-            bool: [Boolean if interpolation is needed]
+            bool: Boolean if interpolation is needed
         """
         empty = img.ImgAugmentations.empty_slices
         if not empty or len(empty) == 0:
@@ -245,7 +245,7 @@ class Interpolate(ImgHandler):
 
 # We could also resample by Field of View
 class Resample(ImgHandler):
-    """[Resample image volume]
+    """Resample image volume
 
     Raises:
         TypeError: Raised if no-resampling is specified
@@ -253,19 +253,19 @@ class Resample(ImgHandler):
     def __init__(self, ratio: float = None, dims: list = None,
                  voxel_size: list = None, dz_limit: float = None,
                  dz_goal: float = None, dz_exact: float = None):
-        """[Resamples volumetric image to dimensions, coordinates or voxel size]
+        """Resamples volumetric image to dimensions, coordinates or voxel size
 
         Args:
-            ratio (float, optional): [Resampling ratio, either per-dimension or uniform
-                with r>1 upsampling and r<1 downsampling]. Defaults to None.
-            dims (list, optional): [Number of voxels per-dimension to resmaple to, with
-                dimensions of None left unsampled. (e.g. [512, 512, None])]. Defaults to None.
-            voxel_size (list, optional): [Voxel size, in mm, to resample image]. Defaults to None.
-            dz_limit (float, optional): [Limited slice thickness, with dz > dz_limit being
-                resampled to dz_goal or 1/2 slice thickness otherwise]. Defaults to None.
-            dz_goal (float, optional): [Resampling goal if dz_limit is specified]. Defaults to None.
-            dz_exact (float, optional): [Resamples all images to this exact dz, if
-                specified. Will override dz_limit and dz_goal]. Defaults to None.
+            ratio (float, optional): Resampling ratio, either per-dimension or uniform
+                with r>1 upsampling and r<1 downsampling. Defaults to None.
+            dims (list, optional): Number of voxels per-dimension to resmaple to, with
+                dimensions of None left unsampled. (e.g. [512, 512, None]). Defaults to None.
+            voxel_size (list, optional): Voxel size, in mm, to resample image. Defaults to None.
+            dz_limit (float, optional): Limited slice thickness, with dz > dz_limit being
+                resampled to dz_goal or 1/2 slice thickness otherwise. Defaults to None.
+            dz_goal (float, optional): Resampling goal if dz_limit is specified. Defaults to None.
+            dz_exact (float, optional): Resamples all images to this exact dz, if
+                specified. Will override dz_limit and dz_goal. Defaults to None.
 
         Notes:
             Non-integer resampling ratios may cause artifacting errors. Therefore, resampling by
@@ -281,13 +281,13 @@ class Resample(ImgHandler):
         self.dz_exact = dz_exact
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
-        """[Downsample an image by a specified ratio]
+        """Downsample an image by a specified ratio
 
         Args:
-            img (ReconstructedVolume): [Image to resample]
+            img (ReconstructedVolume): Image to resample
 
         Returns:
-            ReconstructedVolume: [Downsampled image array]
+            ReconstructedVolume: Downsampled image array
         """
         if self.ratio is not None:
             if type(self.ratio) is int or type(self.ratio) is float:
@@ -316,13 +316,13 @@ class Resample(ImgHandler):
         return img
 
     def _check_needed(self, img: ReconVolumeOrFile) -> bool:
-        """[Determines if the volume or file requires resampling]
+        """Determines if the volume or file requires resampling
 
         Args:
-            img (ReconVolumeOrFile): [Image volume or file]
+            img (ReconVolumeOrFile): Image volume or file
 
         Returns:
-            bool: [Requires resampling]
+            bool: Requires resampling
 
         Notes:
             Resampling heirarchy, where resampling occurs if any is True:
@@ -359,14 +359,14 @@ class Resample(ImgHandler):
         return not img.ImgAugmentations.resampled
 
     def _compute_ratio(self, list1: list, list2: list) -> list:
-        """[Computes resampling ratio between two lists]
+        """Computes resampling ratio between two lists
 
         Args:
-            list1 (list): [Desired parameters]
-            list2 (list): [Current parameters]
+            list1 (list): Desired parameters
+            list2 (list): Current parameters
 
         Returns:
-            list: [Resampling ratio]
+            list: Resampling ratio
         """
         ratio = []
         for x0, x1 in zip(list1, list2):
@@ -376,36 +376,24 @@ class Resample(ImgHandler):
         return ratio
 
     def _dims_to_ratio(self, img: ReconVolumeOrFile) -> list:
-        """[Calculates the resampling ratio based on dimensions]
-
-        Args:
-            img (ReconVolumeOrFile): [Image volume or file]
-
-        Returns:
-            list: [Resampling ratio]
+        """Calculates the resampling ratio based on dimensions
         """
         return self._compute_ratio(self.dims, img.dims.shape)
 
     def _voxel_size_to_ratio(self, img: ReconVolumeOrFile) -> list:
-        """[Calculates the resampling ratio based on voxel size]
-
-        Args:
-            img (ReconVolumeOrFile): [Image volume or file]
-
-        Returns:
-            list: [Resampling ratio]
+        """Calculates the resampling ratio based on voxel size
         """
-        return self._compute_ratio(self.voxel_size, img.dims.voxel_size)
+        return self._compute_ratio(img.dims.voxel_size, self.voxel_size)
 
     def _dz_limit_to_ratio(self, img: ReconVolumeOrFile, previous: list) -> list:
-        """[Calculates the z-axis resampling ratio based on slice thickness limit]
+        """Calculates the z-axis resampling ratio based on slice thickness limit
 
         Args:
-            img (ReconVolumeOrFile): [Image volume or file]
-            prevoius: (list): [Previous list of resampling ratios]
+            img (ReconVolumeOrFile): Image volume or file
+            prevoius: (list): Previous list of resampling ratios
 
         Returns:
-            list: [Resampling ratio]
+            list: Resampling ratio
         """
         if self.dz_exact is not None:
             if img.dims.dz != self.dz_exact:
@@ -423,18 +411,18 @@ class Resample(ImgHandler):
 class Crop(ImgHandler):
     def __init__(self, crop_size: list, centroid: list = None, centroids: dict = None,
                  in_patient_coords: bool = False):
-        """[Cropping function for image and rtstruct volumes]
+        """Cropping function for image and rtstruct volumes
 
         Args:
-            crop_size (list): [N length list with int for each volume dimension]
-            centroid (list, optional): [A centroid to crop around, specified
-                in voxels]. Defaults to None.
-            centroids (dict, optional): [A dictionary with FrameOfReferenceUID as key
+            crop_size (list): N length list with int for each volume dimension
+            centroid (list, optional): A centroid to crop around, specified
+                in voxels. Defaults to None.
+            centroids (dict, optional): A dictionary with FrameOfReferenceUID as key
                 and the corresponding voxel centroid location as value. Overridden by a specified
-                centroid value]. Defaults to None.
-            in_patient_coords (bool, optional): [Specifies if the provided centroids are in
+                centroid value. Defaults to None.
+            in_patient_coords (bool, optional): Specifies if the provided centroids are in
                 the patient coordinate system, in mm. Default behavior is image coordinates,
-                in voxels.] Defaults to False.
+                in voxels. Defaults to False.
         """
         self.crop_size = crop_size
         self.centroid = centroid
@@ -444,27 +432,27 @@ class Crop(ImgHandler):
 
     def _convert_to_voxels(self, centroid_mm: np.ndarray,
                            volfile: ReconstructedVolume) -> np.ndarray:
-        """[When given a centroid in patient coordinates (mm), convert to voxels]
+        """When given a centroid in patient coordinates (mm), convert to voxels
 
         Args:
-            centroid_mm (np.ndarray): [Centroid location in patient coordinates]
-            volfile (ReconstructedVolume): [Associated reconstructed volume file]
+            centroid_mm (np.ndarray): Centroid location in patient coordinates
+            volfile (ReconstructedVolume): Associated reconstructed volume file
 
         Returns:
-            np.ndarray: [Numpy array of integer voxel locations]
+            np.ndarray: Numpy array of integer voxel locations
         """
         centroid_mm_diff = abs(centroid_mm - volfile.dims.origin)
         centroid_vox = centroid_mm_diff / volfile.dims.voxel_size
         return np.array(np.round(centroid_vox), dtype=np.int)
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
-        """[Crops an image volume and updates headers accordingly]
+        """Crops an image volume and updates headers accordingly
 
         Args:
-            img (ReconVolumeOrFile): [Image volume object to crop]
+            img (ReconVolumeOrFile): Image volume object to crop
 
         Returns:
-            ReconVolumeOrFile: [description]
+            ReconVolumeOrFile: Cropped volume file
 
         Notes:
             Centroid will not be observed if the cropped volume will be
@@ -531,29 +519,29 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
                         structures: list = None, struct_filter: object = None,
                         volume_filter: object = None, nthreads: int = None,
                         offset_fn: object = None) -> dict:
-    """[Multithreaded computation of the centroid for each frame of reference]
+    """Multithreaded computation of the centroid for each frame of reference
 
     Args:
-        tree (NodeMixin): [Tree to iterate through]
-        method (object): [Function to calculate centroid. Takes an array, returns
-            a list of N items corresponding to the centroid in each axis].
-        modalities (list, optional): [Structure name to use for centroid]. Defaults to None.
-        structures (list, optional): [List of str to calculate the centroid]. Defaults to None.
-        struct_filter (object, optional): [A custom filtering function to pick structures, this is
+        tree (NodeMixin): Tree to iterate through
+        method (object): Function to calculate centroid. Takes an array, returns
+            a list of N items corresponding to the centroid in each axis.
+        modalities (list, optional): Structure name to use for centroid. Defaults to None.
+        structures (list, optional): List of str to calculate the centroid. Defaults to None.
+        struct_filter (object, optional): A custom filtering function to pick structures, this is
             overriden if the paremeter structures is also specified. Function should accept a
-            structure name and return a boolean for calculation of centroid.]. Defaults to None.
-        volume_filter (object, optional): [A custom filtering function to pick volumes, this is
+            structure name and return a boolean for calculation of centroid. Defaults to None.
+        volume_filter (object, optional): A custom filtering function to pick volumes, this is
             overriden if the parameter structures is also specified. Function should accept a
             ReconstructedVolume object and return a boolean for calculation of
-            centroid.]. Defaults to None.
-        nthreads (int, optional): [Number of threads to use for the computation. Higher
-            threads may run faster with higher memroy usage.]. Defaults to CPU count // 2.
-        offset_fn (object, optional): [A function to offset the centroid. Should accept a the
+            centroid. Defaults to None.
+        nthreads (int, optional): Number of threads to use for the computation. Higher
+            threads may run faster with higher memroy usage. Defaults to CPU count // 2.
+        offset_fn (object, optional): A function to offset the centroid. Should accept a the
             centroid and a ReconstructedVolume object and return a centroid of
-            equivalent dimensions.]. Defaults to None.
+            equivalent dimensions. Defaults to None.
 
     Returns:
-        dict: [Keyed to Frame Of Reference UID with centroid voxel location as value]
+        dict: Keyed to Frame Of Reference UID with centroid voxel location as value
     """
     def name_check(structures: list) -> object:
         def fn(name):
