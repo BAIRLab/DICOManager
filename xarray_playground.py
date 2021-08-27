@@ -207,7 +207,7 @@ class CalcZIndex:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def __call__(self):
+    def __call__(self, loc):
         return int(round(abs((self._obj.origin[-1] - loc) / self._obj.dz)))
 
 
@@ -367,6 +367,10 @@ class ReconstructedIO:
 
 @xr.register_dataset_accessor("extend_vars")
 class ExtendVars:
+    # Made to dynamically extend a Dataset with images or rtstructs
+    # RTSTRUCT arrays need to match in structure length for the dimension
+    # Therefore we need to either extend the existing arrays with
+    # sections of np.nan
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
         self._dims = ['PatientPosition_x-axis',
@@ -419,6 +423,8 @@ class ExtendVars:
             self._obj[uid_name] = (coords, dataarray.data)
 
     def _reorder_structures(self, dataarray, new_names):
+        # Need to write a function to reorder the structure dimensions
+        # to be the same for all structures
         pass
 
     def _fill_in_missing(self, dataarray, new_names):
@@ -445,16 +451,6 @@ class ExtendVars:
         return xr.DataArray(expanded_array, coords=coords, attrs=dataarray.attrs)
 
 
-
-# TODO integrate this into the working knowledge
-def create_dataset(Modality):
-    dims = {}
-    for mod, dicoms in Modality.dicom_files:
-        dims.update({mod: create_dataarray(dicoms)})
-    new_ds = xr.Dataset(dims, name)
-    Modality.volume_data = new_ds
-
-
 def create_dataarray(volume, dicom_files, struct_names=None):
     volume_dimensions = VolumeDimensions(dicom_files)
     attrs = volume_dimensions.report_attrs()
@@ -475,14 +471,23 @@ def create_dataarray(volume, dicom_files, struct_names=None):
 
 if __name__ == '__main__':
     ct_files = glob('/home/eporter/eporter_data/rtog_project/dicoms/train/**/Patient_10*71/**/CT/*.dcm', recursive=True)
-    volume = np.zeros((5, 512, 512, len(ct_files)), dtype=np.bool)
+    rt_files = glob('/home/eporter/eporter_data/rtog_project/dicoms/train/**/Patient_10*71/**/RTSTRUCT/*.dcm', recursive=True)
+    volume = np.zeros((512, 512, len(ct_files)), dtype=np.bool)
+    rtstruct = np.zeros((5, 512, 512, len(ct_files)), dtype=np.bool)
     struct_names = ['rt' + str(n) for n in range(5)]
+
+    # Create CT DataArray and convert to Dataset
     xrda = create_dataarray(volume=volume, dicom_files=ct_files, struct_names=struct_names)
     xrda.attrs['Modality'] = 'RTSTRUCT'
     xrds = xrda.to_dataset()
+    # Create RTSTRUCT DataArray and add to Dataset
     xrda1 = create_dataarray(volume=np.zeros((512, 512, len(ct_files)), dtype='float32'), dicom_files=ct_files)
     xrds.extend_vars.image(xrda1)
+    # Create another RTSTRUCT with only 4 structures
     xrda2 = create_dataarray(volume=np.zeros((4, 512, 512, len(ct_files)), dtype=np.bool), dicom_files=ct_files, struct_names=struct_names[1:]) #+['rt5'])
     xrda2.attrs['Modality'] = 'RTSTRUCT'
+    # Add to dataset, this should expand the 4 structure one with a single array of np.nan
+    # Could also expand it to be np.zeros and have a hidden attribute to designate that it
+    # is empty. But this is less user friendly
     xrds.extend_vars.struct(xrda2)
     print(xrds)
