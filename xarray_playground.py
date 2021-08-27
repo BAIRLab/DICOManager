@@ -134,9 +134,9 @@ class VolumeDimensions:
         return ds
 
     def report_coords(self):
-        output = {'x_ipp': self.origin[0] + np.arange(self.rows) * self.dx,
-                  'y_ipp': self.origin[1] + np.arange(self.cols) * self.dy,
-                  'z_ipp': self.origin[2] - np.arange(self.slices) * self.dz
+        output = {'PatientPosition_x-axis': self.origin[0] + np.arange(self.rows) * self.dx,
+                  'PatientPosition_y-axis': self.origin[1] + np.arange(self.cols) * self.dy,
+                  'PatientPosition_z-axis': self.origin[2] - np.arange(self.slices) * self.dz
                   }
         for key, value in output.items():
             output[key] = np.array(value, dtype=np.half)
@@ -154,14 +154,14 @@ class VolumeDimensions:
         return output
 
 
-
 @xr.register_dataarray_accessor("is_struct")
 class IsStruct:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
     def __call__(self):
-        return self._obj.Modality == 'RTSTRUCT'
+        value = self._obj.attrs.get('Modality', False)
+        return value == 'RTSTRUCT'
 
 
 @xr.register_dataarray_accessor("field_of_view")
@@ -216,7 +216,7 @@ class MGrid:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
 
-    def __call__(self):
+    def __call__(self, dcm_hdr):
         """Given a DICOM CT image slice, returns an array of pixel coordinates
            for the given frame of reference. Useful for converting boolean masks
            to RTSTRUCT files
@@ -365,11 +365,93 @@ class ReconstructedIO:
             self._is_pointer = True
 
 
+@xr.register_dataset_accessor("extend_vars")
+class ExtendVars:
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+        self._dims = ['PatientPosition_x-axis',
+                      'PatientPosition_y-axis',
+                      'PatientPosition_z-axis']
+
+    def image(self, dataarray):
+        uid_name = dataarray.attrs['SeriesInstanceUID'] + '10'
+        if uid_name in self._obj.data_vars.keys():
+            raise AttributeError('Cannot add to dataset - UID already used')
+        self._obj[uid_name] = (self._dims, dataarray.data)
+
+    def struct(self, dataarray):
+        uid_name = dataarray.attrs['SeriesInstanceUID'] + '12'
+        if uid_name in self._obj.data_vars.keys():
+            raise AttributeError('Cannot add to dataset - UID already used')
+        if not 'StructureNames' in dataarray.dims:
+            raise TypeError('DataArray must have StructureNames')
+
+        coords = ['StructureNames'] + self._dims
+
+        new_names = dataarray.coords['StructureNames'].values
+        current_names = self._obj.coords['StructureNames'].values
+        n_diff = len(new_names) - len(current_names)
+
+        if n_diff > 0:  # Need to add to dataset
+            uids = []
+            fills = []
+
+            # Create new expanded structures
+            for uid, data in self._obj.data_vars.items():
+                if data.is_struct():
+                    uids.append(uid)
+                    fills.append(self._fill_in_missing(data, new_names))
+
+            # Remove old ones and replace with new structures
+            for uid, fill in zip(uids, fills):
+                del self._obj.coords['StructureNames']
+                del self._obj[uid]
+                self._obj[uid] = (fill.coords, fill.data)
+
+            # Insert new coordinates
+            if len(fills):
+                self._obj.coords["StructureNames"] = new_names
+        elif n_diff < 0:  # Need to add to dataarray
+            old_names = self._obj.coords["StructureNames"].values
+            dataarray = self._fill_in_missing(dataarray, old_names)
+            self._obj[uid_name] = (coords, dataarray.data)
+        else:  # No need to add blank structures
+            self._obj[uid_name] = (coords, dataarray.data)
+
+    def _reorder_structures(self, dataarray, new_names):
+        pass
+
+    def _fill_in_missing(self, dataarray, new_names):
+        expanded_array = np.zeros((len(new_names), *dataarray.shape[1:]))
+        old_names = dataarray.coords['StructureNames'].values
+        missing = list(set(new_names) - set(old_names))
+
+        for i, (name, array) in enumerate(zip(old_names, dataarray.values)):
+            if name not in new_names:
+                filler = np.empty_like(dataarray.shape[1:])
+                expanded_array[i] = filler
+                old_names.insert(missing.pop())
+            else:
+                expanded_array[i] = array
+
+        fields = ['PatientPosition_x-axis', 'PatientPosition_y-axis', 'PatientPosition_z-axis']
+        coords = {'StructureNames': new_names}
+
+        for field in fields:
+            coords.update({field: dataarray.coords[field]})
+
+        # reorder_structures()
+
+        return xr.DataArray(expanded_array, coords=coords, attrs=dataarray.attrs)
+
+
+
+# TODO integrate this into the working knowledge
 def create_dataset(Modality):
     dims = {}
     for mod, dicoms in Modality.dicom_files:
         dims.update({mod: create_dataarray(dicoms)})
-    new_ds = xr.Dataset(dims)
+    new_ds = xr.Dataset(dims, name)
     Modality.volume_data = new_ds
 
 
@@ -379,36 +461,28 @@ def create_dataarray(volume, dicom_files, struct_names=None):
     coords = volume_dimensions.report_coords()
     name = volume_dimensions.SeriesInstanceUID
 
-    dims = ['x_ipp', 'y_ipp', 'z_ipp']
     if struct_names is not None:
-        dims = ['struct_names'] + dims
-        new_coords = ({'struct_names': struct_names})
+        new_coords = ({'StructureNames': struct_names})
         new_coords.update(coords)
         coords = new_coords
 
-    new_da = xr.DataArray(volume, name=name, coords=coords)#, dims=dims)
+    new_da = xr.DataArray(volume, name=name, coords=coords)
     new_da.attrs = attrs
 
     return new_da
 
 
-# Each image will be a xarray.DataArray
-# The dims will simply be the x, y, z coordinates
-# For a structure, there will also be structure names
-# structure will have a hidden accessor for is_structure
-# Then the overall reconstructed group will be stored as a
-# xarray.Dataset with the same coordinates for x, y, z
-# and a series of special methods to implement special group
-# funciontality
 
 if __name__ == '__main__':
     ct_files = glob('/home/eporter/eporter_data/rtog_project/dicoms/train/**/Patient_10*71/**/CT/*.dcm', recursive=True)
-    volume = np.zeros((5, 512, 512, len(ct_files)))
-    print(volume.shape)
+    volume = np.zeros((5, 512, 512, len(ct_files)), dtype=np.bool)
     struct_names = ['rt' + str(n) for n in range(5)]
     xrda = create_dataarray(volume=volume, dicom_files=ct_files, struct_names=struct_names)
+    xrda.attrs['Modality'] = 'RTSTRUCT'
     xrds = xrda.to_dataset()
-    print(xrda)
-    print(xrda.attrs)
-    print(xrda.field_of_view())
+    xrda1 = create_dataarray(volume=np.zeros((512, 512, len(ct_files)), dtype='float32'), dicom_files=ct_files)
+    xrds.extend_vars.image(xrda1)
+    xrda2 = create_dataarray(volume=np.zeros((4, 512, 512, len(ct_files)), dtype=np.bool), dicom_files=ct_files, struct_names=struct_names[1:]) #+['rt5'])
+    xrda2.attrs['Modality'] = 'RTSTRUCT'
+    xrds.extend_vars.struct(xrda2)
     print(xrds)
