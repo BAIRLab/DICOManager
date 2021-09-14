@@ -274,6 +274,15 @@ class Reconstruction:
                 else:
                     filled_zlocs.append(zloc)
 
+            if hasattr(ds, 'PixelPaddingValue'):
+                if ds.PixelRepresentation:
+                    twos_complement = ds.PixelPaddingValue
+                    bits = ds.BitsStored
+                    unsigned_int = twos_complement - (1 << bits)
+                    fill_array[fill_array == unsigned_int] = 0
+                else:
+                    fill_array[fill_array == ds.PixelPaddingValue] = 0
+
             if HU:
                 slope = ds.RescaleSlope
                 intercept = ds.RescaleIntercept

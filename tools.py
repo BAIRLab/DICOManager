@@ -219,7 +219,7 @@ class Interpolate(ImgHandler):
                         interpolated.append(eslice)
                     elif not self.extrapolate:
                         utils.colorwarn(f'Cannot interpolate {img.PatientID}, try extroplate=True')
-                    elif lo_slice is not None:
+                    elif hi_slice is not None:
                         volume[..., eslice] = hi_slice
                     else:
                         volume[..., eslice] = lo_slice
@@ -362,23 +362,23 @@ class Resample(ImgHandler):
         """Computes resampling ratio between two lists
 
         Args:
-            list1 (list): Desired parameters
-            list2 (list): Current parameters
+            list1 (list): Current parameters
+            list2 (list): Desired parameters
 
         Returns:
             list: Resampling ratio
         """
         ratio = []
         for x0, x1 in zip(list1, list2):
-            if x0 is None:
-                x0 = x1
-            ratio.append(x0 / x1)
+            if x1 is None:
+                x1 = x0
+            ratio.append(x1 / x0)
         return ratio
 
     def _dims_to_ratio(self, img: ReconVolumeOrFile) -> list:
         """Calculates the resampling ratio based on dimensions
         """
-        return self._compute_ratio(self.dims, img.dims.shape)
+        return self._compute_ratio(img.dims.shape, self.dims)
 
     def _voxel_size_to_ratio(self, img: ReconVolumeOrFile) -> list:
         """Calculates the resampling ratio based on voxel size
