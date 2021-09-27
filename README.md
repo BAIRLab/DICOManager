@@ -31,19 +31,20 @@
 <!-- PROJECT LOGO -->
 <br />
 <p align="center">
-  <h3 align="center">project_title</h3>
+  <h3 align="center">DICOManager</h3>
 
   <p align="center">
-    project_description
+    A DICOM sorting and processing toolkit
     <br />
-    <a href="https://github.com/github_username/repo_name"><strong>Explore the docs »</strong></a>
+    <a href="https://github.com/BAIRLab/DICOManager/"><strong>Explore the docs »</strong></a>
     <br />
+    [![Python 3.6](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-380/)
     <br />
-    <a href="https://github.com/github_username/repo_name">View Demo</a>
+    <a href="https://github.com/BAIRLab/DICOManager/blob/dev/example.py">View Demo</a>
     ·
-    <a href="https://github.com/github_username/repo_name/issues">Report Bug</a>
+    <a href="https://github.com/BAIRLab/DICOManager/issues">Report Bug</a>
     ·
-    <a href="https://github.com/github_username/repo_name/issues">Request Feature</a>
+    <a href="https://github.com/BAIRLab/DICOManager/issues">Request Feature</a>
   </p>
 </p>
 
@@ -79,13 +80,7 @@
 
 <!-- ABOUT THE PROJECT -->
 ## About The Project
-
-
-
-Here's a blank template to get started:
-**To avoid retyping too much info. Do a search and replace with your text editor for the following:**
-`github_username`, `repo_name`, `twitter_handle`, `email`, `project_title`, `project_description`
-
+DICOManager is designed around building a DICOM file tree, from which multi-threaded reconstruction, processing and saving can be conducted. For systems with limited memory, file trees contain pointers to disk allowing reconstruction to be run on as little as 8 GiB memory. For systems with limited write access, all operations can be conducted in memory.
 
 ### Built With
 
@@ -129,25 +124,26 @@ DICOManager is designed around building DICOM trees and conducting multithreaded
 The file tree can then be saved, reconstructed into volumes, filtered, sorted or manipulated.
 
 **Building a tree**
-'''
+```
 from DICOManager import groupings
+from glob import glob
 
-files = glob('/path/to/unsorted/files/\*\*/*.dcm', recursive=True)
+files = glob('/path/to/unsorted/files/**/*.dcm', recursive=True)
 project = groupings.Cohort(files=files, name='Example')
-'''
+```
 
 **Saving DICOM tree**
-'''
+```
 project.save_tree('/path/to/save/tree')
-'''
+```
 
 **Reconstructing DICOMs**
 To reduce memory usage, the default behavior for reconstruction is to write the volumes to disk and only store the paths to the volumes in memory.
-'''
+```
 project.recon(path='/path/to/save/pointers')
-'''
+```
 
-_For more examples, please refer to the [jupyter notebook](https://github.com/BAIRLab/DICOManager/blob/dev/tutorial.ipynb) or [example script](https://github.com/BAIRLab/DICOManager/blob/dev/example.py).
+For more examples, please refer to the [jupyter notebook](https://github.com/BAIRLab/DICOManager/blob/dev/tutorial.ipynb) or [example script](https://github.com/BAIRLab/DICOManager/blob/dev/example.py).
 
 <!-- ROADMAP -->
 ## Roadmap
@@ -159,7 +155,7 @@ The remaining tasks are in the process of being completed:
 * Reading saved directory trees without re-sorting
 * Checking loaded tree for validity
 * Updating deconstruction for new data structures
-* Saving as either .npy or NIFTI format or x-array
+* Support for saving as NIFTI format or x-array
 * Improving documentation and creation of wiki
 * Formatting for pip install
 
@@ -184,7 +180,7 @@ Distributed under the BSD-3-Clause License. See `LICENSE` for more information.
 <!-- CONTACT -->
 ## Contact
 
-Your Name - evan.porter(at)beaumont.org
+Evan Porter - evan.porter(at)beaumont.org
 
 Project Link: [https://github.com/BAIRLab/DICOManager](https://github.com/BAIRLab/DICOManager)
 
