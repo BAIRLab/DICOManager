@@ -35,11 +35,9 @@
   <h3 align="center">DICOManager</h3>
 
   <p align="center">
-    A DICOM sorting and processing toolkit
+    A DICOM Sorting and Processing Toolkit written in Python
     <br />
     <a href="https://github.com/BAIRLab/DICOManager/"><strong>Explore the docs »</strong></a>
-    <br />
-    <img src="https://img.shields.io/pypi/pyversions/rt-utils" alt="Python version" height="18">
     <br />
     <a href="https://github.com/BAIRLab/DICOManager/blob/dev/example.py">View Demo</a>
     ·
@@ -131,6 +129,7 @@ from glob import glob
 
 files = glob('/path/to/unsorted/files/**/*.dcm', recursive=True)
 project = groupings.Cohort(files=files, name='Example')
+print(project)
 ```
 
 **Saving DICOM tree**
@@ -139,12 +138,13 @@ project.save_tree('/path/to/save/tree')
 ```
 
 **Reconstructing DICOMs**
+<br />
 To reduce memory usage, the default behavior for reconstruction is to write the volumes to disk and only store the paths to the volumes in memory.
 ```
 project.recon(path='/path/to/save/pointers')
 ```
 
-For more examples, please refer to the [jupyter notebook](https://github.com/BAIRLab/DICOManager/blob/dev/tutorial.ipynb) or [example script](https://github.com/BAIRLab/DICOManager/blob/dev/example.py).
+For more examples, please refer to the [jupyter notebook](https://github.com/BAIRLab/DICOManager/blob/dev/tutorial.ipynb) or the example script [example.py](https://github.com/BAIRLab/DICOManager/blob/dev/example.py).
 
 <!-- ROADMAP -->
 ## Roadmap
@@ -192,6 +192,7 @@ Evan Porter - evan.porter(at)beaumont.org
 * [Numpy](https://numpy.org)
 * [scipy.ndimage](https://docs.scipy.org/doc/scipy/reference/ndimage.html)
 * [xarray](http://xarray.pydata.org/en/stable/)
+* [scikit-image](https://scikit-image.org/docs/stable/api/skimage.html)
 * [README design template](https://github.com/othneildrew/Best-README-Template)
 
 
