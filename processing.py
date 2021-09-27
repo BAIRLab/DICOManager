@@ -5,7 +5,7 @@ import pydicom
 from . import groupings
 from . import utils
 from scipy.interpolate import RegularGridInterpolator as RGI
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .utils import VolumeDimensions, check_dims
 from .deconstruction import RTStructConstructor
 from typing import TYPE_CHECKING
@@ -116,13 +116,13 @@ class Reconstruction:
         return all_pointers
 
     def _split_mod(self, mod: Modality):
-        """[Wrapper function to split the modalities to their respective functions]
+        """Wrapper function to split the modalities to their respective functions
 
         Args:
-            mod (Modality): [Modality to reconstruct]
+            mod (Modality): Modality to reconstruct
 
         Returns:
-            [tuple]: [Modality and ReconstructedFile]
+            tuple: Modality and ReconstructedFile
 
         Notes:
             # Match statement in python 3.10
@@ -141,21 +141,25 @@ class Reconstruction:
             pointer = self.mr(mod)
         elif mod.name == 'NM':
             pointer = self.nm(mod)
+        elif mod.name == 'PT':
+            pointer = self.pt(mod)
         elif mod.name == 'PET':
             pointer = self.pet(mod)
         elif mod.name == 'DOSE':
             pointer = self.dose(mod)
+        else:
+            print(mod.name)
         return (mod, pointer)
 
     def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
-        """[converts a dicom contour slice into image coordinates]
+        """Converts a dicom contour slice into image coordinates
 
         Args:
             contour_slice (pydicom.dataset.Dataset): [(3006, 0016): Contour Image Sequence]
 
         Returns:
-            [np.ndarray]: [2D numpy array of contour points in image coordinates]
-            [int]: [The z location of the rtstruct slice location]
+            np.ndarray: 2D numpy array of contour points in image coordinates
+            int: The z location of the rtstruct slice location
         """
         contour_pts = np.array(contour_slice.ContourData).reshape(-1, 3)
         pts_diff = abs(contour_pts - self.dims.origin)
@@ -193,13 +197,13 @@ class Reconstruction:
             raise TypeError('filter_by[\'StructName\'] must be dict or list')
 
     def define_vol_dims(self, frame_of_ref: FrameOfRef) -> None:
-        """[Defines the volume dimensions from a FrameOfRef for RTSTRUCT construction]
+        """Defines the volume dimensions from a FrameOfRef for RTSTRUCT construction
 
         Args:
-            frame_of_ref (FrameOfRef): [Frame of Ref with CT or MR DICOMs]
+            frame_of_ref (FrameOfRef): Frame of Ref with CT or MR DICOMs
 
         Raises:
-            TypeError: [Raised if CT or MR are not within FrameOfRef]
+            TypeError: Raised if CT or MR are not within FrameOfRef
         """
         if not hasattr(self, 'dims'):
             for mod in frame_of_ref.iter_modalities():
@@ -210,14 +214,14 @@ class Reconstruction:
                 raise TypeError('Volume dimensions not created, no MR or CT in Frame Of Reference')
 
     def struct(self, modality: Modality) -> None:
-        """[RTSTRUCT reconstruction from a modality with RTSTRUCT DicomFiles]
+        """RTSTRUCT reconstruction from a modality with RTSTRUCT DicomFiles
 
         Args:
-            modality (Modality): [Modality with RTSTRUCT DicomFiles]
-            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+            modality (Modality): Modality with RTSTRUCT DicomFiles
+            in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
 
         Raises:
-            LookupError: [Must set volume dimensions with 'define_vol_dims' first]
+            LookupError: Must set volume dimensions with 'define_vol_dims' first
         """
         if not hasattr(self, 'dims'):
             raise LookupError('Must define volume dimensions first')
@@ -232,7 +236,7 @@ class Reconstruction:
                     if valid:
                         try:
                             contour_data = ds.ROIContourSequence[index].ContourSequence
-                        except AttributeError:
+                        except Exception:
                             utils.colorwarn(f'Contour {name} for {struct} is emtpy')
                             built = None
                         else:
@@ -249,12 +253,51 @@ class Reconstruction:
             modality._add_file(struct_set)
 
     @check_dims
+    def pt(self, modality: Modality):
+        for pt_group in modality.pt:
+            fill_array = np.zeros(self.dims.shape, dtype='float32')
+            volume, errors = self.axial_image_backend(volume=fill_array, filegroup=pt_group)
+
+            ds = pydicom.dcmread(pt_group[0].filepath)
+            pt_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
+            pt_set.add_vol(ds.SOPInstanceUID, fill_array)
+
+            if not self.in_memory:
+                pt_set.convert_to_pointer(path=self.path)
+                return pt_set
+            modality._add_file(pt_set)
+    
+    @dataclass
+    class ImageError:
+        corrupt_slices: list = field(default_factory=list)
+        empty_slices: list = field(default_factory=list)
+
+    def axial_image_backend(self, volume, filegroup):
+        errors = self.ImageError()
+        filled_zlocs = []
+        for dicomfile in sorted(filegroup):
+            ds = pydicom.dcmread(dicomfile.filepath)
+            zloc = self.dims.calc_z_index(loc=ds.ImagePositionPatient[-1])
+
+            try:
+                volume[:, :, zloc] = np.array(ds.pixel_array, dtype='float32')
+                filled_zlocs.append(zloc)
+            except ValueError:
+                errors.corrupt_slices.append(zloc)
+            except IndexError:
+                utils.colorwarn(f'Patient {ds.PatientID}, slice {zloc} is problematic')
+            else:
+                filled_zlocs.append(zloc)
+
+        return (volume, errors)
+
+    @check_dims
     def ct(self, modality: Modality, HU: bool = True) -> None:
-        """[Reconstruct CT Volume from DICOMs within Modality object]
+        """Reconstruct CT Volume from DICOMs within Modality object
 
         Args:
-            modality (Modality): [Modality object containing CT DICOMs]
-            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+            modality (Modality): Modality object containing CT DICOMs
+            in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
         for ct_group in modality.ct:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
@@ -273,6 +316,15 @@ class Reconstruction:
                     utils.colorwarn(f'Patient {ds.PatientID}, slice {zloc} is problematic')
                 else:
                     filled_zlocs.append(zloc)
+
+            if hasattr(ds, 'PixelPaddingValue'):
+                if ds.PixelRepresentation:
+                    twos_complement = ds.PixelPaddingValue
+                    bits = ds.BitsStored
+                    unsigned_int = twos_complement - (1 << bits)
+                    fill_array[fill_array == unsigned_int] = 0
+                else:
+                    fill_array[fill_array == ds.PixelPaddingValue] = 0
 
             if HU:
                 slope = ds.RescaleSlope
@@ -299,11 +351,11 @@ class Reconstruction:
 
     @check_dims
     def nm(self, modality: Modality) -> None:
-        """[Reconstruct NM DICOMs within Modality object]
+        """Reconstruct NM DICOMs within Modality object
 
         Args:
-            modality (Modality): [Modality object containing NM DICOM]
-            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+            modality (Modality): Modality object containing NM DICOM
+            in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
         for nm_group in modality.nm:
             ds = pydicom.dcmread(nm_group.filepath)
@@ -325,11 +377,11 @@ class Reconstruction:
 
     @check_dims
     def mr(self, modality: Modality) -> None:
-        """[Reconstruct MR Volume from DICOMs within Modality object]
+        """Reconstruct MR Volume from DICOMs within Modality object
 
         Args:
-            modality (Modality): [Modality object containing MR DICOMs]
-            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+            modality (Modality): Modality object containing MR DICOMs
+            in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
         for mr_group in modality.mr:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
@@ -358,11 +410,11 @@ class Reconstruction:
 
     @check_dims
     def pet(self, modality: Modality) -> None:
-        """[Reconstruct PET DICOMs within Modality object]
+        """Reconstruct PET DICOMs within Modality object
 
         Args:
-            modality (Modality): [Modality object containing PET DICOM]
-            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+            modality (Modality): Modality object containing PET DICOM
+            in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
         for pet_group in modality.pet:
             fill_array = np.zeros(self.dims.shape, dtype='float32')
@@ -389,11 +441,11 @@ class Reconstruction:
 
     @check_dims
     def dose(self, modality: Modality) -> None:
-        """[Reconstructs RTDOSE from Modality object]
+        """Reconstructs RTDOSE from Modality object
 
         Args:
-            modality (Modality): [Modality object containing RTDOSE]
-            in_place (bool, optional): [Sorts into existing tree if True]. Defaults to True.
+            modality (Modality): Modality object containing RTDOSE
+            in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
         ct_coords = self.dims.coordgrid()
         for dosefile in modality.dose:
@@ -420,17 +472,17 @@ class Deconstruction:
 
     def to_rt(self, source_rt: Modality, masks: np.ndarray,
               roi_names: list = None, mim: bool = True,
-              sort: bool = True) -> pydicom.dataset.Dataset:
-        """[Appends masks to a given RTSTRUCT modality object]
+              sort: bool = True) -> None:
+        """Appends masks to a given RTSTRUCT modality object
 
         Args:
-            source_rt (Modality): [description]
-            masks (np.ndarray): [description]
-            roi_names (list, optional): [description]. Defaults to None.
-            mim (bool, optional): [description]. Defaults to True.
+            source_rt (Modality): Source Modality group
+            masks (np.ndarray): Numpy array of the masks to convert into RTSTRUCT
+            roi_names (list, optional): Names to associate with the masks. Defaults to None.
+            mim (bool, optional): Encode in a style compliant with DICOM inner structs. Defaults to True.
 
-        Returns:
-            pydicom.dataset.Dataset: [description]
+        Todo:
+            Rename mim to 8.3.6.1 (or whatever the specific DICOM standard is for inner structures)
         """
         if not sort:
             return self.from_rt(source_rt, masks, roi_names, mim, False, True)
@@ -485,14 +537,14 @@ class Deconstruction:
         return None
 
     def save_rt(self, source_rt: pydicom.dataset.Dataset, filename: str = None) -> None:
-        """[Save created RTSTRUCT to specified filepath]
+        """Save created RTSTRUCT to specified filepath
 
         Args:
-            source_rt (pydicom.dataset.Dataset): [RTSTRUCT to save]
-            filename (str, optional): [Default name is ./SOPInstanceUID]. Defaults to None.
+            source_rt (pydicom.dataset.Dataset): RTSTRUCT to save
+            filename (str, optional): Default name is ./SOPInstanceUID. Defaults to None.
 
         Raises:
-            TypeError: [Occurs if source_rt is not a complete pydicom.dataset object]
+            TypeError: Occurs if source_rt is not a complete pydicom.dataset object
         """
         if not filename:
             try:

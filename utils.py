@@ -9,6 +9,7 @@ import shutil
 import time
 import warnings
 from anytree import NodeMixin
+from scipy import ndimage
 from anytree.iterators.levelorderiter import LevelOrderIter
 from datetime import datetime
 from pathlib import Path
@@ -31,10 +32,10 @@ class bcolors:
 
 
 def colorwarn(message: str, source: str = None):
-    """[Fancy warning in color]
+    """Fancy warning in color
 
     Args:
-        message (str): [Warning message to display]
+        message (str): Warning message to display
 
     References:
         https://stackoverflow.com/questions/26430861/make-pythons-warnings-warn-not-mention-itself
@@ -53,16 +54,16 @@ def colorwarn(message: str, source: str = None):
 
 def save_tree(tree: NodeMixin, path: str, prefix: str = 'group',
               separate_volume_dir: bool = True) -> None:
-    """[saves copy of dicom files (and volumes, if present) to a specified
-        location, ordered the same as the tree layout]
+    """Saves copy of dicom files (and volumes, if present) to a specified
+        location, ordered the same as the tree layout
 
     Args:
-        tree (NodeMixin): [tree to save]
-        path (str): [absolute path to write the file tree]
-        prefix (str, optional): [Specifies directory prefix as
-            'group', 'date' or None]. Default to 'group'.
-        separate_volume_dir (bool, optional): [Seperates volumes and dicoms
-            at the modality level]. Default to 'True'.
+        tree (NodeMixin): Tree to save
+        path (str): Absolute path to write the file tree
+        prefix (str, optional): Specifies directory prefix as
+            'group', 'date' or None. Default to 'group'.
+        separate_volume_dir (bool, optional): Seperates volumes and dicoms
+            at the modality level. Default to 'True'.
 
     Notes:
         prefix = 'date' not functional
@@ -118,7 +119,7 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group',
                     original = fname.filepath
                     newpath = dcmpath + fname.name
                     shutil.copy(original, newpath)
-    print(f'\nTree {tree.name} written to {path}')
+    print(f'Tree {tree.name} written to {path}')
 
 
 def current_datetime() -> str:
@@ -129,14 +130,14 @@ def current_datetime() -> str:
 
 
 def mod_getter(modtype: str) -> object:
-    """[decorator to yield a property getter for the
-        specified modality type]
+    """Decorator to yield a property getter for the
+        specified modality type
 
     Args:
-        modtype (str): [the specified modality type]
+        modtype (str): The specified modality type
 
     Returns:
-        object: [a property getter function]
+        object: A property getter function
     """
     def func(self):
         modlist = []
@@ -157,10 +158,10 @@ def mod_setter(modtype: str) -> object:
 
 # Move to tools
 def print_rts(rts):
-    """[Simplified printing of DICOM RTSTRUCT without referenced UIDs]
+    """Simplified printing of DICOM RTSTRUCT without referenced UIDs
 
     Args:
-        rts ([pathlib.Path or pydicom.dataset]): [DICOM RTSTRUCT path or dataset]
+        rts (pathlib.Path or pydicom.dataset): DICOM RTSTRUCT path or dataset
     """
     if type(rts) is not pydicom.dataset:
         rts = pydicom.dcmread(rts)
@@ -210,7 +211,7 @@ class VolumeDimensions:
     def _calculate_dz(self, zlocations):
         zlocations.sort()
         differences = np.zeros((len(zlocations) - 1))
-        previous = min(zlocations)
+        previous = zlocations[0]
 
         for i in range(1, len(zlocations)):
             differences[i - 1] = round(abs(previous - zlocations[i]), 2)
@@ -223,10 +224,10 @@ class VolumeDimensions:
         return min(differences)
 
     def _calc_n_slices(self, files: list):
-        """[calculates the number of volume slices]
+        """Calculates the number of volume slices
 
         Args:
-            files ([DicomFile]): [A list of DicomFile objects]
+            files (DicomFile): A list of DicomFile objects
 
         Notes:
             Creating the volume by the difference in slice location at high and
@@ -260,7 +261,8 @@ class VolumeDimensions:
                     low_inst = inst
                     low_thickness = ds.SliceThickness
 
-        if 1 < low_inst < 5 and low_inst != np.inf:  # For extrapolation of missing slices
+        if 1 < low_inst < 5 and low_inst != np.inf:
+            # For extrapolation of missing slices
             # Need to make it the slice thickness of the lowest slice
             # in case the image has mixed thicknesses
             z0 -= low_thickness * (low_inst - 1)
@@ -270,7 +272,6 @@ class VolumeDimensions:
         self.zlohi = (z0, z1)
         self.origin = np.array([*self.ipp[:2], max(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
-
         return ds
 
     @property
@@ -421,14 +422,14 @@ def three_axis_plot(array: np.ndarray, name: str, mask: np.ndarray = None) -> No
 
 
 def dict_to_dataclass(d: dict, name: str = 'd_dataclass') -> object:
-    """[Converts a dictionary into a dataclass]
+    """Converts a dictionary into a dataclass
 
     Args:
-        d (dict): [Dict of name and properties for the dataclass]
-        name (str, optional): [Name of dataclass]. Defaults to 'd_dataclass'.
+        d (dict): Dict of name and properties for the dataclass
+        name (str, optional): Name of dataclass. Defaults to 'd_dataclass'.
 
     Returns:
-        [object]: [Created dataclass]
+        dataclass object: Created dataclass
     """
     @dataclass
     class Wrapped:
@@ -475,14 +476,14 @@ def flatten_list(S):
 
 
 def split_tree(primary: NodeMixin, n: int = 10) -> list:
-    """[Splits a tree into a series of n-sized trees]
+    """Splits a tree into a series of n-sized trees
 
     Args:
-        primary (NodeMixin): [Primary tree to split]
-        n (int, optional): [Size of each smaller tree]. Defaults to 10.
+        primary (NodeMixin): Primary tree to split
+        n (int, optional): Size of each smaller tree. Defaults to 10.
 
     Returns:
-        list: [A list of the split trees]
+        list: A list of the split trees
     """
     trees = []
     tree = primary.__class__(primary.name)
@@ -502,14 +503,14 @@ def split_tree(primary: NodeMixin, n: int = 10) -> list:
 
 # this should really be type GroupUtils
 def combine_trees(primary: NodeMixin, secondaries: list) -> NodeMixin:
-    """[Combine a series of trees into the primary tree]
+    """Combine a series of trees into the primary tree
 
     Args:
-        primary (NodeMixin): [Primary tree to return with secondaries]
-        secondaries (list): [Secondaries to add to primary tree]
+        primary (NodeMixin): Primary tree to return with secondaries
+        secondaries (list): Secondaries to add to primary tree
 
     Returns:
-        NodeMixin: [Unified tree under type Primary]
+        NodeMixin: Unified tree under type Primary
     """
     for tree in secondaries:
         for child in tree:
@@ -518,11 +519,11 @@ def combine_trees(primary: NodeMixin, secondaries: list) -> NodeMixin:
 
 
 def insert_into_tree(tree: NodeMixin, mod_ptr_pairs: list) -> None:
-    """[Inserts a volume pointer into a tree]
+    """Inserts a volume pointer into a tree
 
     Args:
-        tree (NodeMixin): [Tree to insert volume pointers]
-        mod_ptr_pairs (list): [list of modality and corresponding pointer]
+        tree (NodeMixin): Tree to insert volume pointers
+        mod_ptr_pairs (list): list of modality and corresponding pointer
     """
     for modality, pointer in mod_ptr_pairs:
         node = tree
@@ -532,14 +533,14 @@ def insert_into_tree(tree: NodeMixin, mod_ptr_pairs: list) -> None:
 
 
 class ReconToPath:
-    """[For reconstruction of a tree]
+    """For reconstruction of a tree
 
     Args:
-        tree (NodeMixin): [Tree to reconstruct]
-        path (str): [Path to save reconstructed volume]
+        tree (NodeMixin): Tree to reconstruct
+        path (str): Path to save reconstructed volume
 
     Returns:
-        [list]: [A list of tuples containing modality and ReconstructedFile]
+        list: A list of tuples containing modality and ReconstructedFile
     """
     def __init__(self, path: str = None):
         self.path = path
@@ -549,13 +550,13 @@ class ReconToPath:
 
 
 def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
-    """[A multiprocessed reconstruction of primary]
+    """A multiprocessed reconstruction of primary
 
     Args:
-        primary (NodeMixin): [Tree for reconstruction]
+        primary (NodeMixin): Tree for reconstruction
 
     Returns:
-        NodeMixin: [Primary with the volume pointers inserted]
+        NodeMixin: Primary with the volume pointers inserted
 
     Notes:
         Reconstruction does not scale with processors, so we split the
@@ -566,12 +567,10 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
 
     ncpus = multiprocessing.cpu_count()
     recon_fn = ReconToPath(path)
-
     with ProcessPool(max_workers=ncpus//4) as P:
         results = list(P.map(recon_fn, trees))
         P.shutdown()
     ProcessPool().shutdown()
-
     primary = combine_trees(primary, trees)
 
     for mod_ptr_pairs in results:
@@ -581,14 +580,14 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
 
 
 def decendant_types(group: NodeMixin) -> list:
-    """[Declare the decendant types for a group, could
-        also use group.decendant]
+    """Declare the decendant types for a group, could
+       also use group.decendant
 
     Args:
-        group (NodeMixin): [The group to determine decendants]
+        group (NodeMixin): The group to determine decendants
 
     Returns:
-        list: [List of decendant types]
+        list: List of decendant types
     """
     heiarchy = ['Cohort', 'Patient', 'FrameOfRef', 'Study', 'Series', 'Modality']
     index = heiarchy.index(group)
@@ -596,14 +595,14 @@ def decendant_types(group: NodeMixin) -> list:
 
 
 def structure_voxel_count(tree: NodeMixin, structure: str) -> dict:
-    """[The count of voxels in each occurance of a structure]
+    """The count of voxels in each occurance of a structure
 
     Args:
-        tree (NodeMixin): [The tree to iterate through]
-        structure (str): [String corresponding to structure name]
+        tree (NodeMixin): The tree to iterate through
+        structure (str): String corresponding to structure name
 
     Returns:
-        dict: [Dict of SeriesInstanceUID and counts]
+        dict: Dict of SeriesInstanceUID and counts
     """
     it = tree.iter_struct_volume_files()
     counts = {}
@@ -621,13 +620,13 @@ def structure_voxel_count(tree: NodeMixin, structure: str) -> dict:
 
 
 def clean_up(arr: np.ndarray) -> np.ndarray:
-    """[clean an array by removing any discontinuities]
+    """Clean an array by removing any discontinuities
 
     Args:
-        arr (np.ndarray): [boolean array to be cleaned]
+        arr (np.ndarray): boolean array to be cleaned
 
     Returns:
-        np.ndarray: [cleaned boolean array]
+        np.ndarray: cleaned boolean array
     """
     encoded, n_labels = measure.label(arr, connectivity=3, return_num=True)
     if n_labels >= 2:
@@ -637,16 +636,64 @@ def clean_up(arr: np.ndarray) -> np.ndarray:
     return np.array(arr, dtype='bool')
 
 
-def dose_max_points(dose_array: np.ndarray,
-                    dose_coords: np.ndarray = None) -> np.ndarray:
-    """[Calculates the dose maximum point in an array, returns index or coordinates]
+def fill_holes(arr: np.ndarray, axially: bool = True) -> np.ndarray:
+    """Fills holes either volumetrically or axially (default)
 
     Args:
-        dose_array (np.ndarray): [A reconstructed dose array]
-        dose_coords (np.ndarray, optional): [Associated patient coordinates]. Defaults to None.
+        arr (np.ndarray): [description]
 
     Returns:
-        np.ndarray: [The dose max index, or patient coordinates, if given]
+        np.ndarray: [description]
+    """
+    if not axially:
+        return ndimage.binary_fill_holes(arr)
+    for z in range(arr.shape[-1]):
+        arr[..., z] = ndimage.binary_fill_holes(arr[..., z])
+    return arr
+
+
+def smooth(arr: np.ndarray, iterations: int = 2) -> np.ndarray:
+    big = ndimage.binary_dilation(arr, iterations=iterations)
+    return ndimage.binary_erosion(big, iterations=iterations)
+
+
+def smooth_median(arr: np.ndarray, kernel_size: int = 2) -> np.ndarray:
+    return ndimage.median_filter(arr, kernel_size)
+
+
+def expand_contour(arr: np.ndarray, distance: float, voxel_size: list,
+                   epsilon: float = 0) -> np.ndarray:
+    """Expand contour uniformly in all dimensions by a given distance
+
+    Args:
+        arr (np.ndarray): Boolean numpy array to expand
+        distance (float): Distance, in voxel_size dimension units to expand
+        voxel_size (list): Voxel dimensions in either pixels [1, 1, 1] or mm
+        epsilon (float, optional): Epsilon to offset the expansion, same
+            as adding to the distance. Potentially helpful because software, like
+            MIM, contours at voxel_size[0]/2 dimensions an to match a MIM expansion may warrant
+            an offset of voxel_size[0]/2. Defaults to 0.
+
+    Returns:
+        np.ndarray: [description]
+    """
+    padded_distance = distance + epsilon
+    surface = ndimage.binary_erosion(arr) ^ np.array(arr, dtype=np.bool)
+    inverted = np.invert(surface)
+    edt = ndimage.distance_transform_edt(inverted, sampling=voxel_size)
+    return edt < padded_distance
+
+
+def dose_max_points(dose_array: np.ndarray,
+                    dose_coords: np.ndarray = None) -> np.ndarray:
+    """Calculates the dose maximum point in an array, returns index or coordinates
+
+    Args:
+        dose_array (np.ndarray): A reconstructed dose array
+        dose_coords (np.ndarray, optional): Associated patient coordinates. Defaults to None.
+
+    Returns:
+        np.ndarray: The dose max index, or patient coordinates, if given
     """
     index = np.unravel_index(np.argmax(dose_array), dose_array.shape)
 

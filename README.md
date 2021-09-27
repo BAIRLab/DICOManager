@@ -25,6 +25,7 @@
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
 [![BSD-3-Clause License][license-shield]][license-url]
+[![3.8][python-shield]][python-url]
 
 
 
@@ -38,7 +39,7 @@
     <br />
     <a href="https://github.com/BAIRLab/DICOManager/"><strong>Explore the docs »</strong></a>
     <br />
-    [![Python 3.6](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-380/)
+    <img src="https://img.shields.io/pypi/pyversions/rt-utils" alt="Python version" height="18">
     <br />
     <a href="https://github.com/BAIRLab/DICOManager/blob/dev/example.py">View Demo</a>
     ·
@@ -182,10 +183,6 @@ Distributed under the BSD-3-Clause License. See `LICENSE` for more information.
 
 Evan Porter - evan.porter(at)beaumont.org
 
-Project Link: [https://github.com/BAIRLab/DICOManager](https://github.com/BAIRLab/DICOManager)
-
-
-
 <!-- ACKNOWLEDGEMENTS -->
 ## Acknowledgements
 
@@ -210,3 +207,5 @@ Project Link: [https://github.com/BAIRLab/DICOManager](https://github.com/BAIRLa
 [issues-url]: https://github.com/BAIRLab/DICOManager/issues
 [license-shield]: https://img.shields.io/github/license/BAIRLab/DICOManager.svg?style=for-the-badge
 [license-url]: https://github.com/BAIRLab/DICOManager/blob/dev/LICENSE.txt
+[python-shield]: https://img.shields.io/badge/python-3.8-blue.svg
+[python-url]: https://www.python.org/downloads/release/python-360/
