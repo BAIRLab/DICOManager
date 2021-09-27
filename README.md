@@ -207,5 +207,5 @@ Evan Porter - evan.porter(at)beaumont.org
 [issues-url]: https://github.com/BAIRLab/DICOManager/issues
 [license-shield]: https://img.shields.io/github/license/BAIRLab/DICOManager.svg?style=for-the-badge
 [license-url]: https://github.com/BAIRLab/DICOManager/blob/dev/LICENSE.txt
-[python-shield]: https://img.shields.io/badge/python-3.8-blue.svg
+[python-shield]: https://img.shields.io/badge/python-3.8-blue.svg?style=for-the-badge
 [python-url]: https://www.python.org/downloads/release/python-360/
