@@ -77,14 +77,16 @@ class ImgAugmentations:
         self.ratio = ratio
 
     def interpolated_update(self, interpolated_slices: list, extrapolated_slices: list) -> None:
-        temp = self.empty_slices
+        temp = set(self.empty_slices)
+        interpolated_slices = set(interpolated_slices)
+        extrapolated_slices = set(extrapolated_slices)
         if len(interpolated_slices) > 0:
             self.interpolated = True
-            self.interpolated_slices = interpolated_slices
+            self.interpolated_slices = list(interpolated_slices + set(self.interpolated_slices))
             temp = list(set(temp) - set(interpolated_slices))
         if len(extrapolated_slices) > 0:
             self.extrapolated = True
-            self.extrapolated_slices = extrapolated_slices
+            self.extrapolated_slices = list(extrapolated_slices + set(self.extrapolated_slices))
             temp = list(set(temp) - set(extrapolated_slices))
         self.empty_slices = temp
 

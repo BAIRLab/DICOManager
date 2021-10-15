@@ -6,6 +6,9 @@ from anytree import NodeMixin
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
 from scipy.ndimage import zoom
 from typing import Union
+from scipy.interpolate import interpn
+from scipy.ndimage.morphology import distance_transform_edt
+from mahotas import bwperim
 from . import utils
 from .groupings import ReconstructedVolume, ReconstructedFile, FrameOfRef
 
@@ -639,109 +642,137 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
 
     return centroids
 
+class InterpolateContours(ImgHandler):
+    """Contour Interpolation
 
-"""
-from scipy.interpolate import interpn
-from scipy.ndimage.morphology import distance_transform_edt
+    Args:
+        roi_names (list): Limited ROIs to interpolate. Defaults to all.
+        z_index (list): Limited list of z_index to interpolate. Defaults
+            to only slices which could not be filled by an image.
+        all_empty (bool): Interpolate all empty slices which are bordered
+            above or below by a filled slice. Defaults to False.
 
-Start of Code for the interpolation of RTSTRUCTs. These will require more user specification
-to prevent the interpolation of intentional gaps within the structure sets.
+    Notes:
+        Only interpolates on slices which are missing slices
 
-@handle_files
-def interpolate_contour(img: ReconstructedVolume, extrapolate=False) -> ReconstructedVolume:
-    # https://stackoverflow.com/questions/48818373/interpolate-between-two-images
-    empty_slices = img.ImgAugmentations.empty_slices
-    if empty_slices and img.is_struct:
-        interpolated = []
-        extrapolated = []
-        for name, volume in img.volumes.items():
-            for eslice in empty_slices:
-                zlo, zhi = (1, 1)
-                lo_slice, hi_slice = (None, None)
-                # Find filled slice below
-                while (eslice - zlo) > 0:
-                    lo_slice = volume[..., eslice-zlo]
-                    if lo_slice.size:
-                        break
-                    zlo += 1
-                # Find filled slice above
-                while (eslice + zhi) < (img.dims.slices - 1):
-                    hi_slice = volume[..., eslice+zhi]
-                    if hi_slice.size:
-                        break
-                    zhi += 1
-                # interpolate or extrapolate, if valid
-                if lo_slice.size and hi_slice.size:
-                    volume[..., eslice] = (hi_slice + lo_slice) / 2
-                    interpolated.append(eslice)
-                elif not extrapolate:
-                    utils.colorwarn(f'Cannot interpolate {img}, try extroplate=True')
-                elif not lo_slice.size:
-                    volume[..., eslice] = hi_slice
-                else:
-                    volume[..., eslice] = lo_slice
-    return interp_shape(lo_slice, hi_slice, 0.5)
+    References:
+        https://stackoverflow.com/questions/48818373/interpolate-between-two-images
+    """
+    def __init__(self, roi_names=None, z_index=None, all_empty=False):
+        self.roi_names = roi_names
+        self.z_index = z_index
+        self.all_empty = all_empty
 
+    def _function(self, lbl):
+        if not lbl.is_struct:
+            return lbl
 
+        empties = set(lbl.augmentations.empty_slices)
+        # Previously interpolated slices from img interpolation
+        empties.add(lbl.augmentations.interpolated_slices)
+        empties = list(empties)
 
-def signed_bwdist(im):
-    '''
-    Find perim and return masked image (signed/reversed)
-    '''
-    from mahotas import bwperim
-    im = -bwdist(bwperim(im))*np.logical_not(im) + bwdist(bwperim(im))*im
-    return im
+        interpolated = False
+        for name, vol in lbl.volumes:
+            if self._check_needed(name, empties):
+                interpolated = True
+                lbl.volumes[name] = self._interpolate(vol, empties)
 
+        if interpolated:
+            lbl.ImgAugmentations.interpolated_update(interpolated, [])
+        return lbl
 
-def bwdist(im):
-    '''
-    Find distance map of image
-    '''
-    dist_im = distance_transform_edt(1-im)
-    return dist_im
+    def _check_needed(self, name, empties):
+        # Checks if slice needs to be interpolated
+        if not len(empties):
+            return False
+        if not self.roi_name:
+            return False
+        return name in self.roi_name
 
+    # Make this into function
+    def _interpolate(self, lbl, empties):
+        # replace with pulling empty from DCM output
+        filled = []
+        new_lbl = np.copy(lbl)
+        for i in range(lbl.shape[-1]):
+            if np.sum(lbl[..., i]):
+                filled.append(i)
+            elif self.all_empty:
+                empties.append(i)
+        for z in empties:
+            if z in filled:
+                continue
+            if self.z_index and z not in self.z_index:
+                continue
+            if z > min(filled) and z < max(filled):
+                lo, hi, ratio = self._nearest(filled, z)
+                lo_lbl = lbl[..., lo]
+                hi_lbl = lbl[..., hi]
+                filler = self._interp_shape(hi_lbl, lo_lbl, ratio)
+                new_lbl[..., z] = np.round(filler)
+                filled.append(z)
+        return new_lbl
 
-def interp_shape(top, bottom, precision):
-    '''
-    Interpolate between two contours
+    def _nearest(self, filled, index):
+        below = np.copy(filled)
+        above = np.copy(filled)
+        below = below[below < index]
+        above = above[above > index]
+        lo = min(below, key=lambda x:abs(x-index))
+        hi = min(above, key=lambda x:abs(x-index))
+        ratio = (index - lo) / (hi - lo)
+        return lo, hi, ratio
 
-    Input: top
-            [X,Y] - Image of top contour (mask)
-           bottom
-            [X,Y] - Image of bottom contour (mask)
-           precision
-             float  - % between the images to interpolate
-                Ex: num=0.5 - Interpolate the middle image between top and bottom image
-    Output: out
-            [X,Y] - Interpolated image at num (%) between top and bottom
+    def _signed_bwdist(self, im):
+        '''
+        Find perim and return masked image (signed/reversed)
+        '''
+        perim = bwperim(im)
+        bwdist = distance_transform_edt(1-perim)
+        im_ma = -1*bwdist*np.logical_not(im) + bwdist*im
+        return im_ma
 
-    '''
-    if precision > 2:
-        print("Error: Precision must be between 0 and 1 (float)")
+    def _interp_shape(self, top, bottom, precision):
+        '''
+        Interpolate between two contours
 
-    top = signed_bwdist(top)
-    bottom = signed_bwdist(bottom)
+        Input: top
+                [X,Y] - Image of top contour (mask)
+            bottom
+                [X,Y] - Image of bottom contour (mask)
+            precision
+                float  - % between the images to interpolate
+                    Ex: num=0.5 - Interpolate the middle image between top and bottom image
+        Output: out
+                [X,Y] - Interpolated image at num (%) between top and bottom
 
-    # row,cols definition
-    r, c = top.shape
+        '''
+        if precision > 2:
+            print("Error: Precision must be between 0 and 1 (float)")
 
-    # Reverse % indexing
-    precision = 1+precision
+        top = self._signed_bwdist(top)
+        bottom = self._signed_bwdist(bottom)
 
-    # rejoin top, bottom into a single array of shape (2, r, c)
-    top_and_bottom = np.stack((top, bottom))
+        # row,cols definition
+        r, c = top.shape
 
-    # create ndgrids
-    points = (np.r_[0, 2], np.arange(r), np.arange(c))
-    xi = np.rollaxis(np.mgrid[:r, :c], 0, 3).reshape((r**2, 2))
-    xi = np.c_[np.full((r**2), precision), xi]
+        # Reverse % indexing
+        precision = 1+precision
 
-    # Interpolate for new plane
-    out = interpn(points, top_and_bottom, xi)
-    out = out.reshape((r, c))
+        # rejoin top, bottom into a single array of shape (2, r, c)
+        top_and_bottom = np.stack((top, bottom))
 
-    # Threshold distmap to values above 0
-    out = out > 0
+        # create ndgrids
+        points = (np.r_[0, 2], np.arange(r), np.arange(c))
+        xi = np.rollaxis(np.mgrid[:r, :c], 0, 3).reshape((r*c, 2))
+        xi = np.c_[np.full((r*c), precision), xi]
 
-    return out
-"""
+        # Interpolate for new plane
+        out = interpn(points, top_and_bottom, xi)
+        out = out.reshape((r, c))
+
+        # Threshold distmap to values above 0
+        out = out > 0
+
+        return out
