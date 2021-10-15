@@ -533,7 +533,7 @@ class Crop(ImgHandler):
             datatype = volume.dtype
             img.volumes[name] = np.array(volume[xlo: xhi, ylo: yhi, zlo: zhi], dtype=datatype)
 
-        img.ImgAugmentations.crop_update(img_coords, patient_coords)
+        img.ImgAugmentations.crop_update(img_coords, patient_coords, imgshape)
         img.dims.crop_update(img_coords)
         return img
 

@@ -64,8 +64,9 @@ class ImgAugmentations:
         self.std = std
         self.mean = mean
 
-    def crop_update(self, img_coords: np.ndarray, patient_coords: np.ndarray) -> None:
+    def crop_update(self, img_coords: np.ndarray, patient_coords: np.ndarray, original_dims: np.ndarray) -> None:
         self.cropped = True
+        self.original_dims = original_dims
         self.img_coords = img_coords
         self.patient_coords = patient_coords
 
