@@ -112,8 +112,8 @@ class Reconstruction:
         self.in_memory = in_memory
         self.path = path
 
-        all_pointers = list(map(self._split_mod, frame_of_ref.iter_modalities()))
-        return all_pointers
+        all_files = list(map(self._split_mod, frame_of_ref.iter_modalities()))
+        return all_files
 
     def _split_mod(self, mod: Modality):
         """Wrapper function to split the modalities to their respective functions
@@ -128,28 +128,28 @@ class Reconstruction:
             # Match statement in python 3.10
             match mod.name:
                 case 'CT':
-                    pointer = self.ct(mod)
+                    file = self.ct(mod)
                 ...
                 case _:
                     raise TypeError(f'Reconstruction of {mod.name} not supported')
         """
         if mod.name == 'CT':
-            pointer = self.ct(mod)
+            filegroup = self.ct(mod)
         elif mod.name == 'RTSTRUCT':
-            pointer = self.struct(mod)
+            filegroup = self.struct(mod)
         elif mod.name == 'MR':
-            pointer = self.mr(mod)
+            filegroup = self.mr(mod)
         elif mod.name == 'NM':
-            pointer = self.nm(mod)
+            filegroup = self.nm(mod)
         elif mod.name == 'PT':
-            pointer = self.pt(mod)
+            filegroup = self.pt(mod)
         elif mod.name == 'PET':
-            pointer = self.pet(mod)
+            filegroup = self.pet(mod)
         elif mod.name == 'DOSE':
-            pointer = self.dose(mod)
+            filegroup = self.dose(mod)
         else:
             print(mod.name)
-        return (mod, pointer)
+        return (mod, filegroup)
 
     def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
         """Converts a dicom contour slice into image coordinates
@@ -248,7 +248,7 @@ class Reconstruction:
             struct_set.add_structs(structs)
 
             if not self.in_memory:
-                struct_set.convert_to_pointer(path=self.path)
+                struct_set.convert_to_file(path=self.path)
                 return struct_set
             modality._add_file(struct_set)
 
@@ -263,10 +263,10 @@ class Reconstruction:
             pt_set.add_vol(ds.SOPInstanceUID, fill_array)
 
             if not self.in_memory:
-                pt_set.convert_to_pointer(path=self.path)
+                pt_set.convert_to_file(path=self.path)
                 return pt_set
             modality._add_file(pt_set)
-    
+
     @dataclass
     class ImageError:
         corrupt_slices: list = field(default_factory=list)
@@ -345,7 +345,7 @@ class Reconstruction:
                 ct_set.ImgAugmentations.empty_slices = empty_slices
 
             if not self.in_memory:
-                ct_set.convert_to_pointer(path=self.path)
+                ct_set.convert_to_file(path=self.path)
                 return ct_set
             modality._add_file(ct_set)
 
@@ -371,7 +371,7 @@ class Reconstruction:
             nm_set.add_vol(ds.SOPInstanceUID, fill_array)
 
             if not self.in_memory:
-                nm_set.convert_to_pointer(path=self.path)
+                nm_set.convert_to_file(path=self.path)
                 return nm_set
             modality._add_file(nm_set)
 
@@ -404,7 +404,7 @@ class Reconstruction:
                 mr_set.ImgAugmentations.empty_slices = empty_slices
 
             if not self.in_memory:
-                mr_set.convert_to_pointer(path=self.path)
+                mr_set.convert_to_file(path=self.path)
                 return mr_set
             modality._add_file(mr_set)
 
@@ -435,7 +435,7 @@ class Reconstruction:
             pet_set.add_vol(ds.SOPInstanceUID, suv_values)
 
             if not self.in_memory:
-                pet_set.convert_to_pointer(path=self.path)
+                pet_set.convert_to_file(path=self.path)
                 return pet_set
             modality._add_file(pet_set)
 
@@ -461,7 +461,7 @@ class Reconstruction:
             dose_set.add_vol(ds.SOPInstanceUID, dose_interp)
 
             if not self.in_memory:
-                dose_set.convert_to_pointer(path=self.path)
+                dose_set.convert_to_file(path=self.path)
                 return dose_set
             modality._add_file(dose_set)
 

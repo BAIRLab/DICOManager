@@ -14,14 +14,14 @@ ReconVolumeOrFile = Union[ReconstructedVolume, ReconstructedFile]
 
 # Tools are used to process reconstructed arrays
 # DicomUtils are for DICOM reconstruction utilities
-# Should probably unnest from the class and move to a seperate file
+# Should probably un-nest from the class and move to a separate file
 
 
 class ImgHandler:
     def __call__(self, img, path):
-        return self.pointer_conversion(img, path)
+        return self.file_conversion(img, path)
 
-    def pointer_conversion(self, img: ReconVolumeOrFile, path: str = None) -> ReconVolumeOrFile:
+    def file_conversion(self, img: ReconVolumeOrFile, path: str = None) -> ReconVolumeOrFile:
         """Handles conversion of ReconstructedFile to Volume for any tools
 
         Args:
@@ -36,7 +36,7 @@ class ImgHandler:
             if type(img) is ReconstructedFile:
                 img.load_array()
                 img = self._function(img)
-                img.convert_to_pointer(path=path)
+                img.convert_to_file(path=path)
             else:
                 img = self._function(img)
             return img
@@ -263,7 +263,7 @@ class Resample(ImgHandler):
             ratio (float, optional): Resampling ratio, either per-dimension or uniform
                 with r>1 upsampling and r<1 downsampling. Defaults to None.
             dims (list, optional): Number of voxels per-dimension to resmaple to, with
-                dimensions of None left unsampled. (e.g. [512, 512, None]). Defaults to None.
+                dimensions of None left un-sampled. (e.g. [512, 512, None]). Defaults to None.
             voxel_size (list, optional): Voxel size, in mm, to resample image. Defaults to None.
             dz_limit (float, optional): Limited slice thickness, with dz > dz_limit being
                 resampled to dz_goal or 1/2 slice thickness otherwise. Defaults to None.
@@ -324,7 +324,7 @@ class Resample(ImgHandler):
             datatype = volume.dtype
             if not np.all(current_ratio == 1):
                 if img.Modality == 'RTSTRUCT':
-                    resampled = np.array(zoom(volume, current_ratio, order=1), dtype=datatype)
+                    resampled = np.array(zoom(volume, current_ratio, order=0), dtype=datatype)
                     if self.fill:
                         resampled = utils.fill_holes(resampled)
                     if self.smooth:
@@ -350,7 +350,7 @@ class Resample(ImgHandler):
             bool: Requires resampling
 
         Notes:
-            Resampling heirarchy, where resampling occurs if any is True:
+            Resampling hierarchy, where resampling occurs if any is True:
                 1. If dz_exact is specified and dz is outside tolerance
                 2. If dz_limit is specified and dz is outside tolerance
                 3. If voxel_size is specified and img is outside tolerance
@@ -397,25 +397,27 @@ class Resample(ImgHandler):
         for x0, x1 in zip(list1, list2):
             if x1 is None:
                 x1 = x0
-            ratio.append(x1 / x0)
+            ratio.append(round(x1 / x0, 4))
         return ratio
 
     def _dims_to_ratio(self, img: ReconVolumeOrFile) -> list:
         """Calculates the resampling ratio based on dimensions
+            Where dims * ratio = new size
         """
         return self._compute_ratio(img.dims.shape, self.dims)
 
     def _voxel_size_to_ratio(self, img: ReconVolumeOrFile) -> list:
         """Calculates the resampling ratio based on voxel size
+            Where current size / ratio = new size
         """
-        return self._compute_ratio(img.dims.voxel_size, self.voxel_size)
+        return self._compute_ratio(self.voxel_size, img.dims.voxel_size)
 
     def _dz_limit_to_ratio(self, img: ReconVolumeOrFile, previous: list) -> list:
         """Calculates the z-axis resampling ratio based on slice thickness limit
 
         Args:
             img (ReconVolumeOrFile): Image volume or file
-            prevoius: (list): Previous list of resampling ratios
+            previous: (list): Previous list of resampling ratios
 
         Returns:
             list: Resampling ratio
@@ -553,10 +555,10 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
         modalities (list, optional): Structure name to use for centroid. Defaults to None.
         structures (list, optional): List of str to calculate the centroid. Defaults to None.
         struct_filter (object, optional): A custom filtering function to pick structures, this is
-            overriden if the paremeter structures is also specified. Function should accept a
+            overridden if the paremeter structures is also specified. Function should accept a
             structure name and return a boolean for calculation of centroid. Defaults to None.
         volume_filter (object, optional): A custom filtering function to pick volumes, this is
-            overriden if the parameter structures is also specified. Function should accept a
+            overridden if the parameter structures is also specified. Function should accept a
             ReconstructedVolume object and return a boolean for calculation of
             centroid. Defaults to None.
         nthreads (int, optional): Number of threads to use for the computation. Higher
@@ -589,7 +591,7 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
             modalities = [modalities]
         volume_filter = only_modality(modalities)
     elif modalities is None and structures is not None:
-        modalities = ['RSTRUCT']
+        modalities = ['RTSTRUCT']
 
     if structures is not None:
         if type(structures) is str:
@@ -610,11 +612,11 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
                             if offset_fn is not None:
                                 CoM = offset_fn(CoM, volfile)
                             if original_fmt is ReconstructedFile:
-                                volfile.convert_to_pointer()
+                                volfile.convert_to_file()
                             return (frame.name, CoM)
 
                     if original_fmt is ReconstructedFile:
-                        volfile.convert_to_pointer()
+                        volfile.convert_to_file()
             return (frame.name, None)
         return fn
 
@@ -645,7 +647,7 @@ from scipy.ndimage.morphology import distance_transform_edt
 Start of Code for the interpolation of RTSTRUCTs. These will require more user specification
 to prevent the interpolation of intentional gaps within the structure sets.
 
-@handle_pointers
+@handle_files
 def interpolate_contour(img: ReconstructedVolume, extrapolate=False) -> ReconstructedVolume:
     # https://stackoverflow.com/questions/48818373/interpolate-between-two-images
     empty_slices = img.ImgAugmentations.empty_slices

@@ -104,9 +104,9 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group',
             dcmpath = path + '/'.join(names) + '/'
 
         if not os.path.isdir(volpath) and has_volumes:
-            os.mkdir(volpath)
+            os.makedirs(volpath, exist_ok=True)
         if not os.path.isdir(dcmpath) and has_dicoms:
-            os.mkdir(dcmpath)
+            os.makedirs(dcmpath, exist_ok=True)
 
         if repr(node) == 'Modality':
             for key in node.volumes_data:
@@ -211,7 +211,7 @@ class VolumeDimensions:
     def _calculate_dz(self, zlocations):
         zlocations.sort()
         differences = np.zeros((len(zlocations) - 1))
-        previous = zlocations[0]
+        previous = min(zlocations)
 
         for i in range(1, len(zlocations)):
             differences[i - 1] = round(abs(previous - zlocations[i]), 2)
@@ -261,8 +261,7 @@ class VolumeDimensions:
                     low_inst = inst
                     low_thickness = ds.SliceThickness
 
-        if 1 < low_inst < 5 and low_inst != np.inf:
-            # For extrapolation of missing slices
+        if 1 < low_inst < 5 and low_inst != np.inf:  # For extrapolation of missing slices
             # Need to make it the slice thickness of the lowest slice
             # in case the image has mixed thicknesses
             z0 -= low_thickness * (low_inst - 1)
@@ -272,6 +271,7 @@ class VolumeDimensions:
         self.zlohi = (z0, z1)
         self.origin = np.array([*self.ipp[:2], max(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
+
         return ds
 
     @property
@@ -519,17 +519,17 @@ def combine_trees(primary: NodeMixin, secondaries: list) -> NodeMixin:
 
 
 def insert_into_tree(tree: NodeMixin, mod_ptr_pairs: list) -> None:
-    """Inserts a volume pointer into a tree
+    """Inserts a volume file into a tree
 
     Args:
-        tree (NodeMixin): Tree to insert volume pointers
-        mod_ptr_pairs (list): list of modality and corresponding pointer
+        tree (NodeMixin): Tree to insert volume files
+        mod_ptr_pairs (list): list of modality and corresponding file
     """
-    for modality, pointer in mod_ptr_pairs:
+    for modality, leaf in mod_ptr_pairs:
         node = tree
         for a in modality.ancestors:
             node = anytree.search.findall(node, filter_=lambda x: x.name == a.name)[-1]
-        node._add_file(pointer)
+        node._add_file(leaf)
 
 
 class ReconToPath:
@@ -556,7 +556,7 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
         primary (NodeMixin): Tree for reconstruction
 
     Returns:
-        NodeMixin: Primary with the volume pointers inserted
+        NodeMixin: Primary with the volume files inserted
 
     Notes:
         Reconstruction does not scale with processors, so we split the
@@ -567,10 +567,12 @@ def threaded_recon(primary: NodeMixin, path: str) -> NodeMixin:
 
     ncpus = multiprocessing.cpu_count()
     recon_fn = ReconToPath(path)
+
     with ProcessPool(max_workers=ncpus//4) as P:
         results = list(P.map(recon_fn, trees))
         P.shutdown()
     ProcessPool().shutdown()
+
     primary = combine_trees(primary, trees)
 
     for mod_ptr_pairs in results:
@@ -608,14 +610,14 @@ def structure_voxel_count(tree: NodeMixin, structure: str) -> dict:
     counts = {}
     for volfile in it:
         if volfile.Modality == 'RTSTRUCT':
-            original_ptr = volfile.is_pointer()
+            original_ptr = volfile.is_file()
             if original_ptr:
                 volfile.load_array()
             for name, volume in volfile.volumes.items():
                 if name == structure:
                     counts.update({volfile.name: np.sum(volume)})
             if original_ptr:
-                volfile.convert_to_pointer()
+                volfile.convert_to_file()
     return counts
 
 

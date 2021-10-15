@@ -175,7 +175,7 @@ class GroupUtils(NodeMixin):
         """Following multithreaded sorting, trees need to be merged into one
 
         Args:
-            children (list): A list of trees with reocnstructed volumes or pointers
+            children (list): A list of trees with reconstructed volumes or files
 
         Returns:
             NodeMixin: A unified tree
@@ -196,6 +196,7 @@ class GroupUtils(NodeMixin):
         with ProcessPool() as P:
             children = [x for x in list(P.map(self._digestfn, self.files)) if x]
         ProcessPool().clear()
+
         # Need to iterate through and merge any duplicates
         cleaned = self._clean_up_children(children)
 
@@ -210,7 +211,7 @@ class GroupUtils(NodeMixin):
             dicomfile (object): Dicom file to check uniqueness
 
         Returns:
-            bool: Returns if the file is uniuqe, needing a new node, or not
+            bool: Returns if the file is unique, needing a new node, or not
         """
         def date_check(date, dtype):
             condition0 = str(date) in self.filter_by[dtype]
@@ -414,7 +415,7 @@ class GroupUtils(NodeMixin):
 
     def save_dicoms(self, path: str, prefix: str = 'group') -> None:
         """Saves a copy of the dicom tree to a specified location,
-            orderd the same as the tree layout
+            ordered the same as the tree layout
 
         Args:
             path (str): Absolute path to write to the file tree
@@ -426,7 +427,7 @@ class GroupUtils(NodeMixin):
 
     def save_volumes(self, path: str, prefix: str = 'group') -> None:
         """Saves a copy of the volume tree to a specified location,
-            orderd the same as the tree layout
+            ordered the same as the tree layout
 
         Args:
             path (str): Absolute path to write to the file tree
@@ -658,17 +659,17 @@ class GroupUtils(NodeMixin):
         voltree.clear_dicoms()
         return voltree
 
-    def volumes_to_pointers(self) -> None:
-        """Converts all volumes to pointers
+    def volumes_to_files(self) -> None:
+        """Converts all volumes to files
         """
         for vol in self.iter_volumes():
             if type(vol) is ReconstructedVolume:
-                vol.convert_to_pointer()
+                vol.convert_to_file()
             else:
                 utils.colorwarn(f'{vol.name} already {type(vol)}')
 
-    def pointers_to_volumes(self) -> None:
-        """Converts all pointers to volumes
+    def files_to_volumes(self) -> None:
+        """Converts all files to volumes
 
         Notes:
             This may require a large amount of memory
@@ -694,6 +695,7 @@ class GroupUtils(NodeMixin):
             P.close()
             P.join()
             P.clear()
+
         mods_ptrs = utils.flatten_list(frame_group)
         if return_mods:
             return mods_ptrs
@@ -750,7 +752,7 @@ class GroupUtils(NodeMixin):
         elif parallelize:
             self = utils.threaded_recon(self, path=path)
             if in_memory:
-                self.pointers_to_volumes()
+                self.files_to_volumes()
         else:
             return self._recon_to_disk(path=path)
 
@@ -761,7 +763,7 @@ class GroupUtils(NodeMixin):
         Args:
             toolset (list): List of tool functions
             path (str, optional): Path to write volumes. Defaults to None.
-            mod (Modality, optional): Moadlity to apply function to. Defaults to self.
+            mod (Modality, optional): Modality to apply function to. Defaults to self.
             warn (bool, optional): Raise warning when applied. Defaults to True.
 
         Warnings:
@@ -837,7 +839,7 @@ class GroupUtils(NodeMixin):
 
         Args:
             group (str): Group to determine completeness
-            exact (bool, optional): Group must contain extactly what is specified in contains,
+            exact (bool, optional): Group must contain exactly what is specified in contains,
                 otherwise the group can contain more than contains and be valid. Defaults to False.
             contains (dict, optional): A dictionary with keys of the group type and the
                 corresponding features. For example:
@@ -943,7 +945,7 @@ class GroupUtils(NodeMixin):
         return incomplete_tree
 
     def remove_empty_branches(self, prune_modalities: bool = False) -> None:
-        """Removes any empty branches from a tree. An emtpy branch is defined
+        """Removes any empty branches from a tree. An empty branch is defined
             as a branch with no children. By default, modalities are excluded.
 
         Args:
@@ -999,13 +1001,13 @@ class ReconstructedVolume(GroupUtils):
 
     def _rename(self, name: str):
         """DICOM RTSTRUCTs can have non-unique names, so we need to rename
-            these functions to be dictionary compatiable
+            these functions to be dictionary compatible
 
         Args:
             name (str): Name of the found RTSTRUCT
 
         Returns:
-            str]: Name + # where number is the unique occurance
+            str]: Name + # where number is the unique occupance
         """
         i = 0
         while True:
@@ -1053,7 +1055,7 @@ class ReconstructedVolume(GroupUtils):
         return header
 
     def _generate_filepath(self, prefix: str = 'group') -> str:
-        """Generates a filepath, in tree heirarchy to save the file
+        """Generates a filepath, in tree hierarchy to save the file
 
         Args:
             prefix (str, optional): Directory naming convention, similar to
@@ -1079,7 +1081,7 @@ class ReconstructedVolume(GroupUtils):
         names[0] += '_volumes'
         return '/'.join(names) + '/'
 
-    def is_pointer(self):
+    def is_file(self):
         return False
 
     def remove_parent_data(self) -> None:
@@ -1148,7 +1150,7 @@ class ReconstructedVolume(GroupUtils):
             export_dict.update({'DateTime': self.DateTime.export()})
         return export_dict
 
-    def convert_to_pointer(self, path: str = None, save: bool = True) -> None:
+    def convert_to_file(self, path: str = None, save: bool = True) -> None:
         """Converts ReconstructedVolume to ReconstructedFile and saves
             the volume array to ~/tree/format/SeriesInstanceUID.npy
         """
@@ -1206,7 +1208,7 @@ class ReconstructedVolume(GroupUtils):
 
 
 class ReconstructedFile(GroupUtils):
-    """A pointer to the saved file, as opposed to the file in memory (ReconstructedVolume).
+    """A file to the saved file, as opposed to the file in memory (ReconstructedVolume).
 
         When reconstructing and saving to disk, we will generate the file, write to disk and
         add this leaf type within the tree. If we want to load that into memory, we will simply
@@ -1227,7 +1229,7 @@ class ReconstructedFile(GroupUtils):
         setattr(self, name, value)
 
     def __str__(self):
-        return ' [ 1 pointer to volume ]'
+        return ' [ 1 file path to volume ]'
 
     def _digest(self):
         """Generates a ReconstructedFile from a ReconstructedVolume, either from a dict or loaded
@@ -1249,10 +1251,10 @@ class ReconstructedFile(GroupUtils):
         for name, value in self.populate['header'].items():
             self[name] = value
 
-    def is_pointer(self):
+    def is_file(self):
         return True
 
-    def convert_to_pointer(self):
+    def convert_to_file(self):
         # Included to prevent unnecessary errors
         pass
 
@@ -1276,7 +1278,7 @@ class ReconstructedFile(GroupUtils):
 
 
 class DicomFile(GroupUtils):
-    """Group level for individal Dicom files, pulls releveant header data out
+    """Group level for individual Dicom files, pulls releveant header data out
 
     Args:
         filepath (str): absolute file path to the *.dcm file
@@ -1459,7 +1461,7 @@ class Modality(GroupUtils):
         mr: mr files within group
         pet: pet files within group
         dose: dose files within group
-        struct: structf files within group
+        struct: struct files within group
     """
     ct = property(utils.mod_getter('CT'), utils.mod_setter('CT'))
     nm = property(utils.mod_getter('NM'), utils.mod_setter('NM'))
@@ -1486,10 +1488,10 @@ class Modality(GroupUtils):
         if self.volumes_data:
             for index, key in enumerate(self.volumes_data):
                 data = self.volumes_data[key]
-                pointers = len([x for x in data if type(x) is ReconstructedFile])
+                files = len([x for x in data if type(x) is ReconstructedFile])
                 fullvols = len([x for x in data if type(x) is ReconstructedVolume])
-                if pointers:
-                    middle.append(f' {pointers} volume pointer(s)')
+                if files:
+                    middle.append(f' {files} volume file(s)')
                 if fullvols:
                     middle.append(f' {fullvols} volume(s)')
         output = ' [' + ','.join(middle) + ' ]'
