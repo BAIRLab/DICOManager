@@ -4,11 +4,10 @@ import multiprocessing
 import numpy as np
 from anytree import NodeMixin
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_erosion
 from typing import Union
 from scipy.interpolate import interpn
 from scipy.ndimage.morphology import distance_transform_edt
-from mahotas import bwperim
 from . import utils
 from .groupings import ReconstructedVolume, ReconstructedFile, FrameOfRef
 
@@ -728,7 +727,9 @@ class InterpolateContours(ImgHandler):
         '''
         Find perim and return masked image (signed/reversed)
         '''
-        perim = bwperim(im)
+        if im.dtype != np.dtype('bool'):
+            im = np.array(im, dtype='bool')
+        perim = im ^ binary_erosion(im)
         bwdist = distance_transform_edt(1-perim)
         im_ma = -1*bwdist*np.logical_not(im) + bwdist*im
         return im_ma
