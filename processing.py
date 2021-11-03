@@ -148,7 +148,7 @@ class Reconstruction:
             filegroup = self.pt(mod)
         elif mod.name == 'PET':
             filegroup = self.pet(mod)
-        elif mod.name == 'DOSE':
+        elif mod.name == 'RTDOSE':
             filegroup = self.dose(mod)
         else:
             print(mod.name)
@@ -450,23 +450,24 @@ class Reconstruction:
             modality (Modality): Modality object containing RTDOSE
             in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
-        ct_coords = self.dims.coordgrid()
-        for dosefile in modality.dose:
-            ds = pydicom.dcmread(dosefile.filepath)
-            dose_dims = VolumeDimensions(dosefile)
-            dose_coords = dose_dims.coordrange()
-            dose_array = np.rollaxis(ds.pixel_array, 0, 3) * ds.DoseGridScaling
-            interper = RGI(dose_coords, dose_array,
-                           bounds_error=False, fill_value=0)
-            dose_interp = interper(ct_coords).reshape(self.dims.shape)
+        ct_coords = self.dims.coordgrid().T
+        for dose_group in modality.dose:
+            for dosefile in dose_group:
+                ds = pydicom.dcmread(dosefile.filepath)
+                dose_dims = VolumeDimensions(modality.dicoms_data, from_dose=True)
+                dose_coords = dose_dims.coordrange()
+                dose_array = np.rollaxis(ds.pixel_array, 0, 3) * ds.DoseGridScaling
+                interper = RGI(dose_coords, dose_array,
+                            bounds_error=False, fill_value=0)
+                dose_interp = interper(ct_coords).reshape(self.dims.shape)
 
-            dose_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
-            dose_set.add_vol(ds.SOPInstanceUID, dose_interp)
+                dose_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
+                dose_set.add_vol(ds.SOPInstanceUID, dose_interp)
 
-            if not self.in_memory:
-                dose_set.convert_to_file(path=self.path)
-                return dose_set
-            modality._add_file(dose_set)
+                if not self.in_memory:
+                    dose_set.convert_to_file(path=self.path)
+                    return dose_set
+                modality._add_file(dose_set)
 
 
 class Deconstruction:

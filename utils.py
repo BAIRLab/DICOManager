@@ -186,9 +186,10 @@ class VolumeDimensions:
     ipp: list = None
     flipped: bool = False
     multi_thick: bool = False
+    from_dose: bool = False
 
     def __post_init__(self):
-        if 'RTDOSE' in self.dicoms:
+        if 'RTDOSE' in self.dicoms and self.from_dose:
             filepath = self.dicoms['RTDOSE'][0].filepath
             ds = pydicom.dcmread(filepath)
             self.slices = ds.NumberOfFrames
