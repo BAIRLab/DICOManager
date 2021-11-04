@@ -173,6 +173,21 @@ def print_rts(rts):
     print(rts)
 
 
+def dose_grid_coordrange(dosefile, ct_dims):
+    ds = pydicom.dcmread(dosefile.filepath)
+    dx, dy = ds.PixelSpacing
+    cols = ds.Columns
+    rows = ds.Rows
+    origin = ds.ImagePositionPatient
+    zlocs = ds.GridFrameOffsetVector
+    pts_x = origin[0] + np.arange(rows) * dx
+    pts_y = origin[1] + np.arange(cols) * dy
+    pts_z = origin[2] + np.array(zlocs)
+    if ct_dims.flipped:
+        pts_z = pts_z[..., ::-1]
+    return [pts_x, pts_y, pts_z]
+
+
 @dataclass
 class VolumeDimensions:
     dicoms: list

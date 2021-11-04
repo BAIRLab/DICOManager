@@ -361,22 +361,23 @@ class Reconstruction:
             in_place (bool, optional): Sorts into existing tree if True. Defaults to True.
         """
         for nm_group in modality.nm:
-            ds = pydicom.dcmread(nm_group.filepath)
-            raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
-            map_seq = ds.RealWorldValueMappingSequence[0]
-            slope = float(map_seq.RealWorldValueSlope)
-            intercept = float(map_seq.RealWorldValueIntercept)
-            if intercept != 0:
-                utils.colorwarn(f'NM file: {nm_group.filepath} has non-zero intercept')
-            fill_array = np.array(raw * slope + intercept, dtype='float32')
+            for nmfile in nm_group:
+                ds = pydicom.dcmread(nmfile.filepath)
+                raw = np.rollaxis(ds.pixel_array, 0, 3)[:, :, ::-1]
+                map_seq = ds.RealWorldValueMappingSequence[0]
+                slope = float(map_seq.RealWorldValueSlope)
+                intercept = float(map_seq.RealWorldValueIntercept)
+                if intercept != 0:
+                    utils.colorwarn(f'NM file: {nm_group.filepath} has non-zero intercept')
+                fill_array = np.array(raw * slope + intercept, dtype='float32')
 
-            nm_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
-            nm_set.add_vol(ds.SOPInstanceUID, fill_array)
+                nm_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
+                nm_set.add_vol(ds.SOPInstanceUID, fill_array)
 
-            if not self.in_memory:
-                nm_set.convert_to_file(path=self.path)
-                return nm_set
-            modality._add_file(nm_set)
+                if not self.in_memory:
+                    nm_set.convert_to_file(path=self.path)
+                    return nm_set
+                modality._add_file(nm_set)
 
     @check_dims
     def mr(self, modality: Modality) -> None:
@@ -454,11 +455,10 @@ class Reconstruction:
         for dose_group in modality.dose:
             for dosefile in dose_group:
                 ds = pydicom.dcmread(dosefile.filepath)
-                dose_dims = VolumeDimensions(modality.dicoms_data, from_dose=True)
-                dose_coords = dose_dims.coordrange()
+                dose_coords = utils.dose_grid_coordrange(dosefile, self.dims)
                 dose_array = np.rollaxis(ds.pixel_array, 0, 3) * ds.DoseGridScaling
                 interper = RGI(dose_coords, dose_array,
-                            bounds_error=False, fill_value=0)
+                               bounds_error=False, fill_value=0)
                 dose_interp = interper(ct_coords).reshape(self.dims.shape)
 
                 dose_set = groupings.ReconstructedVolume(ds, self.dims, parent=modality)
