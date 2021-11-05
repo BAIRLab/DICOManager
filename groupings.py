@@ -1297,17 +1297,17 @@ class DicomFile(GroupUtils):
         return getattr(self, name)
 
     def __lt__(self, other: SelfType):
-        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
+        if hasattr(self, 'SliceLocation') and hasattr(other, 'SliceLocation'):
             return self.SliceLocation < other.SliceLocation
         return self.InstanceUID < other.InstanceUID
 
     def __gt__(self, other: SelfType):
-        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
+        if hasattr(self, 'SliceLocation') and hasattr(other, 'SliceLocation'):
             return self.SliceLocation > other.SliceLocation
         return self.FrameOfRefUID > other.FrameOfRefUID
 
     def __eq__(self, other: SelfType):
-        if hasattr(self, 'SliceLocation') and hasattr(self, 'SliceLocation'):
+        if hasattr(self, 'SliceLocation') and hasattr(other, 'SliceLocation'):
             return self.SliceLocation == other.SliceLocation
         return self.FrameOfRefUID == other.FrameOfRefUID
 
