@@ -8,7 +8,7 @@ from scipy.interpolate import RegularGridInterpolator as RGI
 from dataclasses import dataclass, field
 from .utils import VolumeDimensions, check_dims
 from .deconstruction import RTStructConstructor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Tuple
 
 if TYPE_CHECKING:
     from groupings import Cohort, FrameOfRef, Modality
@@ -77,16 +77,17 @@ class ImgAugmentations:
         self.ratio = ratio
 
     def interpolated_update(self, interpolated_slices: list, extrapolated_slices: list) -> None:
-        temp = set(self.empty_slices)
-        interpolated_slices = set(interpolated_slices)
-        extrapolated_slices = set(extrapolated_slices)
+        temp = self.empty_slices
         if len(interpolated_slices) > 0:
             self.interpolated = True
-            self.interpolated_slices = list(interpolated_slices + set(self.interpolated_slices))
-            temp = list(set(temp) - set(interpolated_slices))
+            self.interpolated_slices = interpolated_slices
+            try:
+                temp = list(set(temp) - set(interpolated_slices))
+            except Exception:
+                temp = []
         if len(extrapolated_slices) > 0:
             self.extrapolated = True
-            self.extrapolated_slices = list(extrapolated_slices + set(self.extrapolated_slices))
+            self.extrapolated_slices = extrapolated_slices
             temp = list(set(temp) - set(extrapolated_slices))
         self.empty_slices = temp
 
@@ -154,7 +155,7 @@ class Reconstruction:
             print(mod.name)
         return (mod, filegroup)
 
-    def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> (np.ndarray, int):
+    def _slice_coords(self, contour_slice: pydicom.dataset.Dataset) -> Tuple(np.ndarray, int):
         """Converts a dicom contour slice into image coordinates
 
         Args:

@@ -2,10 +2,6 @@
 import copy
 import pydicom
 import numpy as np
-import hashlib
-import os
-import random
-import uuid
 import scipy
 from datetime import datetime
 from dataclasses import dataclass
@@ -13,6 +9,7 @@ from matplotlib import cm
 from scipy import spatial
 from scipy.ndimage.morphology import binary_erosion, binary_dilation
 from skimage import measure as skm
+from typing import List, Tuple
 from .utils import VolumeDimensions
 
 
@@ -112,7 +109,7 @@ class RTStructConstructor:
 
         date = datetime.now().date().strftime('%Y%m%d')
         time = datetime.now().time().strftime('%H%M%S.%f')[:-3]
-        uid_prefix = '1.2.826.0.1.3680043.10.771'
+        uid_prefix = '1.2.826.0.1.3680043.10.771.'
         sop_instance_uid = pydicom.uid.generate_uid(prefix=uid_prefix)
         series_instance_uid = pydicom.uid.generate_uid(prefix=uid_prefix)
 
@@ -875,7 +872,7 @@ def get_first_index(points: np.ndarray) -> int:
     return np.argmin(angles)
 
 
-def find_nearest(inner: np.ndarray, outer: np.ndarray) -> ([tuple, tuple], int):
+def find_nearest(inner: np.ndarray, outer: np.ndarray) -> Tuple(List[tuple, tuple], int):
     """
     Function
     ----------
@@ -1123,7 +1120,7 @@ def poly_to_coords_2D(poly: np.ndarray, ctcoord: np.ndarray,
     return points_sorted
 
 
-def separate_polygons(z_slice: np.ndarray, mim: bool = True) -> [np.ndarray]:
+def separate_polygons(z_slice: np.ndarray, mim: bool = True) -> List[np.ndarray]:
     """
     Function
     ----------

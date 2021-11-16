@@ -2,6 +2,7 @@ from __future__ import annotations
 import abc
 import multiprocessing
 import numpy as np
+from copy import deepcopy
 from anytree import NodeMixin
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
 from scipy.ndimage import zoom, binary_erosion
@@ -206,20 +207,24 @@ class Interpolate(ImgHandler):
                     zlo, zhi = (1, 1)
                     lo_slice, hi_slice = (None, None)
                     # Find filled slice below
-                    while (eslice - zlo) > 0:
-                        lo_slice = volume[..., eslice-zlo]
-                        if lo_slice.size:
-                            break
+                    while (eslice - zlo) > 0 or zlo < 10:
+                        if eslice - zlo not in empty_slices:
+                            lo_slice = volume[..., eslice-zlo]
+                            if np.sum(lo_slice):
+                                break
                         zlo += 1
                     # Find filled slice above
-                    while (eslice + zhi) < (img.dims.slices - 1):
-                        hi_slice = volume[..., eslice+zhi]
-                        if hi_slice.size:
-                            break
+                    while (eslice + zhi) < (img.dims.slices - 1) or zhi < 10:
+                        if eslice + zhi not in empty_slices:
+                            hi_slice = volume[..., eslice+zhi]
+                            if np.sum(hi_slice):
+                                break
                         zhi += 1
                     # interpolate or extrapolate, if valid
                     if lo_slice is not None and hi_slice is not None:
-                        volume[..., eslice] = (hi_slice + lo_slice) / 2
+                        lo_ratio = zlo / (zlo + zhi)
+                        hi_ratio = zhi / (zlo + zhi)
+                        volume[..., eslice] = hi_slice * hi_ratio + lo_slice * lo_ratio
                         interpolated.append(eslice)
                     elif not self.extrapolate:
                         utils.colorwarn(f'Cannot interpolate {img.PatientID}, try extroplate=True')
@@ -641,6 +646,7 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
 
     return centroids
 
+
 class InterpolateContours(ImgHandler):
     """Contour Interpolation
 
@@ -661,57 +667,82 @@ class InterpolateContours(ImgHandler):
         self.roi_names = roi_names
         self.z_index = z_index
         self.all_empty = all_empty
+        self.empties = []
 
     def _function(self, lbl):
         if not lbl.is_struct:
             return lbl
 
-        empties = set(lbl.augmentations.empty_slices)
-        # Previously interpolated slices from img interpolation
-        empties.add(lbl.augmentations.interpolated_slices)
-        empties = list(empties)
+        empties = set([])
+        if lbl.ImgAugmentations.empty_slices:
+            try:
+                empties.add(lbl.ImgAugmentations.empty_slices)
+            except Exception:
+                pass
+        if lbl.ImgAugmentations.interpolated_slices:
+            try:
+                empties.add(lbl.ImgAugmentations.interpolated_slices)
+            except Exception:
+                pass
+        self.empties = list(empties)
 
-        interpolated = False
-        for name, vol in lbl.volumes:
-            if self._check_needed(name, empties):
-                interpolated = True
-                lbl.volumes[name] = self._interpolate(vol, empties)
+        for name, vol in lbl.volumes.items():
+            if self._check_slice(name):
+                lbl.volumes[name], interpolated_slices = self._interpolate(vol, self.empties)
+                print(lbl.PatientID, name, 'interpolating:', interpolated_slices)
 
-        if interpolated:
-            lbl.ImgAugmentations.interpolated_update(interpolated, [])
+        if interpolated_slices:
+            lbl.ImgAugmentations.interpolated_update(interpolated_slices, [])
         return lbl
 
-    def _check_needed(self, name, empties):
+    def _check_needed(self, volume):
+        return volume.Modality == 'RTSTRUCT'
+
+    def _check_slice(self, name):
         # Checks if slice needs to be interpolated
-        if not len(empties):
+        if not len(self.empties) and not self.all_empty:
             return False
-        if not self.roi_name:
-            return False
-        return name in self.roi_name
+        return name in self.roi_names
 
     # Make this into function
     def _interpolate(self, lbl, empties):
         # replace with pulling empty from DCM output
         filled = []
+        empties = deepcopy(empties)
         new_lbl = np.copy(lbl)
         for i in range(lbl.shape[-1]):
             if np.sum(lbl[..., i]):
                 filled.append(i)
             elif self.all_empty:
                 empties.append(i)
+
+        fill_set = sorted(set(filled))
+        # Interpolate at most 3 slices, otherwise reject outliers
+        if fill_set[1] - fill_set[0] > 3:
+            lo = fill_set[1]
+        else:
+            lo = fill_set[0]
+
+        if fill_set[-1] - fill_set[-2] > 3:
+            hi = fill_set[-2]
+        else:
+            hi = fill_set[-1]
+
+        # only take empties within the range of the structure
+        empties = [x for x in empties if lo < x < hi]
+
+        interpolated_slices = []
         for z in empties:
-            if z in filled:
-                continue
             if self.z_index and z not in self.z_index:
                 continue
-            if z > min(filled) and z < max(filled):
-                lo, hi, ratio = self._nearest(filled, z)
-                lo_lbl = lbl[..., lo]
-                hi_lbl = lbl[..., hi]
-                filler = self._interp_shape(hi_lbl, lo_lbl, ratio)
-                new_lbl[..., z] = np.round(filler)
-                filled.append(z)
-        return new_lbl
+            interpolated_slices.append(z)
+            lo, hi, ratio = self._nearest(filled, z)
+            lo_lbl = lbl[..., lo]
+            hi_lbl = lbl[..., hi]
+            filler = self._interp_shape(hi_lbl, lo_lbl, ratio)
+            new_lbl[..., z] = np.round(filler)
+            filled.append(z)
+        return np.array(new_lbl, dtype=np.bool), interpolated_slices
 
     def _nearest(self, filled, index):
         below = np.copy(filled)
@@ -745,9 +776,9 @@ class InterpolateContours(ImgHandler):
             precision
                 float  - % between the images to interpolate
                     Ex: num=0.5 - Interpolate the middle image between top and bottom image
+
         Output: out
                 [X,Y] - Interpolated image at num (%) between top and bottom
-
         '''
         if precision > 2:
             print("Error: Precision must be between 0 and 1 (float)")
