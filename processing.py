@@ -64,10 +64,11 @@ class ImgAugmentations:
         self.std = std
         self.mean = mean
 
-    def crop_update(self, img_coords: np.ndarray, patient_coords: np.ndarray) -> None:
+    def crop_update(self, img_coords: np.ndarray, patient_coords: np.ndarray, original_dims: np.ndarray) -> None:
         self.cropped = True
         self.img_coords = img_coords
         self.patient_coords = patient_coords
+        self.original_dims = original_dims
 
     def resampled_update(self, pixelspacing_original: np.ndarray, ratio: int) -> None:
         # TODO: Need to update the img.VolumeDimensions to correlate too
@@ -80,7 +81,10 @@ class ImgAugmentations:
         if len(interpolated_slices) > 0:
             self.interpolated = True
             self.interpolated_slices = interpolated_slices
-            temp = list(set(temp) - set(interpolated_slices))
+            try:
+                temp = list(set(temp) - set(interpolated_slices))
+            except Exception:
+                temp = []
         if len(extrapolated_slices) > 0:
             self.extrapolated = True
             self.extrapolated_slices = extrapolated_slices

@@ -10,6 +10,7 @@ import time
 import warnings
 import xarray as xr
 from anytree import NodeMixin
+from scipy import ndimage
 from anytree.iterators.levelorderiter import LevelOrderIter
 from datetime import datetime
 from pathlib import Path
@@ -119,7 +120,7 @@ def save_tree(tree: NodeMixin, path: str, prefix: str = 'group',
                     original = fname.filepath
                     newpath = dcmpath + fname.name
                     shutil.copy(original, newpath)
-    print(f'\nTree {tree.name} written to {path}')
+    print(f'Tree {tree.name} written to {path}')
 
 
 def current_datetime() -> str:
@@ -271,7 +272,6 @@ class VolumeDimensions:
         self.zlohi = (z0, z1)
         self.origin = np.array([*self.ipp[:2], max(z0, z1)])
         self.slices = 1 + round((max(z0, z1) - min(z0, z1)) / self.dz)
-
         return ds
 
     @property
@@ -299,6 +299,7 @@ class VolumeDimensions:
         pts_y = self.origin[1] + np.arange(self.cols) * self.dy
         pts_z = self.origin[2] + np.arange(self.slices) * self.dz
         if self.flipped:
+            print('flipped')
             pts_z = pts_z[..., ::-1]
         return [pts_x, pts_y, pts_z]
 
@@ -636,6 +637,54 @@ def clean_up(arr: np.ndarray) -> np.ndarray:
         encoded[encoded != value[np.argmax(count[1:]) + 1]] = 0
         arr = arr * encoded
     return np.array(arr, dtype='bool')
+
+
+def fill_holes(arr: np.ndarray, axially: bool = True) -> np.ndarray:
+    """Fills holes either volumetrically or axially (default)
+
+    Args:
+        arr (np.ndarray): [description]
+
+    Returns:
+        np.ndarray: [description]
+    """
+    if not axially:
+        return ndimage.binary_fill_holes(arr)
+    for z in range(arr.shape[-1]):
+        arr[..., z] = ndimage.binary_fill_holes(arr[..., z])
+    return arr
+
+
+def smooth(arr: np.ndarray, iterations: int = 2) -> np.ndarray:
+    big = ndimage.binary_dilation(arr, iterations=iterations)
+    return ndimage.binary_erosion(big, iterations=iterations)
+
+
+def smooth_median(arr: np.ndarray, kernel_size: int = 2) -> np.ndarray:
+    return ndimage.median_filter(arr, kernel_size)
+
+
+def expand_contour(arr: np.ndarray, distance: float, voxel_size: list,
+                   epsilon: float = 0) -> np.ndarray:
+    """Expand contour uniformly in all dimensions by a given distance
+
+    Args:
+        arr (np.ndarray): Boolean numpy array to expand
+        distance (float): Distance, in voxel_size dimension units to expand
+        voxel_size (list): Voxel dimensions in either pixels [1, 1, 1] or mm
+        epsilon (float, optional): Epsilon to offset the expansion, same
+            as adding to the distance. Potentially helpful because software, like
+            MIM, contours at voxel_size[0]/2 dimensions an to match a MIM expansion may warrant
+            an offset of voxel_size[0]/2. Defaults to 0.
+
+    Returns:
+        np.ndarray: [description]
+    """
+    padded_distance = distance + epsilon
+    surface = ndimage.binary_erosion(arr) ^ np.array(arr, dtype=np.bool)
+    inverted = np.invert(surface)
+    edt = ndimage.distance_transform_edt(inverted, sampling=voxel_size)
+    return edt < padded_distance
 
 
 def dose_max_points(dose_array: np.ndarray,

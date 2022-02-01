@@ -2,10 +2,13 @@ from __future__ import annotations
 import abc
 import multiprocessing
 import numpy as np
+from copy import deepcopy
 from anytree import NodeMixin
 from concurrent.futures import ThreadPoolExecutor as ThreadPool
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_erosion
 from typing import Union
+from scipy.interpolate import interpn
+from scipy.ndimage.morphology import distance_transform_edt
 from . import utils
 from .groupings import ReconstructedVolume, ReconstructedFile, FrameOfRef
 
@@ -202,20 +205,24 @@ class Interpolate(ImgHandler):
                     zlo, zhi = (1, 1)
                     lo_slice, hi_slice = (None, None)
                     # Find filled slice below
-                    while (eslice - zlo) > 0:
-                        lo_slice = volume[..., eslice-zlo]
-                        if lo_slice.size:
-                            break
+                    while (eslice - zlo) > 0 or zlo < 10:
+                        if eslice - zlo not in empty_slices:
+                            lo_slice = volume[..., eslice-zlo]
+                            if np.sum(lo_slice):
+                                break
                         zlo += 1
                     # Find filled slice above
-                    while (eslice + zhi) < (img.dims.slices - 1):
-                        hi_slice = volume[..., eslice+zhi]
-                        if hi_slice.size:
-                            break
+                    while (eslice + zhi) < (img.dims.slices - 1) or zhi < 10:
+                        if eslice + zhi not in empty_slices:
+                            hi_slice = volume[..., eslice+zhi]
+                            if np.sum(hi_slice):
+                                break
                         zhi += 1
                     # interpolate or extrapolate, if valid
                     if lo_slice is not None and hi_slice is not None:
-                        volume[..., eslice] = (hi_slice + lo_slice) / 2
+                        lo_ratio = zlo / (zlo + zhi)
+                        hi_ratio = zhi / (zlo + zhi)
+                        volume[..., eslice] = hi_slice * hi_ratio + lo_slice * lo_ratio
                         interpolated.append(eslice)
                     elif not self.extrapolate:
                         utils.colorwarn(f'Cannot interpolate {img.PatientID}, try extroplate=True')
@@ -252,7 +259,9 @@ class Resample(ImgHandler):
     """
     def __init__(self, ratio: float = None, dims: list = None,
                  voxel_size: list = None, dz_limit: float = None,
-                 dz_goal: float = None, dz_exact: float = None):
+                 dz_goal: float = None, dz_exact: float = None,
+                 fill: bool = False, smooth: bool = False,
+                 smooth_kernel_size: int = 2):
         """Resamples volumetric image to dimensions, coordinates or voxel size
 
         Args:
@@ -266,6 +275,11 @@ class Resample(ImgHandler):
             dz_goal (float, optional): Resampling goal if dz_limit is specified. Defaults to None.
             dz_exact (float, optional): Resamples all images to this exact dz, if
                 specified. Will override dz_limit and dz_goal. Defaults to None.
+            fill (bool, optional): Fill holes in resampled RTSTRUCT. Defaults to False.
+            smooth (bool, optional): Median value filter smoothing applied to resampled RTSTRUCT.
+                Default smooth kernel size is 2. Defaults to False.
+            smooth_kernel_size (int, optional): Number of voxels to use in the median filter
+                smoothing function. Defaults to 2.
 
         Notes:
             Non-integer resampling ratios may cause artifacting errors. Therefore, resampling by
@@ -279,6 +293,10 @@ class Resample(ImgHandler):
         self.dz_limit = dz_limit
         self.dz_goal = dz_goal
         self.dz_exact = dz_exact
+        self.fill = fill
+        self.smooth = smooth
+        self.smooth_kernel_size = smooth_kernel_size
+
 
     def _function(self, img: ReconVolumeOrFile) -> ReconVolumeOrFile:
         """Downsample an image by a specified ratio
@@ -306,11 +324,23 @@ class Resample(ImgHandler):
         if self.dz_exact is not None or self.dz_limit is not None:
             current_ratio = self._dz_limit_to_ratio(img, previous=current_ratio)
 
+        did_resample = False
         for name, volume in img.volumes.items():
             datatype = volume.dtype
-            img.volumes[name] = np.array(zoom(volume, current_ratio, order=1), dtype=datatype)
+            if not np.all(current_ratio == 1):
+                if img.Modality == 'RTSTRUCT':
+                    resampled = np.array(zoom(volume, current_ratio, order=0), dtype=datatype)
+                    if self.fill:
+                        resampled = utils.fill_holes(resampled)
+                    if self.smooth:
+                        resampled = utils.smooth_median(resampled, self.smooth_kernel_size)
+                else:
+                    resampled = np.array(zoom(volume, current_ratio), dtype=datatype)
 
-        if not img.ImgAugmentations.resampled:
+                img.volumes[name] = resampled
+                did_resample = True
+
+        if not img.ImgAugmentations.resampled and did_resample:
             img.ImgAugmentations.resampled_update(img.dims.voxel_size, current_ratio)
             img.dims.resampled_update(current_ratio)
         return img
@@ -372,18 +402,20 @@ class Resample(ImgHandler):
         for x0, x1 in zip(list1, list2):
             if x1 is None:
                 x1 = x0
-            ratio.append(x1 / x0)
+            ratio.append(round(x1 / x0, 4))
         return ratio
 
     def _dims_to_ratio(self, img: ReconVolumeOrFile) -> list:
         """Calculates the resampling ratio based on dimensions
+            Where dims * ratio = new size
         """
         return self._compute_ratio(img.dims.shape, self.dims)
 
     def _voxel_size_to_ratio(self, img: ReconVolumeOrFile) -> list:
         """Calculates the resampling ratio based on voxel size
+            Where current size / ratio = new size
         """
-        return self._compute_ratio(img.dims.voxel_size, self.voxel_size)
+        return self._compute_ratio(self.voxel_size, img.dims.voxel_size)
 
     def _dz_limit_to_ratio(self, img: ReconVolumeOrFile, previous: list) -> list:
         """Calculates the z-axis resampling ratio based on slice thickness limit
@@ -504,9 +536,10 @@ class Crop(ImgHandler):
 
         for name, volume in img.volumes.items():
             datatype = volume.dtype
+            volshape = volume.shape
             img.volumes[name] = np.array(volume[xlo: xhi, ylo: yhi, zlo: zhi], dtype=datatype)
 
-        img.ImgAugmentations.crop_update(img_coords, patient_coords)
+        img.ImgAugmentations.crop_update(img_coords, patient_coords, volshape)
         img.dims.crop_update(img_coords)
         return img
 
@@ -613,108 +646,160 @@ def calculate_centroids(tree: NodeMixin, method: object, modalities: list = None
     return centroids
 
 
-"""
-from scipy.interpolate import interpn
-from scipy.ndimage.morphology import distance_transform_edt
+class InterpolateContours(ImgHandler):
+    """Contour Interpolation
+    Args:
+        roi_names (list): Limited ROIs to interpolate. Defaults to all.
+        z_index (list): Limited list of z_index to interpolate. Defaults
+            to only slices which could not be filled by an image.
+        all_empty (bool): Interpolate all empty slices which are bordered
+            above or below by a filled slice. Defaults to False.
+    Notes:
+        Only interpolates on slices which are missing slices
+    References:
+        https://stackoverflow.com/questions/48818373/interpolate-between-two-images
+    """
+    def __init__(self, roi_names=None, z_index=None, all_empty=False):
+        self.roi_names = roi_names
+        self.z_index = z_index
+        self.all_empty = all_empty
+        self.empties = []
 
-Start of Code for the interpolation of RTSTRUCTs. These will require more user specification
-to prevent the interpolation of intentional gaps within the structure sets.
+    def _function(self, lbl):
+        if not lbl.is_struct:
+            return lbl
 
-@handle_pointers
-def interpolate_contour(img: ReconstructedVolume, extrapolate=False) -> ReconstructedVolume:
-    # https://stackoverflow.com/questions/48818373/interpolate-between-two-images
-    empty_slices = img.ImgAugmentations.empty_slices
-    if empty_slices and img.is_struct:
-        interpolated = []
-        extrapolated = []
-        for name, volume in img.volumes.items():
-            for eslice in empty_slices:
-                zlo, zhi = (1, 1)
-                lo_slice, hi_slice = (None, None)
-                # Find filled slice below
-                while (eslice - zlo) > 0:
-                    lo_slice = volume[..., eslice-zlo]
-                    if lo_slice.size:
-                        break
-                    zlo += 1
-                # Find filled slice above
-                while (eslice + zhi) < (img.dims.slices - 1):
-                    hi_slice = volume[..., eslice+zhi]
-                    if hi_slice.size:
-                        break
-                    zhi += 1
-                # interpolate or extrapolate, if valid
-                if lo_slice.size and hi_slice.size:
-                    volume[..., eslice] = (hi_slice + lo_slice) / 2
-                    interpolated.append(eslice)
-                elif not extrapolate:
-                    utils.colorwarn(f'Cannot interpolate {img}, try extroplate=True')
-                elif not lo_slice.size:
-                    volume[..., eslice] = hi_slice
-                else:
-                    volume[..., eslice] = lo_slice
-    return interp_shape(lo_slice, hi_slice, 0.5)
+        empties = set([])
+        if lbl.ImgAugmentations.empty_slices:
+            try:
+                empties.add(lbl.ImgAugmentations.empty_slices)
+            except Exception:
+                pass
+        if lbl.ImgAugmentations.interpolated_slices:
+            try:
+                empties.add(lbl.ImgAugmentations.interpolated_slices)
+            except Exception:
+                pass
+        self.empties = list(empties)
 
+        interpolated_slices = None
+        for name, vol in lbl.volumes.items():
+            if self._check_slice(name):
+                lbl.volumes[name], interpolated_slices = self._interpolate(vol, self.empties)
+                print(lbl.PatientID, name, 'interpolating:', interpolated_slices)
 
+        if interpolated_slices:
+            lbl.ImgAugmentations.interpolated_update(interpolated_slices, [])
+        return lbl
 
-def signed_bwdist(im):
-    '''
-    Find perim and return masked image (signed/reversed)
-    '''
-    from mahotas import bwperim
-    im = -bwdist(bwperim(im))*np.logical_not(im) + bwdist(bwperim(im))*im
-    return im
+    def _check_needed(self, volume):
+        return volume.Modality == 'RTSTRUCT'
 
+    def _check_slice(self, name):
+        # Checks if slice needs to be interpolated
+        if not len(self.empties) and not self.all_empty:
+            return False
+        return name in self.roi_names
 
-def bwdist(im):
-    '''
-    Find distance map of image
-    '''
-    dist_im = distance_transform_edt(1-im)
-    return dist_im
+    # Make this into function
+    def _interpolate(self, lbl, empties):
+        # replace with pulling empty from DCM output
+        filled = []
+        empties = deepcopy(empties)
+        new_lbl = np.copy(lbl)
+        for i in range(lbl.shape[-1]):
+            if np.sum(lbl[..., i]):
+                filled.append(i)
+            elif self.all_empty:
+                empties.append(i)
 
+        fill_set = sorted(set(filled))
+        # Interpolate at most 3 slices, otherwise reject outliers
+        if fill_set[1] - fill_set[0] > 3:
+            lo = fill_set[1]
+        else:
+            lo = fill_set[0]
 
-def interp_shape(top, bottom, precision):
-    '''
-    Interpolate between two contours
+        if fill_set[-1] - fill_set[-2] > 3:
+            hi = fill_set[-2]
+        else:
+            hi = fill_set[-1]
 
-    Input: top
-            [X,Y] - Image of top contour (mask)
-           bottom
-            [X,Y] - Image of bottom contour (mask)
-           precision
-             float  - % between the images to interpolate
-                Ex: num=0.5 - Interpolate the middle image between top and bottom image
-    Output: out
-            [X,Y] - Interpolated image at num (%) between top and bottom
+        # only take empties within the range of the structure
+        empties = [x for x in empties if lo < x < hi]
 
-    '''
-    if precision > 2:
-        print("Error: Precision must be between 0 and 1 (float)")
+        interpolated_slices = []
+        for z in empties:
+            if self.z_index and z not in self.z_index:
+                continue
+            interpolated_slices.append(z)
+            lo, hi, ratio = self._nearest(filled, z)
+            lo_lbl = lbl[..., lo]
+            hi_lbl = lbl[..., hi]
+            filler = self._interp_shape(hi_lbl, lo_lbl, ratio)
+            new_lbl[..., z] = np.round(filler)
+            filled.append(z)
+        return np.array(new_lbl, dtype=np.bool), interpolated_slices
 
-    top = signed_bwdist(top)
-    bottom = signed_bwdist(bottom)
+    def _nearest(self, filled, index):
+        below = np.copy(filled)
+        above = np.copy(filled)
+        below = below[below < index]
+        above = above[above > index]
+        lo = min(below, key=lambda x:abs(x-index))
+        hi = min(above, key=lambda x:abs(x-index))
+        ratio = (index - lo) / (hi - lo)
+        return lo, hi, ratio
 
-    # row,cols definition
-    r, c = top.shape
+    def _signed_bwdist(self, im):
+        '''
+        Find perim and return masked image (signed/reversed)
+        '''
+        if im.dtype != np.dtype('bool'):
+            im = np.array(im, dtype='bool')
+        perim = im ^ binary_erosion(im)
+        bwdist = distance_transform_edt(1-perim)
+        im_ma = -1*bwdist*np.logical_not(im) + bwdist*im
+        return im_ma
 
-    # Reverse % indexing
-    precision = 1+precision
+    def _interp_shape(self, top, bottom, precision):
+        '''
+        Interpolate between two contours
+        Input: top
+                [X,Y] - Image of top contour (mask)
+            bottom
+                [X,Y] - Image of bottom contour (mask)
+            precision
+                float  - % between the images to interpolate
+                    Ex: num=0.5 - Interpolate the middle image between top and bottom image
+        Output: out
+                [X,Y] - Interpolated image at num (%) between top and bottom
+        '''
+        if precision > 2:
+            print("Error: Precision must be between 0 and 1 (float)")
 
-    # rejoin top, bottom into a single array of shape (2, r, c)
-    top_and_bottom = np.stack((top, bottom))
+        top = self._signed_bwdist(top)
+        bottom = self._signed_bwdist(bottom)
 
-    # create ndgrids
-    points = (np.r_[0, 2], np.arange(r), np.arange(c))
-    xi = np.rollaxis(np.mgrid[:r, :c], 0, 3).reshape((r**2, 2))
-    xi = np.c_[np.full((r**2), precision), xi]
+        # row,cols definition
+        r, c = top.shape
 
-    # Interpolate for new plane
-    out = interpn(points, top_and_bottom, xi)
-    out = out.reshape((r, c))
+        # Reverse % indexing
+        precision = 1+precision
 
-    # Threshold distmap to values above 0
-    out = out > 0
+        # rejoin top, bottom into a single array of shape (2, r, c)
+        top_and_bottom = np.stack((top, bottom))
 
-    return out
-"""
+        # create ndgrids
+        points = (np.r_[0, 2], np.arange(r), np.arange(c))
+        xi = np.rollaxis(np.mgrid[:r, :c], 0, 3).reshape((r*c, 2))
+        xi = np.c_[np.full((r*c), precision), xi]
+
+        # Interpolate for new plane
+        out = interpn(points, top_and_bottom, xi)
+        out = out.reshape((r, c))
+
+        # Threshold distmap to values above 0
+        out = out > 0
+
+        return out
