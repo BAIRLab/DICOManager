@@ -872,7 +872,7 @@ def get_first_index(points: np.ndarray) -> int:
     return np.argmin(angles)
 
 
-def find_nearest(inner: np.ndarray, outer: np.ndarray) -> Tuple(List[tuple, tuple], int):
+def find_nearest(inner: np.ndarray, outer: np.ndarray) -> tuple:
     """
     Function
     ----------
