@@ -187,10 +187,19 @@ class Reconstruction:
             contains = name in self.filter_structs
             return (contains, name)
         elif type(self.filter_structs) is dict:  # dict, rename
+            # If name matches key, return
             if name in self.filter_structs:
                 return (True, name)
+            elif name.lower() in self.filter_structs:
+                return (True, name.lower())
+            elif name.upper() in self.filter_structs:
+                return (True, name.upper())
+
             for key, value in self.filter_structs.items():
+                lowers = [x.lower() for x in value]
                 if name in value:
+                    return (True, key)
+                elif name.lower() in lowers: # Fallback matching
                     return (True, key)
             return (False, name)
         else:
@@ -231,8 +240,7 @@ class Reconstruction:
             for struct in struct_group:
                 ds = pydicom.dcmread(struct.filepath)
                 for index, contour in enumerate(ds.StructureSetROISequence):
-                    name = contour.ROIName.lower()
-                    valid, name = self._struct_filter_check(name)
+                    valid, name = self._struct_filter_check(contour.ROIName)
                     if valid:
                         try:
                             contour_data = ds.ROIContourSequence[index].ContourSequence
