@@ -184,6 +184,7 @@ class Reconstruction:
         fill_array = fill_array % 2
         return fill_array
 
+
     def _struct_filter_check(self, name):
         if self.filter_structs is None:  # No filter
             return (True, name)
@@ -191,10 +192,19 @@ class Reconstruction:
             contains = name in self.filter_structs
             return (contains, name)
         elif type(self.filter_structs) is dict:  # dict, rename
+            # If name matches key, return
             if name in self.filter_structs:
                 return (True, name)
+            elif name.lower() in self.filter_structs:
+                return (True, name.lower())
+            elif name.upper() in self.filter_structs:
+                return (True, name.upper())
+
             for key, value in self.filter_structs.items():
+                lowers = [x.lower() for x in value]
                 if name in value:
+                    return (True, key)
+                elif name.lower() in lowers: # Fallback matching
                     return (True, key)
             return (False, name)
         else:
