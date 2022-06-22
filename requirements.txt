@@ -2,7 +2,7 @@ pip>=19.3
 python>=3.7.0
 anytree==2.8.0
 matplotlib==3.4.1
-numpy==1.20.2
+numpy==1.22.0
 pathos==0.2.7
 pydicom==2.1.2
 scikit-image==0.0
